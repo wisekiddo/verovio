@@ -1107,24 +1107,33 @@ FunctorCode PrepareLyricsFunctor::VisitSyl(Syl *syl)
 void PrepareLyricsFunctor::FollowSyl(Syl *syl, int n)
 {
     Syl *&m_currentSyl = m_currentSyls.at(n);
+    const bool isEmptySyl = syl->IsEmpty();
 
     // At this stage currentSyl is actually the previous one that is ending here
     if (m_currentSyl) {
         // The previous syl was an initial or median -> The note we just parsed is the end
         if ((m_currentSyl->GetWordpos() == sylLog_WORDPOS_i) || (m_currentSyl->GetWordpos() == sylLog_WORDPOS_m)) {
-            m_currentSyl->SetEnd(m_lastNoteOrChord);
-            m_currentSyl->m_nextWordSyl = syl;
+            if (!isEmptySyl) {
+                m_currentSyl->SetEnd(m_lastNoteOrChord);
+                m_currentSyl->m_nextWordSyl = syl;
+            }
         }
-        // The previous syl was a underscore -> the previous but one was the end
+        // The previous syl was an underscore -> the explicit empty endpoint or the previous but one was the end.
         else if (m_currentSyl->GetCon() == sylLog_CON_u) {
-            if (m_currentSyl->GetStart() == m_penultimateNoteOrChord) {
+            LayerElement *end = isEmptySyl ? syl->GetStart() : m_penultimateNoteOrChord;
+            if (end && (m_currentSyl->GetStart() == end)) {
                 LogWarning("Syllable with underline extender under one single note '%s'",
                     m_currentSyl->GetStart()->GetID().c_str());
             }
-            else {
-                m_currentSyl->SetEnd(m_penultimateNoteOrChord);
+            else if (end) {
+                m_currentSyl->SetEnd(end);
             }
         }
+    }
+
+    if (isEmptySyl) {
+        m_currentSyl = NULL;
+        return;
     }
 
     // Now decide what to do with the starting syl and check if it has a forward connector
