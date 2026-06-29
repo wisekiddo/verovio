@@ -4332,9 +4332,6 @@ void MusicXmlInput::ReadMusicXmlNote(
         }
     }
 
-    // add duration to measure time
-    if (!nextIsChord) m_durTotal += duration;
-
     m_ID = "#" + element->GetID();
     m_lastIDOnStaff[staff->GetN()] = m_ID;
 
@@ -4347,7 +4344,7 @@ void MusicXmlInput::ReadMusicXmlNote(
         breath->SetPlace(
             breath->AttPlacementRelStaff::StrToStaffrel(xmlBreath.node().attribute("placement").as_string()));
         breath->SetColor(xmlBreath.node().attribute("color").as_string());
-        breath->SetTstamp((double)(m_durTotal + duration) * (double)m_meterUnit / (double)(4 * m_ppq) - 0.1);
+        breath->SetTstamp((double)(m_durTotal + duration) * (double)m_meterUnit / (double)(4 * m_ppq) + 0.9);
     }
 
     // caesura
@@ -4359,8 +4356,11 @@ void MusicXmlInput::ReadMusicXmlNote(
         caesura->SetPlace(
             caesura->AttPlacementRelStaff::StrToStaffrel(xmlCaesura.node().attribute("placement").as_string()));
         caesura->SetColor(xmlCaesura.node().attribute("color").as_string());
-        caesura->SetTstamp((double)(m_durTotal) * (double)m_meterUnit / (double)(4 * m_ppq) + 0.5);
+        caesura->SetTstamp((double)(m_durTotal + duration) * (double)m_meterUnit / (double)(4 * m_ppq) + 0.9);
     }
+
+    // add duration to measure time
+    if (!nextIsChord) m_durTotal += duration;
 
     // dynamics
     pugi::xml_node xmlDynam = notations.node().child("dynamics");
