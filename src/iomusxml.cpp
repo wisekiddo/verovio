@@ -5254,6 +5254,10 @@ void MusicXmlInput::ReadMusicXmlTupletStart(
     tuplet->SetNumFormat(ConvertTupletNumberValue(tupletStart.attribute("show-number").as_string()));
     if (HasAttributeWithValue(tupletStart, "show-number", "none")) tuplet->SetNumVisible(BOOLEAN_false);
     tuplet->SetBracketVisible(ConvertWordToBool(tupletStart.attribute("bracket").as_string()));
+    if (HasAttributeWithValue(tupletStart.parent(), "print-object", "no")) {
+        tuplet->SetNumVisible(BOOLEAN_false);
+        tuplet->SetBracketVisible(BOOLEAN_false);
+    }
 }
 
 void MusicXmlInput::ReadMusicXmlBeamStart(const pugi::xml_node &node, const pugi::xml_node &beamStart, Layer *layer)
