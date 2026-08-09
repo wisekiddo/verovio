@@ -3646,6 +3646,8 @@ void MusicXmlInput::ReadMusicXmlNote(
         if (chord) duration = std::min(duration, chord->GetDurPpq());
     }
     const int noteStaffNum = node.child("staff").text().as_int();
+    // Staff the note is actually on (cross-staff aware), for control events anchored to this note
+    const int notationStaffN = (noteStaffNum > 0) ? noteStaffNum + staffOffset : staff->GetN();
     const pugi::xml_node rest = node.child("rest");
     // A note or a rest that is drawn takes the next place of its voice, the next for the ties before it (a chord
     // takes one; a grace note stands with the note it leads to; a rest not drawn is a gap, as a <forward> is)
@@ -4232,7 +4234,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                     m_controlElements.push_back({ measure, fing });
                     const std::string startID = note ? ("#" + note->GetID()) : m_ID;
                     fing->SetStartid(startID);
-                    fing->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+                    fing->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
                     fing->SetPlace(
                         fing->AttPlacementRelStaff::StrToStaffrel(technicalChild.attribute("placement").as_string()));
                     fing->AddChild(text);
@@ -4331,7 +4333,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (xmlBreath) {
         Breath *breath = new Breath();
         m_controlElements.push_back({ measure, breath });
-        breath->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        breath->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         breath->SetPlace(
             breath->AttPlacementRelStaff::StrToStaffrel(xmlBreath.node().attribute("placement").as_string()));
         breath->SetColor(xmlBreath.node().attribute("color").as_string());
@@ -4343,7 +4345,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (xmlCaesura) {
         Caesura *caesura = new Caesura();
         m_controlElements.push_back({ measure, caesura });
-        caesura->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        caesura->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         caesura->SetPlace(
             caesura->AttPlacementRelStaff::StrToStaffrel(xmlCaesura.node().attribute("placement").as_string()));
         caesura->SetColor(xmlCaesura.node().attribute("color").as_string());
@@ -4355,7 +4357,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (xmlDynam) {
         Dynam *dynam = new Dynam();
         m_controlElements.push_back({ measure, dynam });
-        dynam->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        dynam->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         dynam->SetStartid(m_ID);
         if (xmlDynam.attribute("id")) dynam->SetID(xmlDynam.attribute("id").as_string());
         // place
@@ -4385,7 +4387,7 @@ void MusicXmlInput::ReadMusicXmlNote(
         Fermata *fermata = new Fermata();
         m_controlElements.push_back({ measure, fermata });
         fermata->SetStartid(m_ID);
-        fermata->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        fermata->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         if (xmlFermata.attribute("id")) fermata->SetID(xmlFermata.attribute("id").as_string());
         this->ShapeFermata(fermata, xmlFermata);
     }
@@ -4404,7 +4406,7 @@ void MusicXmlInput::ReadMusicXmlNote(
             gliss->SetLform(gliss->AttLineRendBase::StrToLineform(xmlGlissando.attribute("line-type").as_string()));
             gliss->SetN(xmlGlissando.attribute("number").as_string());
             gliss->SetStartid(noteID);
-            gliss->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+            gliss->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
             gliss->SetType(xmlGlissando.name());
             if (xmlGlissando.attribute("id")) gliss->SetID(xmlGlissando.attribute("id").as_string());
             m_glissStack.push_back(gliss);
@@ -4429,7 +4431,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (xmlMordent) {
         Mordent *mordent = new Mordent();
         m_controlElements.push_back({ measure, mordent });
-        mordent->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        mordent->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         mordent->SetStartid(m_ID);
         // color
         mordent->SetColor(xmlMordent.node().attribute("color").as_string());
@@ -4482,7 +4484,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (xmlExtOrnament) {
         Mordent *mordent = new Mordent();
         m_controlElements.push_back({ measure, mordent });
-        mordent->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        mordent->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         mordent->SetStartid(m_ID);
         // color
         mordent->SetColor(xmlExtOrnament.node().attribute("color").as_string());
@@ -4500,7 +4502,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (xmlTrill || xmlTrillLine) {
         Trill *trill = new Trill();
         m_controlElements.push_back({ measure, trill });
-        trill->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        trill->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         trill->SetStartid(m_ID);
         // color
         trill->SetColor(xmlTrill.node().attribute("color").as_string());
@@ -4551,7 +4553,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (xmlTurn) {
         Turn *turn = new Turn();
         m_controlElements.push_back({ measure, turn });
-        turn->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        turn->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(notationStaffN)));
         turn->SetStartid(m_ID);
         turn->SetColor(xmlTurn.node().attribute("color").as_string());
         turn->SetPlace(turn->AttPlacementRelStaff::StrToStaffrel(xmlTurn.node().attribute("placement").as_string()));
