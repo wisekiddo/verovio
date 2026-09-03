@@ -4980,6 +4980,17 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
             m_fineInfo->m_timesGiven = true;
         }
     }
+
+    const float bpm = node.attribute("tempo").as_float();
+    if (bpm > 0) {
+        const short int offset = node.child("offset").text().as_int();
+        const double timeStamp = (double)(m_durTotal + offset) * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0;
+        Tempo *tempo = new Tempo();
+        tempo->SetMidiBpm(bpm);
+        tempo->SetTstamp(timeStamp);
+        m_controlElements.push_back({ measure, tempo });
+        m_tempoStack.push_back(tempo);
+    }
 }
 
 void MusicXmlInput::KeepWhatTheSoundSays(ControlElement *mark, const pugi::xml_node sound, const std::string &kind) const
