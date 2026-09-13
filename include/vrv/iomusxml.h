@@ -747,6 +747,8 @@ private:
     std::map<const LayerElement *, std::string> m_tupletNumbers;
     /** The tuplet stops the chord being read has given (its later notes may write them again) */
     std::set<std::string> m_chordTupletStops;
+    /* Verse numbers with a pending <extend type="stop"/> per staff/layer @n, to anchor on the following note */
+    std::map<std::pair<int, int>, std::set<int>> m_pendingExtenderStops;
     /* To remember layer of last element (note) to handle chords */
     Layer *m_prevLayer = NULL;
     /* To remember current layer to properly handle layers/staves/cross-staff elements */
