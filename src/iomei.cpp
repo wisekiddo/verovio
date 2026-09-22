@@ -4071,6 +4071,9 @@ bool MEIInput::IsAllowed(std::string element, Object *filterParent)
         else if (element == "fTrem") {
             return true;
         }
+        else if (element == "graceGrp") {
+            return true;
+        }
         else if (element == "note") {
             return true;
         }
