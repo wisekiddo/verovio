@@ -4234,6 +4234,8 @@ void MusicXmlInput::ReadMusicXmlNote(
 
         // End extenders by adding a verse with empty syl
         for (int lyricNumber : extenderStops) {
+            // TODO Tablature: <tabGrp> does not support child <verse>
+            if (element->Is(TABGRP)) continue;
             Verse *verse = new Verse();
             verse->SetN(lyricNumber);
             verse->AddChild(new Syl());
