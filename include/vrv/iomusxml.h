@@ -727,6 +727,8 @@ private:
     Label *m_label = NULL;
     LabelAbbr *m_labelAbbr = NULL;
     InstrDef *m_instrdef = NULL;
+    /* MIDI keys of unpitched notes per part and instrument id ("" for a part with a single instrument) */
+    std::map<std::string, std::map<std::string, int>> m_unpitchedKeys;
     /* LastElementID */
     std::string m_ID;
     /* The same for each staff: an octave line ends on the last note of its own staff */
