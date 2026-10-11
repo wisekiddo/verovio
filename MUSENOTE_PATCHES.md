@@ -14,6 +14,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 4 | 2026-09-25 | Decode GABC lyrics as UTF-8 (ba278bbe6) | `src/iogabc.cpp`, +1 / -1 | GABC lyrics with non-ASCII letters come out as written ("lé") instead of invalid UTF-8 (signed char) or "Ã©" (unsigned char) | Not offered upstream |
 | 5 | 2026-09-25 | Skip the GABC header before reading the music (0baa9874a) | `src/iogabc.cpp`, +21 / -1 | A GABC file's header (`name: …;` lines and `%%`) is no longer read as lyric syllables; input without a header is unchanged | Not offered upstream |
 | 6 | 2026-09-30 | Record the MIDI pitch each note is played at (eedc5ea3a) | `include/vrv/doc.h`, `include/vrv/midifunctor.h`, `include/vrv/toolkit.h`, `src/doc.cpp`, `src/midifunctor.cpp`, `src/toolkit.cpp`, +54 / -3 | None in the SVG, timemap, MIDI or MEI output. `GetMIDIValuesForElement` reports a note's pitch as the MIDI output plays it (staff transposition, octave lines, custom tuning), where it reported the notated pitch; new `Toolkit::GetMIDIPitches` (C++) | Not offered upstream |
+| 7 | 2026-10-11 | Do not crash when the MIDI document cannot be built or holds a half octave line (c231613f0) | `src/midifunctor.cpp`, `src/toolkit.cpp`, +13 / -1 | Scores that crashed now load, play and export: an `<octave>` without a start or an end is left out of the MIDI as it is left out of the drawing, and a document its own MEI reader refuses is played as loaded, unexpanded, with a warning. None for a score that did not crash | Not offered upstream; `develop` of 2026-10-08 has both |
 
 ### 1. PAE importer crashes
 
@@ -104,6 +105,44 @@ declared — the pitch map of "Dream (When You're Feeling Blue)", all 71
 notes 12 lower. Every SVG, timemap, MIDI, MEI and locator output is
 byte-identical; seeded ids deterministic on a fresh thread for 209 of 209.
 
+### 7. Two crashes on the way to MIDI
+
+Two MusicXML lead sheets of a user's collection ended the process while
+their MIDI or timemap was written. In the apps the engine runs inside the
+app's own process, and MuseNote opens any file a user imports.
+
+- An `<octave>` with only one of its ends. A MusicXML `octave-shift`
+  started and stopped after the last note of the piece is given that note
+  as its end and no start. It is not drawn (`View::HasValidTimeSpanningOrder`
+  wants both), but `InitMIDIFunctor::VisitOctave` registered it, and
+  `GenerateMIDIFunctor::HandleOctave` read the alignment of both ends: a
+  null start was dereferenced at the first note of that staff and layer.
+  The octave is now left out of the MIDI as it is left out of the drawing,
+  so what sounds is still what the page shows.
+- A document its own MEI reader refuses. `Toolkit::SetMidiDoc` builds the
+  document the MIDI and the timemap are written from by exporting the
+  loaded document to MEI and importing that, and ignored the import's
+  result. A MusicXML `<part-group>` with no part in it becomes an empty
+  `<staffGrp>`, which `MEIInput` refuses ("Each <staffGrp> must contain at
+  least one <staffDef>"); `PrepareData()` on the empty document then took
+  the first of no visible scores (an assert in a debug build; a release
+  build ended with SIGSEGV). The loaded document is now played
+  instead, unexpanded, with a warning. The MusicXML importer is left as it
+  is: it builds objects, and their order gives the ids.
+
+Carried because both faults are inside the engine: neither file can be
+told from a sound one before it is loaded, short of parsing it as the
+engine does.
+
+Regression test: MuseNote's `corelib/verovio/test/native/test_midi_document_engine.cpp`
+(hand-made copies of what the two files had in them, each checked against
+the MIDI note-ons and the pitch map): both cases fail on tb.4, all 14
+cases of the target pass on tb.5.
+
+tb.5 against tb.4 (same toolchain, MuseNote's `tool/parity`, whose score
+corpus is now 2785 scores): 19930 outputs compared, 0 differ; seeded ids
+deterministic on a fresh thread for 2785 of 2785.
+
 tb.2 against tb.1 (same toolchain): 972 outputs compared, 0 differ; the
 fresh-thread seeded import matches on 3 of 3 scores (0 of 54 notes matched on
 tb.1).
@@ -127,7 +166,9 @@ tb.1 against `version-6.2.0`:
   in drawing (`view_*`), layout functors, or importer object construction.
   Six are carried since 2026-09-30 by the owner's decision: patch 6
   exposes a pitch only the MIDI functor computes, and patch 3 (upstream's
-  own fix) drops at the 6.3.0 base move.
+  own fix) drops at the 6.3.0 base move. Seven since 2026-10-11, again by
+  the owner's decision: patch 7 stops two crashes on files a user can
+  import.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
