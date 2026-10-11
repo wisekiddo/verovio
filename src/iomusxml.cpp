@@ -1052,9 +1052,16 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
                 m_staffGrpStack.back()->AddChild(staffGrp);
                 m_staffGrpStack.push_back(staffGrp);
             }
-            // this is the end of a part-group - we assume each opened part-group to be closed
-            else {
+            // this is the end of a part-group. One without a start must not take the root group off the stack:
+            // the score-parts that follow are added to its back()
+            else if (m_staffGrpStack.size() > 1) {
+                StaffGrp *closed = m_staffGrpStack.back();
                 m_staffGrpStack.pop_back();
+                // A group closed with no part in it would be an empty <staffGrp>, which MEIInput refuses when the
+                // document is read back from its own MEI (for the MIDI document, or by whoever loads the export)
+                if (!closed->FindDescendantByType(STAFFDEF)) {
+                    m_staffGrpStack.back()->DeleteChild(closed);
+                }
             }
         }
         else if (IsElement(xpathNode.node(), "score-part")) {
