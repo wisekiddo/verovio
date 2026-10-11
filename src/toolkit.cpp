@@ -290,7 +290,15 @@ void Toolkit::SetMidiDoc()
         resources.SetPath(m_doc.GetResources().GetPath());
         resources.InitFonts();
         MEIInput midiInput(m_midiDoc);
-        midiInput.Import(this->GetMEI());
+        if (!midiInput.Import(this->GetMEI())) {
+            // The document cannot be read back from its own MEI (seen with the empty <staffGrp> the
+            // MusicXML importer writes for an empty <part-group>). PrepareData() on the empty document
+            // that leaves has no score to work on: play the document as loaded, unexpanded
+            LogWarning("The MIDI document could not be built, the document is played unexpanded");
+            delete m_midiDoc;
+            m_midiDoc = &m_doc;
+            return;
+        }
         m_midiDoc->PrepareData();
         CustomTuning::CopyCustomTunings(&m_doc, m_midiDoc);
     }

@@ -586,6 +586,10 @@ FunctorCode InitMIDIFunctor::VisitMeasure(const Measure *measure)
 
 FunctorCode InitMIDIFunctor::VisitOctave(const Octave *octave)
 {
+    // An octave line without both of its ends is not drawn (View::HasValidTimeSpanningOrder), and
+    // GenerateMIDIFunctor::HandleOctave reads the alignment of both: leave it out
+    if (!octave->GetStart() || !octave->GetEnd()) return FUNCTOR_CONTINUE;
+
     const Measure *measure = vrv_cast<const Measure *>(octave->GetFirstAncestor(MEASURE));
     assert(measure);
     std::vector<const Staff *> staffList = octave->GetTstampStaves(measure, octave);
