@@ -606,7 +606,8 @@ FunctorCode InitMIDIFunctor::VisitOctave(const Octave *octave)
     }
 
     const Layer *layer = vrv_cast<const Layer *>(raisePitch ? staff->GetFirst(LAYER) : staff->GetLast(LAYER));
-    assert(layer);
+    // A staff with no layer in the octave's measure: there is no note there for it to move
+    if (!layer) return FUNCTOR_CONTINUE;
 
     m_octaves.push_back({ octave, staff->GetN(), layer->GetN(), (raisePitch ? shift : -shift), false });
 
@@ -929,6 +930,9 @@ FunctorCode GenerateMIDIFunctor::VisitPedal(const Pedal *pedal)
         applies = (applies || this->GetFilters()->Apply(staff));
     }
     if (!applies) return FUNCTOR_CONTINUE;
+
+    // A pedal whose start was not found (a @startid that names nothing) has no time to be played at
+    if (!pedal->GetStart() || !pedal->GetStart()->GetAlignment()) return FUNCTOR_CONTINUE;
 
     double pedalTime = pedal->GetStart()->GetAlignment()->GetTime().ToDouble() * SCORE_TIME_UNIT;
     double startTime = m_totalTime + pedalTime;
