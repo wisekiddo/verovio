@@ -13495,6 +13495,12 @@ void HumGrid::addMeasureLines(void) {
 			continue;
 		}
 		GridSlice* firstspined = nextmeasure->getFirstSpinedSlice();
+		if (firstspined == NULL) {
+			// The next measure has a system break or a comment and nothing
+			// else (a measure whose content is not known): no slice to take
+			// the time and the spine count from.
+			continue;
+		}
 		timestamp = firstspined->getTimestamp();
 		if (measure->size() == 0) {
 			continue;
@@ -100905,8 +100911,12 @@ void Tool_kernview::processFile(HumdrumFile& infile) {
 
 
 
-// #define QUARTER_CONVERT * 4
-#define QUARTER_CONVERT
+// The grid (HumGrid) counts its time in quarter notes, this converter in
+// whole notes: every time handed to the grid is converted.  (With the
+// conversion left out, each note was taken to last four times as long as
+// it does, and the notes after it were overwritten.)
+#define QUARTER_CONVERT * 4
+// #define QUARTER_CONVERT
 
 #define ELEMENT_DEBUG_STATEMENT(X)
 //#define ELEMENT_DEBUG_STATEMENT(X)  cerr << #X << endl;
@@ -101988,6 +101998,28 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 		}
 	}
 
+	// The clef, the key signature and the meter as child elements of the
+	// staffDef or scoreDef, which is how Verovio's own MEI export writes
+	// them.  (Only the attributes were read: such a score came out with
+	// no clef, no key signature and no meter, and its whole-measure rests
+	// with no length.)  An attribute of the element itself comes first.
+	xml_node clefNode = element.child("clef");
+	if (clefNode && clefshape.empty()) {
+		clefshape    = clefNode.attribute("shape").value();
+		clefline     = clefNode.attribute("line").value();
+		clefdis      = clefNode.attribute("dis").value();
+		clefdisplace = clefNode.attribute("dis.place").value();
+	}
+	xml_node keySigNode = element.child("keySig");
+	if (keySigNode && keysig.empty()) {
+		keysig = keySigNode.attribute("sig").value();
+	}
+	xml_node meterSigNode = element.child("meterSig");
+	if (meterSigNode && metercount.empty()) {
+		metercount = meterSigNode.attribute("count").value();
+		meterunit  = meterSigNode.attribute("unit").value();
+	}
+
 
 // ggg
 
@@ -102008,7 +102040,10 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 		staffinfo.clef = makeHumdrumClef(clefshape, clefline, clefdis, clefdisplace);
 	}
 	if ((!metercount.empty()) && (!meterunit.empty())) {
-		HumNum meterduration = stoi(metercount) * 4 / stoi(meterunit);
+		// Not in whole numbers: a measure of 3/8 is one and a half quarter
+		// notes long.
+		HumNum meterduration = stoi(metercount) * 4;
+		meterduration /= stoi(meterunit);
 		if (nodename == "scoreDef") {
 			for (int i=0; i<(int)m_measureDuration.size(); i++) {
 				m_measureDuration.at(i) = meterduration;
@@ -102108,15 +102143,35 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 //
 
 HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
-	NODE_VERIFY(section, starttime);
+	// A <section>, or an <ending>: a first or second ending holds its
+	// measures as a section does, and they are written out in the order
+	// they stand in.  (An <ending> was passed over: every bar under one
+	// was lost.)
+	if (!section) {
+		return starttime;
+	}
+	if ((strcmp(section.name(), "section") != 0) && (strcmp(section.name(), "ending") != 0)) {
+		return starttime;
+	}
 	MAKE_CHILD_LIST(children, section);
 
 	for (int i=0; i<(int)children.size(); i++) {
 		string nodename = children[i].name();
-		if (nodename == "section") {
+		if ((nodename == "section") || (nodename == "ending")) {
 			starttime = parseSection(children[i], starttime);
 		} else if (nodename == "measure") {
-			starttime = parseMeasure(children[i], starttime);
+			// A multi-measure rest is one <measure> that stands for several:
+			// written out as that many measures of rest.  (It was left
+			// empty: its time was lost.)  The number is the file's own, and
+			// a file can say any: no more measures than a piece has.
+			int bars = children[i].select_node(".//multiRest").node().attribute("num").as_int(1);
+			if (bars > 999) {
+				cerr << "Warning: a rest of " << bars << " measures is written out as 999" << endl;
+				bars = 999;
+			}
+			do {
+				starttime = parseMeasure(children[i], starttime);
+			} while (--bars > 0);
 		} else if (nodename == "app") {
 			starttime = parseApp(children[i], starttime);
 		} else if (nodename == "sb") {   // system break
@@ -102307,7 +102362,10 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 	if (n.empty()) {
 		// cerr << "Warning: no measure number on measure element" << endl;
 	} else {
-		nnum = stoi(n);
+		// Not stoi(): a measure's number need not be one ("X1" for a
+		// pickup bar that came from MusicXML), and stoi() then throws,
+		// which nothing here catches.
+		nnum = (int)strtol(n.c_str(), NULL, 10);
 	}
 	if (nnum < 0) {
 		cerr << "Error: invalid measure number: " << nnum << endl;
@@ -102798,7 +102856,8 @@ HumNum Tool_mei2hum::parseLayer(xml_node layer, HumNum starttime, vector<bool>& 
 			starttime = parseRest(children[i], starttime);
 		} else if (nodename == "space") {
 			starttime = parseRest(children[i], starttime);
-		} else if (nodename == "mRest") {
+		} else if ((nodename == "mRest") || (nodename == "multiRest")) {
+			// One measure of a multi-measure rest: see parseSection().
 			starttime = parseMRest(children[i], starttime);
 		} else if (nodename == "beam") {
 			starttime = parseBeam(children[i], starttime);
@@ -104573,7 +104632,13 @@ string Tool_mei2hum::getHumdrumPitch(xml_node note, vector<xml_node>& children) 
 	string accidgeschild = getChildAccidGes(children);
 
 	int octnum = 4;
-	string oct = note.attribute("oct").value();
+	// **kern holds the pitch that sounds.  A note under an octave line is
+	// written an octave away from it, with the octave it sounds in beside
+	// it (@oct.ges).
+	string oct = note.attribute("oct.ges").value();
+	if (oct == "") {
+		oct = note.attribute("oct").value();
+	}
 	if (oct == "") {
 		cerr << "Empty octave" << endl;
 	} else if (isdigit(oct[0])) {
@@ -104931,7 +104996,11 @@ string Tool_mei2hum::parseSyl(xml_node syl) {
 	NODE_VERIFY(syl, "")
 	MAKE_CHILD_LIST(children, syl);
 
-	string text = syl.child_value();
+	// A syllable is one token of one line: a line break or a tab in its
+	// text would end the token, or the line.  (It was written out as it
+	// came: a syllable with a line break in it cut its line in two, and
+	// neither half had the fields the others have.)
+	string text = cleanVerseText(syl.child_value());
 	for (int i=0; i<(int)text.size(); i++) {
 		if (text[i] == '_') {
 			text[i] = ' ';
@@ -105081,7 +105150,6 @@ void Tool_mei2hum::initialize(void) {
 	m_recipQ   =  getBoolean("recip");
 	m_stemsQ   =  getBoolean("stems");
 	m_xmlidQ   =  getBoolean("xmlids");
-	m_xmlidQ   = 1;  // for testing
 	m_appLabel =  getString("app-label");
 	m_placeQ   = !getBoolean("no-place");
 }
@@ -105407,7 +105475,7 @@ string Tool_mei2hum::cleanVerseText(const string& input) {
 		foundstart = true;
 		if (input[i] == '\t') {
 			output += ' ';
-		} else if (input[i] == '\n') {
+		} else if ((input[i] == '\n') || (input[i] == '\r')) {
 			output += ' ';
 		} else {
 			output += input[i];
@@ -105567,8 +105635,13 @@ void Tool_mei2hum::parseTempo(xml_node tempo, HumNum starttime) {
 	}
 
 	// insert tempo
+	// In the grid's time, as every other token is.  (The measure's own
+	// start was used unconverted: a tempo mark anywhere but at the very
+	// start of the score was filed a long way before its measure, and the
+	// notes around it were overwritten.)
+	HumNum timestamp = starttime QUARTER_CONVERT;
 	GridMeasure* gm = m_outdata.back();
-	GridSlice* gs = new GridSlice(gm, starttime, SliceType::Tempos, m_maxStaffInFile);
+	GridSlice* gs = new GridSlice(gm, timestamp, SliceType::Tempos, m_maxStaffInFile);
 	stringstream stok;
 	stok << "*MM" << value;
 	string token = stok.str();
@@ -105580,7 +105653,7 @@ void Tool_mei2hum::parseTempo(xml_node tempo, HumNum starttime) {
 	// insert after time signature at same timestamp if possible
 	bool inserted = false;
 	for (auto it = gm->begin(); it != gm->end(); it++) {
-		if ((*it)->getTimestamp() > starttime) {
+		if ((*it)->getTimestamp() > timestamp) {
 			gm->insert(it, gs);
 			inserted = true;
 			break;
@@ -105589,7 +105662,7 @@ void Tool_mei2hum::parseTempo(xml_node tempo, HumNum starttime) {
 			gm->insert(it, gs);
 			inserted = true;
 			break;
-		} else if (((*it)->getTimestamp() == starttime) && ((*it)->isNoteSlice()
+		} else if (((*it)->getTimestamp() == timestamp) && ((*it)->isNoteSlice()
 				|| (*it)->isGraceSlice())) {
 			gm->insert(it, gs);
 			inserted = true;
