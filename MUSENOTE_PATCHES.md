@@ -15,6 +15,8 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 5 | 2026-09-25 | Skip the GABC header before reading the music (0baa9874a) | `src/iogabc.cpp`, +21 / -1 | A GABC file's header (`name: …;` lines and `%%`) is no longer read as lyric syllables; input without a header is unchanged | Not offered upstream |
 | 6 | 2026-09-30 | Record the MIDI pitch each note is played at (eedc5ea3a) | `include/vrv/doc.h`, `include/vrv/midifunctor.h`, `include/vrv/toolkit.h`, `src/doc.cpp`, `src/midifunctor.cpp`, `src/toolkit.cpp`, +54 / -3 | None in the SVG, timemap, MIDI or MEI output. `GetMIDIValuesForElement` reports a note's pitch as the MIDI output plays it (staff transposition, octave lines, custom tuning), where it reported the notated pitch; new `Toolkit::GetMIDIPitches` (C++) | Not offered upstream |
 | 7 | 2026-10-11 | Do not crash when the MIDI document cannot be built or holds a half octave line (c231613f0) | `src/midifunctor.cpp`, `src/toolkit.cpp`, +13 / -1 | Scores that crashed now load, play and export: an `<octave>` without a start or an end is left out of the MIDI as it is left out of the drawing, and a document its own MEI reader refuses is played as loaded, unexpanded, with a warning. None for a score that did not crash | Not offered upstream; `develop` of 2026-10-08 has both |
+| 8 | 2026-10-12 | Do not leave an empty group behind in the MusicXML importer, nor pop the root group (1ec3b2c5c) | `src/iomusxml.cpp`, +9 / -2 | A MusicXML score with a `<part-group>` that has no part in it no longer carries an empty `<staffGrp>`: its MEI export loads again, and its MIDI and timemap are written from the expanded document (repeats played out) where tb.5 played it as loaded. A score with the end of a part-group that was never started now loads (it ended the process). No other id changes: the group is built, then removed. None for a score with neither | Not offered upstream; `develop` of 2026-10-08 has both |
+| 9 | 2026-10-12 | Do not crash on a pedal without a start or an octave over a staff with no layer (db2307d47) | `src/midifunctor.cpp`, +5 / -1 | Scores that ended the process while their MIDI or timemap was written now play: a `<pedal>` whose `@startid` names nothing, and an `<octave>` over a staff with no layer in its measure, are left out of the MIDI. None for a score with neither | Not offered upstream; `develop` of 2026-10-08 has both |
 
 ### 1. PAE importer crashes
 
@@ -127,8 +129,9 @@ app's own process, and MuseNote opens any file a user imports.
   least one <staffDef>"); `PrepareData()` on the empty document then took
   the first of no visible scores (an assert in a debug build; a release
   build ended with SIGSEGV). The loaded document is now played
-  instead, unexpanded, with a warning. The MusicXML importer is left as it
-  is: it builds objects, and their order gives the ids.
+  instead, unexpanded, with a warning. (Patch 8 has since stopped the
+  MusicXML importer from leaving such a group behind. The fallback stays
+  for any other document the reader refuses.)
 
 Carried because both faults are inside the engine: neither file can be
 told from a sound one before it is loaded, short of parsing it as the
@@ -142,6 +145,52 @@ cases of the target pass on tb.5.
 tb.5 against tb.4 (same toolchain, MuseNote's `tool/parity`, whose score
 corpus is now 2785 scores): 19930 outputs compared, 0 differ; seeded ids
 deterministic on a fresh thread for 2785 of 2785.
+
+### 8. An empty group, and a group end without a start
+
+Patch 7 kept the process alive for a MusicXML `<part-group>` with no part
+in it, but the loaded document still held the empty `<staffGrp>`: its MIDI
+was played as loaded, with no repeat played out, and its own MEI export
+could not be loaded again ("Each <staffGrp> must contain at least one
+<staffDef>"). MuseNote's reader loads that export a second time, without
+the part names, and keeps the export as the score; both were refused for
+"Walking On Sunshine", one of the two lead sheets of patch 7.
+
+- `MusicXmlInput::ReadMusicXml` now removes a group that is closed with no
+  `<staffDef>` in it. The group is still built first, so the objects are
+  constructed in the order they were, and every other id is as before:
+  the MEI of the lead sheet differs from tb.5's by that one line, and all
+  1505 other ids are the same.
+- The end of a part-group that was never started popped the root group
+  off `m_staffGrpStack`; the next `<score-part>` was then added to
+  `back()` of an empty vector (SIGSEGV). Such an end is now passed over.
+
+Carried because the group is built inside the importer: outside the
+engine it could only be removed by rewriting the file before it is
+loaded, or the MEI after.
+
+### 9. A pedal without a start, an octave over no layer
+
+Found by reading the MIDI functors for the fault of patch 7 a second
+time. Both ended the process.
+
+- `GenerateMIDIFunctor::VisitPedal` read the alignment of the pedal's
+  start. A `<pedal>` whose `@startid` names nothing has none.
+- `InitMIDIFunctor::VisitOctave` asserted that the staff the octave
+  starts on has a layer, and read its number. A staff with no `<layer>`
+  in that measure has none: an assert in a debug build, a null pointer
+  read in a release build.
+
+Each is now left out of the MIDI.
+
+Regression test: MuseNote's `corelib/verovio/test/native/test_midi_document_engine.cpp`,
+now five cases. On tb.5 the empty group's case fails, and the group end,
+the pedal and the octave each end the process (SIGSEGV); all 17 cases of
+the target pass on tb.6.
+
+tb.6 against tb.5 (same toolchain, MuseNote's `tool/parity`, 2785
+scores): 19930 outputs compared, 0 differ; seeded ids deterministic on a
+fresh thread for 2785 of 2785. No score of the corpus has an empty group.
 
 tb.2 against tb.1 (same toolchain): 972 outputs compared, 0 differ; the
 fresh-thread seeded import matches on 3 of 3 scores (0 of 54 notes matched on
@@ -168,7 +217,10 @@ tb.1 against `version-6.2.0`:
   exposes a pitch only the MIDI functor computes, and patch 3 (upstream's
   own fix) drops at the 6.3.0 base move. Seven since 2026-10-11, again by
   the owner's decision: patch 7 stops two crashes on files a user can
-  import.
+  import. Nine since 2026-10-12, by the owner's decision: patches 8 and 9
+  finish what patch 7 began. Patch 8 is in the importer; it removes an
+  object after it was built, which leaves the order of construction, and
+  so every other id, as it was.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
