@@ -2312,7 +2312,19 @@ std::string Toolkit::ConvertMEIToHumdrum(const std::string &meiData)
     std::stringstream conversion;
 
     this->LogRedirectStart();
-    bool status = converter.convert(conversion, xmlfile);
+    bool status = false;
+    try {
+        status = converter.convert(conversion, xmlfile);
+    }
+    catch (const std::exception &e) {
+        // The converter reads its numbers with stoi() and the like, which throw on an attribute that holds none, and
+        // catches nothing: no Humdrum for such a file, where the process ended
+        conversion.str("");
+        this->LogRedirectStop();
+        LogError("Error converting MEI data to Humdrum: %s", e.what());
+        this->SetHumdrumBuffer("");
+        return "";
+    }
     this->LogRedirectStop();
 
     if (!status) {

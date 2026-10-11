@@ -663,6 +663,12 @@ bool HumdrumInput::Import(const std::string &content)
         LogError("%s", str);
         return false;
     }
+    catch (const std::exception &e) {
+        // The Humdrum reader goes on with a file it could not parse (a line with the wrong number of fields), and what
+        // it throws then would end the process: nothing above this catches it
+        LogError("Humdrum import: %s", e.what());
+        return false;
+    }
 
 #else
     return true;
