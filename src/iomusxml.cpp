@@ -1870,6 +1870,20 @@ bool MusicXmlInput::ReadMusicXmlPart(pugi::xml_node node, Section *section, shor
         LogWarning("MusicXML import: There are %d hairpins left open", m_hairpinStack.size());
         m_hairpinStack.clear();
     }
+    // An octave line still waiting for its first note has none in this part. Left on the stack, the first note of
+    // the next part was taken for its start
+    for (Octave *octave : m_octaveStack) {
+        std::erase_if(m_controlElements, [octave](const auto &element) { return element.second == octave; });
+        delete octave;
+    }
+    m_octaveStack.clear();
+    // One that was started and never stopped runs to the last note of the part. Without an end it is not drawn,
+    // while its notes are written an octave from where they sound
+    for (const auto &element : m_controlElements) {
+        if (!element.second->Is(OCTAVE)) continue;
+        Octave *octave = vrv_cast<Octave *>(element.second);
+        if (octave->HasStartid() && !octave->HasEndid()) octave->SetEndid(m_ID);
+    }
 
     return false;
 }
@@ -2614,24 +2628,35 @@ void MusicXmlInput::ReadMusicXmlDirection(
     // Ottava
     pugi::xml_node xmlShift = typeNode.child("octave-shift");
     if (xmlShift) {
-        const short int staffNum = (!staffNode) ? 1 : staffNode.text().as_int() + staffOffset;
+        // The first staff of this part when the direction names none, as for every other direction (it was staff 1
+        // of the score: in any part but the first the notes under the line were left where they sound)
+        const short int staffNum = (staffNode ? staffNode.text().as_int() : 1) + staffOffset;
         if (HasAttributeWithValue(xmlShift, "type", "stop")) {
             m_octDis[staffNum] = 0;
-            for (auto iter = m_controlElements.begin(); iter != m_controlElements.end(); ++iter) {
-                if (iter->second->Is(OCTAVE)) {
-                    Octave *octave = dynamic_cast<Octave *>(iter->second);
-                    if (octave->HasEndid()) continue;
-                    std::vector<int> staffAttr = octave->GetStaff();
-                    if (std::find(staffAttr.begin(), staffAttr.end(), staffNum) != staffAttr.end()) {
-                        octave->SetEndid(m_ID);
-                    }
-                    else if (xmlShift.attribute("number").as_string() == octave->GetN()) {
-                        octave->SetEndid(m_ID);
-                    }
-                    else {
-                        LogWarning("MusicXML import: octave for '%s' could not be closed", octave->GetID().c_str());
-                    }
+            for (auto iter = m_controlElements.begin(); iter != m_controlElements.end();) {
+                Octave *octave = iter->second->Is(OCTAVE) ? vrv_cast<Octave *>(iter->second) : NULL;
+                if (!octave || octave->HasEndid()) {
+                    ++iter;
+                    continue;
                 }
+                const std::vector<int> staffAttr = octave->GetStaff();
+                const bool sameStaff = (std::find(staffAttr.begin(), staffAttr.end(), staffNum) != staffAttr.end());
+                if (!sameStaff && (xmlShift.attribute("number").as_string() != octave->GetN())) {
+                    LogWarning("MusicXML import: octave for '%s' could not be closed", octave->GetID().c_str());
+                    ++iter;
+                    continue;
+                }
+                const auto waiting = std::find(m_octaveStack.begin(), m_octaveStack.end(), octave);
+                if (waiting == m_octaveStack.end()) {
+                    octave->SetEndid(m_ID);
+                    ++iter;
+                    continue;
+                }
+                // Stopped before a note came: there is no note for it to stand over. Left waiting, it was given the
+                // next note for its start and the note before for its end
+                m_octaveStack.erase(waiting);
+                iter = m_controlElements.erase(iter);
+                delete octave;
             }
         }
         else {
