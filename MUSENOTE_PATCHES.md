@@ -17,6 +17,9 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 7 | 2026-10-11 | Do not crash when the MIDI document cannot be built or holds a half octave line (c231613f0) | `src/midifunctor.cpp`, `src/toolkit.cpp`, +13 / -1 | Scores that crashed now load, play and export: an `<octave>` without a start or an end is left out of the MIDI as it is left out of the drawing, and a document its own MEI reader refuses is played as loaded, unexpanded, with a warning. None for a score that did not crash | Not offered upstream; `develop` of 2026-10-08 has both |
 | 8 | 2026-10-12 | Do not leave an empty group behind in the MusicXML importer, nor pop the root group (1ec3b2c5c) | `src/iomusxml.cpp`, +9 / -2 | A MusicXML score with a `<part-group>` that has no part in it no longer carries an empty `<staffGrp>`: its MEI export loads again, and its MIDI and timemap are written from the expanded document (repeats played out) where tb.5 played it as loaded. A score with the end of a part-group that was never started now loads (it ended the process). No other id changes: the group is built, then removed. None for a score with neither | Not offered upstream; `develop` of 2026-10-08 has both |
 | 9 | 2026-10-12 | Do not crash on a pedal without a start or an octave over a staff with no layer (db2307d47) | `src/midifunctor.cpp`, +5 / -1 | Scores that ended the process while their MIDI or timemap was written now play: a `<pedal>` whose `@startid` names nothing, and an `<octave>` over a staff with no layer in its measure, are left out of the MIDI. None for a score with neither | Not offered upstream; `develop` of 2026-10-08 has both |
+| 10 | 2026-10-12 | Repair the MEI to Humdrum converter (Tool_mei2hum) (5e2fb6bb9) | `src/hum/humlib.cpp`, +88 / -15 | `Toolkit::ConvertMEIToHumdrum` only: the Humdrum it writes now holds the score (it was damaged for every score tried, and a chord ended the process). No SVG, timemap, MIDI, MEI or id changes: nothing else reaches the converter | Not offered upstream; `develop` of 2026-10-08 has all eleven faults |
+| 11 | 2026-10-12 | Read a MusicXML octave line on its own part, and do not leave one waiting or open (1f1c88522) | `src/iomusxml.cpp`, +40 / -15 | A MusicXML `octave-shift` with no `<staff>` in a part that is not the first is on its own part (it was drawn over the first part, and its notes sounded an octave off); one with no note under it is not built (it took the next part's first note); one never stopped runs to the last note of its part (it was not drawn, and its notes sounded an octave off). None for a score with none of the three | Not offered upstream; `develop` of 2026-10-08 has all three |
+| 12 | 2026-10-12 | Do not end the process on what the Humdrum reader or the MEI to Humdrum converter throws (15cd1c51a) | `src/iohumdrum.cpp`, `src/toolkit.cpp`, +19 / -1 | A Humdrum file the reader cannot parse is refused, and an MEI document the converter cannot read a number from gives no Humdrum, where either ended the process. None for a file that did not throw | Not offered upstream; `develop` of 2026-10-08 has both |
 
 ### 1. PAE importer crashes
 
@@ -192,6 +195,127 @@ tb.6 against tb.5 (same toolchain, MuseNote's `tool/parity`, 2785
 scores): 19930 outputs compared, 0 differ; seeded ids deterministic on a
 fresh thread for 2785 of 2785. No score of the corpus has an empty group.
 
+### 10. The MEI to Humdrum converter
+
+MuseNote exports a score as Humdrum with `Toolkit::ConvertMEIToHumdrum`,
+which hands the MEI to humlib's `Tool_mei2hum`. Over the 2785 scores of
+MuseNote's parity corpus every export was damaged, and a score with a
+chord ended the process. Eleven faults:
+
+- **The time base.** The converter counts whole notes, the grid
+  (`HumGrid`) quarter notes. `QUARTER_CONVERT`, the conversion, was
+  defined empty: every note lasted four times as long as it does and
+  overwrote the notes after it ("ZZZ" tokens, lost bars). It is `* 4`
+  again.
+- **`m_xmlidQ = 1; // for testing`.** An `**xmlid` spine was written for
+  every staff, and a chord has no data slice to hang its ids on (a null
+  pointer read). The option is read as given.
+- **`<ending>`** was passed over by `parseSection`: every measure under a
+  first or second ending was lost. It is read as a section is.
+- **Clef, key signature and meter as child elements** of `staffDef` or
+  `scoreDef`, which is how Verovio's own MEI export writes them, were
+  not read (only the attributes were): no clef, key or meter in the
+  output, and whole-measure rests with no length.
+- **A measure's length** was worked out in whole numbers: 3/8 gave one
+  quarter note.
+- **A measure number** was read with `stoi()`, which throws on "X1" (a
+  pickup bar from MusicXML).
+- **`HumGrid::addMeasureLines`** read the first spined slice of the next
+  measure without looking; a measure with nothing in it has none.
+- **A multi-measure rest** was left empty and its time lost. It is
+  written out as that many measures of rest, at most 999: the number is
+  the file's own, and a few bytes can say any.
+- **A tempo mark** was filed at its measure's start in the converter's
+  time, not the grid's: anywhere but at the start of the score it stood
+  three quarters of the way back, and overwrote what was there.
+- **A syllable** was written as it came: a line break or a tab in it cut
+  its line in two. It goes through `cleanVerseText()`, which now also
+  takes a carriage return.
+- **A note under an octave line** was written at the octave it is drawn
+  in. `**kern` holds what sounds: `@oct.ges` is read first.
+
+Carried because the converter is inside the engine: what it writes could
+only be mended outside by parsing and rewriting Humdrum, which is the
+converter's own work.
+
+Still not carried by the converter, and not patched: chord symbols
+(`parseHarm` is not called), the brackets of endings, `<mSpace>`, and
+ties given as attributes. Some scores with two voices on one staff still
+come out with a "ZZZ" token (5 of the corpus).
+
+Regression test: MuseNote's `corelib/verovio/test/native/test_mei_to_humdrum_engine.cpp`
+(15 cases; the exported text is read by the test itself, and read back
+by the engine).
+
+### 11. MusicXML octave lines
+
+Three faults of `octave-shift` in `MusicXmlInput`, found with hand-made
+files while the octave line of patch 7 was looked at again.
+
+- A direction that names no `<staff>` was put on staff 1 of the score,
+  not on the first staff of its part: the staff offset was added only
+  when the direction had a `<staff>`. In any part but the first the line
+  was drawn over the first part, and the notes under it, written an
+  octave away, sounded there.
+- An octave line waits on `m_octaveStack` for its first note. One that
+  is stopped before a note comes, or still waits when its part ends,
+  stayed there and took the first note of whatever came next, another
+  part's too. It is removed.
+- One that is started and never stopped had no end: not drawn, not
+  played, with its notes written an octave away. It runs to the last
+  note of its part.
+
+Carried because the line is built inside the importer. Six scores of the
+parity corpus have octave lines; none has any of the three faults, and
+none of their outputs changed.
+
+Regression test: `test_midi_document_engine.cpp`, three new cases (ten
+subcases), each checked against the MIDI note-ons, the pitch map and
+whether the line is drawn.
+
+### 12. What the Humdrum reader and the converter throw
+
+humlib reads numbers with `stoi()` and the like, indexes its lines by
+spine, and catches nothing. An exception that leaves the engine ends the
+process: the apps run it in their own.
+
+- `HumdrumInput::Import` caught a `char *` only. The reader goes on with
+  a file it could not parse (a line with the wrong number of fields) and
+  then throws `std::out_of_range`. The import now fails.
+- `Toolkit::ConvertMEIToHumdrum` caught nothing. A verse numbered
+  "chorus" threw `std::invalid_argument`. It now gives no Humdrum, and
+  says so in the log.
+
+Not guarded, because the apps cannot reach them (MuseNote pins the input
+format, and binds `convertMEIToHumdrum` only): the converters in
+`Toolkit::LoadData` for `musicxml-hum`, MuseData and EsAC input, and the
+one in `Toolkit::GetHumdrumBuffer`.
+
+Regression test: `test_mei_to_humdrum_engine.cpp`, two of its cases.
+
+tb.7 against tb.6 (same toolchain, MuseNote's `tool/parity`, 2785
+scores): 19930 outputs compared, 0 differ; seeded ids deterministic on a
+fresh thread for 2785 of 2785.
+
+The gate does not look at the Humdrum export, which patch 10 changes for
+every score. Over the same 2785 scores, each exported to MEI and that
+converted: all convert and none ends the process; 5 still hold a "ZZZ"
+token. The text, read by a kern reader written for this check (not the
+engine's), holds every note at its place and pitch for 2716; 68 differ
+(about half of them by grace notes and arpeggios, which that reader
+does not time as the engine plays them; the others by two voices on one
+staff, by tuplets, most of them nested wrongly in the source, and a few
+more) and 1 cannot be read (its spines change in number with no split
+written). Read back by
+the engine's own Humdrum reader, 2620 play the same notes at the same
+places, 164 do not, and 1 is refused. On tb.6 every one of the 2785 was
+damaged.
+
+Native tests (`verovio_engine_tests`, 35 cases): on tb.6 17 pass, 15
+fail (two of them by an exception, which in an app ends the process)
+and 3 end the process; all 35 pass on tb.7. 24 deliberate breaks of the
+patches' lines, each caught by a case.
+
 tb.2 against tb.1 (same toolchain): 972 outputs compared, 0 differ; the
 fresh-thread seeded import matches on 3 of 3 scores (0 of 54 notes matched on
 tb.1).
@@ -221,6 +345,14 @@ tb.1 against `version-6.2.0`:
   finish what patch 7 began. Patch 8 is in the importer; it removes an
   object after it was built, which leaves the order of construction, and
   so every other id, as it was.
+  Twelve since 2026-10-12, by the owner's decision: patch 10 makes the
+  Humdrum export hold the score (88 lines, well over the 30: eleven
+  faults of one converter, none of them in drawing, layout or an
+  importer), patch 11 puts a MusicXML octave line where it belongs, and
+  patch 12 keeps two exceptions inside the engine. Patch 11 is in the
+  importer: it removes an octave line that has no note, after it was
+  built, and moves one to its own part; no score of the corpus has
+  either, and no id of the corpus changed.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
