@@ -2643,8 +2643,24 @@ void MusicXmlInput::ReadMusicXmlDirection(
         // The first staff of this part when the direction names none, as for every other direction (it was staff 1
         // of the score: in any part but the first the notes under the line were left where they sound)
         const short int staffNum = (staffNode ? staffNode.text().as_int() : 1) + staffOffset;
-        if (HasAttributeWithValue(xmlShift, "type", "stop")) {
+        // A staff the score does not have (a direction that names staff 2 in a part of one): m_octDis has no
+        // place for it, and was written out of bounds
+        if ((staffNum < 0) || (staffNum >= (short int)m_octDis.size())) {
+            LogWarning("MusicXML import: octave-shift on staff %d, which the score does not have", staffNum);
+        }
+        else if (HasAttributeWithValue(xmlShift, "type", "stop")) {
             m_octDis[staffNum] = 0;
+            // A stop is first of all for the lines of its own staff. Only when that staff has none open is it
+            // taken for one of another staff with the same number (it closed both, and the other staff's notes
+            // stayed an octave off with no line over them)
+            const auto isOpenOn = [](const Octave *octave, int n) {
+                const std::vector<int> staves = octave->GetStaff();
+                return !octave->HasEndid() && (std::find(staves.begin(), staves.end(), n) != staves.end());
+            };
+            const bool ownStaffHasOne = std::any_of(
+                m_controlElements.begin(), m_controlElements.end(), [&](const auto &element) {
+                    return element.second->Is(OCTAVE) && isOpenOn(vrv_cast<Octave *>(element.second), staffNum);
+                });
             for (auto iter = m_controlElements.begin(); iter != m_controlElements.end();) {
                 Octave *octave = iter->second->Is(OCTAVE) ? vrv_cast<Octave *>(iter->second) : NULL;
                 if (!octave || octave->HasEndid()) {
@@ -2653,6 +2669,10 @@ void MusicXmlInput::ReadMusicXmlDirection(
                 }
                 const std::vector<int> staffAttr = octave->GetStaff();
                 const bool sameStaff = (std::find(staffAttr.begin(), staffAttr.end(), staffNum) != staffAttr.end());
+                if (!sameStaff && ownStaffHasOne) {
+                    ++iter;
+                    continue;
+                }
                 if (!sameStaff && (xmlShift.attribute("number").as_string() != octave->GetN())) {
                     LogWarning("MusicXML import: octave for '%s' could not be closed", octave->GetID().c_str());
                     ++iter;
