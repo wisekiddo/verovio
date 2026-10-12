@@ -640,6 +640,8 @@ private:
     InstrDef *m_instrdef = NULL;
     /* LastElementID */
     std::string m_ID;
+    /* The same for each staff: an octave line ends on the last note of its own staff */
+    std::map<int, std::string> m_lastIDOnStaff;
     /* A map of stacks for piling open LayerElements (beams, tuplets, chords, btrem, ftrem) separately per layer */
     std::map<Layer *, std::vector<LayerElement *>> m_elementStackMap;
     /* A maps of time stamps (score time) to indicate write pointer of a given layer */

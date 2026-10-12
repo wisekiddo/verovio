@@ -2102,7 +2102,12 @@ void MusicXmlInput::ReadMusicXmlAttributes(
         short int staffNum = clef.attribute("number").as_int();
         staffNum = (staffNum < 1) ? 1 : staffNum;
         Staff *staff = vrv_cast<Staff *>(measure->GetChild(staffNum - 1, STAFF));
-        assert(staff);
+        // A staff the part does not have (or does not have yet: its <staves> comes in a later measure). Only an
+        // assert said so, and the null staff was kept for the clef's place
+        if (!staff) {
+            LogWarning("MusicXML import: clef for staff %d, which the part does not have", staffNum);
+            continue;
+        }
         Clef *meiClef = ConvertClef(clef);
         if (meiClef) {
             const bool afterBarline = clef.attribute("after-barline").as_bool();
@@ -2171,7 +2176,9 @@ void MusicXmlInput::ReadMusicXmlBarLine(pugi::xml_node node, Measure *measure, c
     int repeatTimes = 1;
     bool repeatAfterJump = false;
     if (repeat) {
-        repeatTimes = repeat.node().attribute("times").as_int(2);
+        // (more than a hundred is no count of a repeat: a hundred million of them never came back from the
+        // order being written)
+        repeatTimes = std::min(repeat.node().attribute("times").as_int(2), 100);
         repeatAfterJump = repeat.node().attribute("after-jump").as_bool(false);
     }
     if (!barStyle.empty()) {
@@ -2649,44 +2656,69 @@ void MusicXmlInput::ReadMusicXmlDirection(
             LogWarning("MusicXML import: octave-shift on staff %d, which the score does not have", staffNum);
         }
         else if (HasAttributeWithValue(xmlShift, "type", "stop")) {
-            m_octDis[staffNum] = 0;
-            // A stop is first of all for the lines of its own staff. Only when that staff has none open is it
-            // taken for one of another staff with the same number (it closed both, and the other staff's notes
-            // stayed an octave off with no line over them)
-            const auto isOpenOn = [](const Octave *octave, int n) {
+            const auto isOpen = [](const Object *element) {
+                return element->Is(OCTAVE) && !vrv_cast<const Octave *>(element)->HasEndid();
+            };
+            // A stop whose number one open line has, and only one, is for that line whatever staff the stop is
+            // written on. (Numbers that say nothing, the same on every line or none at all, leave it to the staff)
+            const std::string number = xmlShift.attribute("number").as_string();
+            Octave *named = NULL;
+            int withNumber = 0;
+            for (const auto &element : m_controlElements) {
+                if (number.empty() || !isOpen(element.second)) continue;
+                Octave *octave = vrv_cast<Octave *>(element.second);
+                if (octave->GetN() != number) continue;
+                named = octave;
+                ++withNumber;
+            }
+            if (withNumber != 1) named = NULL;
+            if (!named) m_octDis[staffNum] = 0;
+            // Otherwise a stop is first of all for the lines of its own staff. Only when that staff has none open
+            // is it taken for one of another staff with the same number (it closed both, and the other staff's
+            // notes stayed an octave off with no line over them)
+            const auto isOn = [](const Octave *octave, int n) {
                 const std::vector<int> staves = octave->GetStaff();
-                return !octave->HasEndid() && (std::find(staves.begin(), staves.end(), n) != staves.end());
+                return (std::find(staves.begin(), staves.end(), n) != staves.end());
             };
             const bool ownStaffHasOne = std::any_of(
                 m_controlElements.begin(), m_controlElements.end(), [&](const auto &element) {
-                    return element.second->Is(OCTAVE) && isOpenOn(vrv_cast<Octave *>(element.second), staffNum);
+                    return isOpen(element.second) && isOn(vrv_cast<Octave *>(element.second), staffNum);
                 });
             for (auto iter = m_controlElements.begin(); iter != m_controlElements.end();) {
-                Octave *octave = iter->second->Is(OCTAVE) ? vrv_cast<Octave *>(iter->second) : NULL;
-                if (!octave || octave->HasEndid()) {
+                Octave *octave = isOpen(iter->second) ? vrv_cast<Octave *>(iter->second) : NULL;
+                if (!octave || (named && (octave != named))) {
                     ++iter;
                     continue;
                 }
-                const std::vector<int> staffAttr = octave->GetStaff();
-                const bool sameStaff = (std::find(staffAttr.begin(), staffAttr.end(), staffNum) != staffAttr.end());
-                if (!sameStaff && ownStaffHasOne) {
+                const bool own = (octave == named) || isOn(octave, staffNum);
+                if (!own && ownStaffHasOne) {
                     ++iter;
                     continue;
                 }
-                if (!sameStaff && (xmlShift.attribute("number").as_string() != octave->GetN())) {
+                if (!own && (number != octave->GetN())) {
                     LogWarning("MusicXML import: octave for '%s' could not be closed", octave->GetID().c_str());
                     ++iter;
                     continue;
                 }
                 const auto waiting = std::find(m_octaveStack.begin(), m_octaveStack.end(), octave);
-                if (waiting == m_octaveStack.end()) {
-                    octave->SetEndid(m_ID);
+                // A line that waits for its first note on another staff is not this stop's (a piano part: the left
+                // hand's line is written before the right hand's is stopped)
+                if ((waiting != m_octaveStack.end()) && !own) {
                     ++iter;
                     continue;
                 }
-                // A line that waits for its first note on another staff is not this stop's (a piano part: the left
-                // hand's line is written before the right hand's is stopped)
-                if (!sameStaff) {
+                // The line is over: so is the octave its staff's notes are moved by. (Only the stop's own staff
+                // was set back: a line closed from another staff left its notes moved to the end of the part)
+                const std::vector<int> lineStaves = octave->GetStaff();
+                for (const int n : lineStaves) {
+                    if ((n >= 0) && (n < (int)m_octDis.size())) m_octDis[n] = 0;
+                }
+                if (waiting == m_octaveStack.end()) {
+                    // It ends on the last note of its own staff. (On the note read last, whatever its staff: with
+                    // the other hand's notes read in between, the line ran on over a note that is not under it,
+                    // and that note was played an octave off)
+                    const auto ownLast = m_lastIDOnStaff.find(lineStaves.empty() ? staffNum : lineStaves.front());
+                    octave->SetEndid((ownLast != m_lastIDOnStaff.end()) ? ownLast->second : m_ID);
                     ++iter;
                     continue;
                 }
@@ -2696,6 +2728,10 @@ void MusicXmlInput::ReadMusicXmlDirection(
                 iter = m_controlElements.erase(iter);
                 delete octave;
             }
+        }
+        else if (HasAttributeWithValue(xmlShift, "type", "continue")) {
+            // The line that is open goes on. (It was read as the start of a second line, which took the next
+            // note for itself and left the note after the stop an octave off)
         }
         else {
             Octave *octave = new Octave();
@@ -3675,6 +3711,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     if (!nextIsChord) m_durTotal += duration;
 
     m_ID = "#" + element->GetID();
+    m_lastIDOnStaff[staff->GetN()] = m_ID;
 
     // breath marks
     pugi::xpath_node xmlBreath = notations.node().select_node("articulations/breath-mark");
