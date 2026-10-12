@@ -27789,20 +27789,22 @@ template <class ELEMENT> void HumdrumInput::convertVerses(ELEMENT element, hum::
             }
             // add sub-syllables to verse:
 
-            if (content.back() == '-') { // d connector
+            // A syllable that is a connector and nothing else ("-") leaves an empty string behind: back() and
+            // pop_back() on one read and wrote before its start
+            if (!content.empty() && (content.back() == '-')) { // d connector
                 dashonend = true;
                 content.pop_back();
-                contents.back().pop_back();
+                if (!contents.back().empty()) contents.back().pop_back();
             }
             if ((content.size() > 0) && (content[0] == '-')) {
                 dashonbegin = true;
                 content.erase(0, 1);
-                contents[0].erase(0, 1);
+                if (!contents[0].empty()) contents[0].erase(0, 1);
             }
-            if (content.back() == '_') { // u connector
+            if (!content.empty() && (content.back() == '_')) { // u connector
                 extender = true;
                 content.pop_back();
-                contents.back().pop_back();
+                if (!contents.back().empty()) contents.back().pop_back();
             }
 
             // @wordpos="i" : syllable at start of word (initial)
