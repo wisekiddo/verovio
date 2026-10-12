@@ -101227,7 +101227,7 @@ void Tool_mei2hum::processHairpin(hairpin_info& info) {
 	// unit below is kept by staff: its index went on with the measures,
 	// and was read past the end of the vector for every hairpin that ends
 	// in a later measure.)
-	if ((measure < 0) || ((m_outdata.end() - myit) <= (int)measure)) {
+	if (!(measure >= 0) || (measure > 100000) || ((m_outdata.end() - myit) <= (int)measure)) {
 		return;
 	}
 	myit += (int)measure;
@@ -101467,7 +101467,13 @@ void Tool_mei2hum::parseScoreDef(xml_node scoreDef, HumNum starttime) {
 	MAKE_CHILD_LIST(children, scoreDef);
 
 	if (m_scoreDef.global.timestamp == starttime QUARTER_CONVERT) {
-		m_scoreDef.clear();
+		// What is said for the whole score starts anew.  What is known of
+		// each staff stays: a second <scoreDef> at the same time as the
+		// first (Verovio writes one in the section, before the first
+		// measure) says nothing of the staves, and their transposition is
+		// looked up for every note after it.  (All of it was cleared, and
+		// that was looked up in an empty vector.)
+		m_scoreDef.global.clear();
 	}
 	m_scoreDef.global.timestamp = starttime QUARTER_CONVERT;
 
@@ -102100,7 +102106,10 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 
 		staffinfo.timesig = "*M" + metercount + "/" + meterunit;
 	}
-	if (!keysig.empty()) {
+	// A key that is a number of sharps or flats.  (Any other, "mixed",
+	// has no number to read: stoi() threw, and the whole conversion was
+	// lost.  It is left out.)
+	if (!keysig.empty() && isdigit((unsigned char)keysig[0])) {
 		int count = stoi(keysig);
 		int accid = 0;
 		if (keysig.find("s") != string::npos) {
@@ -102119,7 +102128,12 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 
 		// Adjust for transposition to C score here.
 
-		if (accid > 0) {
+		if (count == 0) {
+			// No sharps and no flats is a key too, and has to be said
+			// when it follows another: left unsaid, the key before it
+			// stayed in force for whoever reads the file.
+			staffinfo.keysig = "*k[]";
+		} else if (accid > 0) {
 			switch (count) {
 				case 1: staffinfo.keysig = "*k[f#]";             break;
 				case 2: staffinfo.keysig = "*k[f#c#]";           break;
@@ -104774,7 +104788,10 @@ string Tool_mei2hum::getHumdrumPitch(xml_node note, vector<xml_node>& children) 
 
 	// Transpose to C score if part is transposing:
 	if (m_currentStaff) {
-		if (m_scoreDef.staves[m_currentStaff-1].base40 != 0) {
+		// Only for a staff that has a definition: a note on one that has
+		// none was looked up past the end of the vector.
+		if ((m_currentStaff >= 1) && (m_currentStaff <= (int)m_scoreDef.staves.size())
+				&& (m_scoreDef.staves[m_currentStaff-1].base40 != 0)) {
 			int base40 = Convert::kernToBase40(output);
 			base40 += m_scoreDef.staves[m_currentStaff-1].base40;
 			output = Convert::base40ToKern(base40);
