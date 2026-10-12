@@ -1650,6 +1650,13 @@ void Doc::TransposeDoc()
     }
 }
 
+static size_t CountDescendants(const Object *object)
+{
+    size_t count = 0;
+    for (const Object *child : object->GetChildren()) count += 1 + CountDescendants(child);
+    return count;
+}
+
 void Doc::ExpandExpansions()
 {
     // Passing this argument does not do anything
@@ -1698,6 +1705,25 @@ void Doc::ExpandExpansions()
         if (startExpansion == NULL) {
             return;
         }
+    }
+
+    // What following the order costs. A section played again is a copy of its elements, and every copy of an
+    // element is listed with all the others of it (ExpansionMap): k times played is k times k. The dearest of
+    // 2,785 real scores comes to 23,000 by this count; 200 repeat ends in a row with no start, or one measure
+    // marked to be played 2,000 times, come to millions, a gigabyte and minutes from a file of 2 KB. Such a score
+    // is played as it is written, once through.
+    static const size_t maxOrderCost = 1000000;
+    std::map<std::string, size_t> timesPlayed;
+    for (const std::string &ref : startExpansion->GetPlist()) ++timesPlayed[ref];
+    size_t orderCost = 0;
+    for (const auto &[ref, times] : timesPlayed) {
+        const Object *played = this->FindDescendantByID((ref.rfind("#", 0) == 0) ? ref.substr(1) : ref);
+        if (played) orderCost += times * times * (1 + CountDescendants(played));
+    }
+    if (orderCost > maxOrderCost) {
+        LogWarning("The order of %d sections is not followed (too many repeats): the score is played as written",
+            (int)startExpansion->GetPlist().size());
+        return;
     }
 
     xsdAnyURI_List existingList; // list of xml:id strings of elements already in the document

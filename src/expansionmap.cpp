@@ -379,7 +379,9 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
     }
 
     Section *section = vrv_cast<Section *>(score->FindDescendantByType(SECTION, 1));
-    assert(section);
+    // A score with no section (nothing after its definition, or an ending that stands alone) has no order to work
+    // out. (Only an assert said so: without it the null section was read)
+    if (!section) return;
 
     ArrayOfObjects childrenArray = section->GetChildrenForModification();
     ListOfObjects children(childrenArray.begin(), childrenArray.end());
@@ -390,6 +392,9 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
     ListOfObjects::iterator last = children.begin();
 
     bool isStartFromPrevious = false;
+    // A repeat end on the left of the first measure has nothing before it to repeat. (It made a section of that
+    // measure itself, played it twice, and lost the repeat that followed)
+    bool hasMeasureBefore = false;
     // A section has just been closed: the measure that follows starts the next one. (The start of the last
     // section was kept, a measure that had been moved into that section already.)
     bool isAfterSection = false;
@@ -410,10 +415,11 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
         if ((*current)->Is(MEASURE)) {
             Measure *measure = vrv_cast<Measure *>(*current);
             // The current measure has a repeat end on its left
-            if (ExpansionMap::IsPreviousRepeatEnd(measure)) {
+            if (hasMeasureBefore && ExpansionMap::IsPreviousRepeatEnd(measure)) {
                 repeat(this->CreateSection(section, first, last));
                 isAfterSection = true;
             }
+            hasMeasureBefore = true;
             if (isStartFromPrevious || ExpansionMap::IsRepeatStart(measure)) {
                 sinceStart.clear();
                 first = current;
