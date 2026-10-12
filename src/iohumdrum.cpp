@@ -27651,6 +27651,9 @@ template <class ELEMENT> void HumdrumInput::convertVerses(ELEMENT element, hum::
         }
         if (vvdataQ) {
             splitSyllableBySpaces(vtexts);
+            // Every piece of the one token is that token's. (Only the first piece had one: the second read past
+            // the end of vtoks)
+            vtoks.resize(vtexts.size(), token);
         }
 
         for (int j = 0; j < (int)vtexts.size(); ++j) {
@@ -27936,11 +27939,12 @@ std::string HumdrumInput::getVerseLabelText(hum::HTp token)
 
 void HumdrumInput::splitSyllableBySpaces(vector<std::string> &vtext, char spacer)
 {
-    if (vtext[0].find(spacer) == std::string::npos) {
-        return;
-    }
+    // (the size first: a token of spaces only leaves no text, and vtext[0] was read all the same)
     if (vtext.size() != 1) {
         // invalid size
+        return;
+    }
+    if (vtext[0].find(spacer) == std::string::npos) {
         return;
     }
     std::string original = vtext[0];
