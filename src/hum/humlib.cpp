@@ -2885,8 +2885,9 @@ string Convert::base40ToKern(int b40) {
 		repeat = 3 - octave;
 	}
 	if (repeat > 12) {
-		cerr << "Error: unreasonable octave value: " << octave << " for " << b40 << endl;
-		exit(1);
+		// Thrown, not exit(1): this is reached from a conversion inside an
+		// application, whose process it ended.
+		throw std::out_of_range("unreasonable octave value: " + to_string(octave));
 	}
 	string output;
 	output += base;
@@ -101170,6 +101171,12 @@ void Tool_mei2hum::processHairpin(hairpin_info& info) {
 		hairopen = ">";
 		hairclose = "]";
 	}
+	// A hairpin given by the notes it starts and ends on has neither, and
+	// stod() throws on an empty string: it is left out, where the whole
+	// conversion was given up.
+	if (tstamp.empty() || tstamp2.empty()) {
+		return;
+	}
 	double starttime = stod(tstamp) - 1.0;
 	double measure = 0.0;
 	auto loc = tstamp2.find("m+");
@@ -101216,8 +101223,14 @@ void Tool_mei2hum::processHairpin(hairpin_info& info) {
 		m_outdata.setDynamicsPresent(staffnum-1);
 	}
 
+	// The measure the hairpin ends in, if the score has it.  (The meter
+	// unit below is kept by staff: its index went on with the measures,
+	// and was read past the end of the vector for every hairpin that ends
+	// in a later measure.)
+	if ((measure < 0) || ((m_outdata.end() - myit) <= (int)measure)) {
+		return;
+	}
 	myit += (int)measure;
-	mindex += (int)measure;
 	gm = *myit;
 	it = gm->begin();
 	lastgs = NULL;
@@ -101458,7 +101471,24 @@ void Tool_mei2hum::parseScoreDef(xml_node scoreDef, HumNum starttime) {
 	}
 	m_scoreDef.global.timestamp = starttime QUARTER_CONVERT;
 
+	string keybefore   = m_scoreDef.global.keysig;
+	string meterbefore = m_scoreDef.global.timesig;
+
 	fillWithStaffDefAttributes(m_scoreDef.global, scoreDef);
+
+	// A change of key or of meter for the whole score, after its start: a
+	// <scoreDef> with no <staffDef> in it.  Kept for the measure that
+	// comes next, which starts with it: see parseMeasure().  (Only a
+	// <staffDef> was written out: such a change was not in the output,
+	// and what followed stood under the key and the meter of before.)
+	if (!m_outdata.empty() && !scoreDef.child("staffGrp") && !scoreDef.child("staffDef")) {
+		if (m_scoreDef.global.keysig != keybefore) {
+			m_pendingKeySig = m_scoreDef.global.keysig;
+		}
+		if (m_scoreDef.global.timesig != meterbefore) {
+			m_pendingTimeSig = m_scoreDef.global.timesig;
+		}
+	}
 
 	for (xml_node item : children) {
 		string nodename = item.name();
@@ -101658,6 +101688,14 @@ void Tool_mei2hum::processKeySig(mei_staffDef& staffinfo, xml_node keysig, HumNu
 		}
 	}
 	token += "]";
+
+	// A <keySig> that lists no accidentals of its own says its key in
+	// @sig, which fillWithStaffDefAttributes() has read: that one stands.
+	// (It was written over with an empty key: a score with its key on the
+	// <scoreDef>, as MuseNote's own are, came out in C.)
+	if (token == "*k[]") {
+		return;
+	}
 
 	staffinfo.keysig = token;
 }
@@ -101931,7 +101969,9 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 			metercount = atti->value();
 		} else if (attname == "meter.unit") {
 			meterunit = atti->value();
-		} else if (attname == "key.sig") {
+		} else if ((attname == "key.sig") || (attname == "keysig")) {
+			// @keysig is MEI 4's and 5's name for it, and what Verovio
+			// writes for a score that came as ABC.
 			keysig = atti->value();
 		} else if (attname == "label") {
 			label = atti->value();
@@ -102169,8 +102209,26 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 				cerr << "Warning: a rest of " << bars << " measures is written out as 999" << endl;
 				bars = 999;
 			}
+			// A repeat sign at the LEFT of a measure is the barline that
+			// closes the measure before it.  Verovio's MusicXML importer
+			// puts the start of a repeat there.  (Only @right was read: the
+			// start of every such repeat was lost, and read back the
+			// repeat went to the beginning.)
+			string leftstyle = children[i].attribute("left").value();
+			if (!m_outdata.empty() && ((leftstyle == "rptstart") || (leftstyle == "rptend") || (leftstyle == "rptboth"))) {
+				GridMeasure* before = m_outdata.back();
+				bool starts = (leftstyle != "rptend") || before->isRepeatForward() || before->isRepeatBoth();
+				bool ends = (leftstyle != "rptstart") || before->isRepeatBackward() || before->isRepeatBoth();
+				before->setBarStyle(starts && ends ? MeasureStyle::RepeatBoth
+						: (starts ? MeasureStyle::RepeatForward : MeasureStyle::RepeatBackward));
+			}
 			do {
 				starttime = parseMeasure(children[i], starttime);
+				// The measure's own barline closes the last of the measures
+				// a multi-measure rest is written out as, not each of them.
+				if (bars > 1) {
+					m_outdata.back()->setBarStyle(MeasureStyle::Plain);
+				}
 			} while (--bars > 0);
 		} else if (nodename == "app") {
 			starttime = parseApp(children[i], starttime);
@@ -102375,6 +102433,21 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 	GridMeasure* gm = m_outdata.addMeasureToBack();
 	gm->setTimestamp(starttime QUARTER_CONVERT);
 
+	// A change of key or of meter that this measure starts with: written
+	// in it, after the barline of the measure before.  (Written before
+	// that barline, a new meter is taken for the measure that has just
+	// ended, and a reader drops a whole-measure rest of the new one.)
+	for (int i=0; i<m_staffcount; i++) {
+		if (!m_pendingKeySig.empty()) {
+			gm->addKeySigToken(m_pendingKeySig, starttime QUARTER_CONVERT, i, 0, 0, m_staffcount);
+		}
+		if (!m_pendingTimeSig.empty()) {
+			gm->addTimeSigToken(m_pendingTimeSig, starttime QUARTER_CONVERT, i, 0, 0, m_staffcount);
+		}
+	}
+	m_pendingKeySig.clear();
+	m_pendingTimeSig.clear();
+
 	vector<HumNum> durations;
 
 	for (int i=0; i<(int)children.size(); i++) {
@@ -102513,6 +102586,10 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 		gm->setFinalBarlineStyle();
 	} else if (rightstyle == "rptend") {
 		gm->setRepeatBackwardStyle();
+	} else if (rightstyle == "rptstart") {
+		gm->setBarStyle(MeasureStyle::RepeatForward);
+	} else if (rightstyle == "rptboth") {
+		gm->setBarStyle(MeasureStyle::RepeatBoth);
 	} else if (rightstyle == "invis") {
 		gm->setInvisibleBarline();
 	}
@@ -103805,6 +103882,12 @@ string Tool_mei2hum::accidToKern(const string& accid) {
 HumNum Tool_mei2hum::parseMRest(xml_node mrest, HumNum starttime) {
 	HumNum duration = m_measureDuration.at(m_currentStaff-1);
 	duration /= 4;
+	if (duration == 0) {
+		// No meter is known (none given, or one this converter does not
+		// read): a whole note, as such a rest is written.  (A rest of no
+		// length came out as "1%0r", and the barline after it was lost.)
+		duration = 1;
+	}
 	int dotcount = 0;
 	string recip = getHumdrumRecip(duration, dotcount);
 	if (recip.find('%') != string::npos) {

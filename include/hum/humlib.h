@@ -9368,6 +9368,10 @@ class Tool_mei2hum : public HumTool {
 		int            m_maxStaffInFile = 0; // valid after parsing staves in first measure
 		int            m_currentMeasure = -1;
 		vector<int>    m_currentMeterUnit;
+		// A key and a meter for the whole score that the measure read next
+		// starts with (a change after the start of the score).
+		string         m_pendingKeySig;
+		string         m_pendingTimeSig;
 		string         m_beamPrefix;
 		string         m_beamPostfix;
 		bool           m_aboveQ = false;
