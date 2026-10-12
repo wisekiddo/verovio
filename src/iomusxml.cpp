@@ -3824,8 +3824,8 @@ void MusicXmlInput::ReadMusicXmlNote(
             const std::string stepStr = pitch.child("step").text().as_string();
             const int octaveNum = pitch.child("octave").text().as_int();
             if (!stepStr.empty()) note->SetPname(ConvertStepToPitchName(stepStr));
-            if (m_octDis[staff->GetN()] != 0) {
-                note->SetOct(octaveNum - m_octDis[staff->GetN()]);
+            if (m_octDis[notationStaffN] != 0) {
+                note->SetOct(octaveNum - m_octDis[notationStaffN]);
                 note->SetOctGes(octaveNum);
             }
             else {
