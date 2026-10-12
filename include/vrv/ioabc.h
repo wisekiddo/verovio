@@ -58,6 +58,7 @@ private:
 
     // parsing functions
     int SetBarLine(const std::string &musicCode, int index);
+    void ImplyRepeatStart(Measure *measure);
     void CalcUnitNoteLength();
     void AddAnnot(const std::string &remark);
     void AddLayerElement();
@@ -119,6 +120,13 @@ private:
     int m_unitDur;
     std::pair<data_BARRENDITION, data_BARRENDITION> m_barLines
         = std::make_pair(BARRENDITION_NONE, BARRENDITION_NONE); //
+    /*
+     * Where a repeat end with no start goes back to (ABC 2.1, 4.8): the first measure after the last repeat end
+     * or double bar, none while the tune has had neither; and whether a start has been written since
+     */
+    Measure *m_repeatsFrom = NULL;
+    bool m_repeatsFromNext = false;
+    bool m_hasRepeatStart = false;
     /*
      * ABC variables with default values
      */

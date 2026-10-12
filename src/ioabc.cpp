@@ -188,10 +188,42 @@ void ABCInput::ParseABC(std::istream &infile)
  BARRENDITION_dbl        ||
  */
 
+// "::" as a bar line: two colons with no "|" after them ("::|" is a ":|" with a colon more; the colons of "|::"
+// are read with their "|")
+static bool IsColonPair(const std::string &musicCode, int i)
+{
+    const int length = (int)musicCode.length();
+    if ((musicCode.at(i) != ':') || (i + 1 >= length) || (musicCode.at(i + 1) != ':')) return false;
+    return (i + 2 >= length) || (musicCode.at(i + 2) != '|');
+}
+
+// "A repeat end with no start goes back to the beginning of the tune, or to the latest double bar line or end of
+// repeated section" (ABC 2.1, 4.8, in other words): tunes are written "A :| B :|" and mean A A B B. The start
+// that is meant is written on the measure it stands before, so that the tune plays so whoever reads it next.
+// (Left unwritten, the second end went back to the beginning, the rule of the other formats: A A B A B)
+void ABCInput::ImplyRepeatStart(Measure *measure)
+{
+    const data_BARRENDITION left = measure->GetLeft();
+    const data_BARRENDITION right = measure->GetRight();
+    if (m_repeatsFromNext) {
+        m_repeatsFrom = measure;
+        m_repeatsFromNext = false;
+    }
+    if ((left == BARRENDITION_rptstart) || (left == BARRENDITION_rptboth)) m_hasRepeatStart = true;
+    const bool ends = (right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth);
+    if (ends && !m_hasRepeatStart && m_repeatsFrom && !m_repeatsFrom->HasLeft()) {
+        m_repeatsFrom->SetLeft(BARRENDITION_rptstart);
+    }
+    if (ends) m_hasRepeatStart = false;
+    if ((right == BARRENDITION_rptstart) || (right == BARRENDITION_rptboth)) m_hasRepeatStart = true;
+    if (ends || (right == BARRENDITION_dbl) || (right == BARRENDITION_end)) m_repeatsFromNext = true;
+}
+
 int ABCInput::SetBarLine(const std::string &musicCode, int i)
 {
     data_BARRENDITION barLine = BARRENDITION_NONE;
-    if (i >= 1 && musicCode.at(i - 1) == ':')
+    // "::", which has no "|" of its own, or a "|" with a ":" before it
+    if ((musicCode.at(i) == ':') || (i >= 1 && musicCode.at(i - 1) == ':'))
         barLine = BARRENDITION_rptend;
     else if (i + 1 < (int)musicCode.length()) {
         switch (musicCode.at(i + 1)) {
@@ -847,6 +879,11 @@ void ABCInput::ParseReferenceNumber(const std::string &referenceNumberString)
     // reset unit note length
     m_durDefault = DURATION_NONE;
 
+    // a tune's repeats are its own
+    m_repeatsFrom = NULL;
+    m_repeatsFromNext = false;
+    m_hasRepeatStart = false;
+
     // reset information fields
     m_composer.clear();
     m_history.clear();
@@ -1187,9 +1224,10 @@ void ABCInput::ReadInformationField(const char &dataKey, std::string value)
     if (comment != std::string::npos) {
         value.resize(comment);
     }
-    while (isspace(value[value.length() - 1])) value.pop_back();
+    // (a value of white space only was read one byte before its start)
+    while (!value.empty() && isspace((unsigned char)value.back())) value.pop_back();
     if (value.empty()) return;
-    while (isspace(value.front())) value.erase(0, 1);
+    while (isspace((unsigned char)value.front())) value.erase(0, 1);
 
     if (dataKey == '+') {
         LogWarning("ABC import: Field continuation (+) is not supported");
@@ -1753,16 +1791,22 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             sysBreak = false;
         }
 
-        // barLine
-        else if (musicCode.at(i) == '|') {
+        // barLine ("::" is one that has no "|" in it)
+        else if ((musicCode.at(i) == '|') || IsColonPair(musicCode, i)) {
             // add stacked elements to layer
             this->AddLayerElement();
+            // "::" and ":|:" end one repeat and start the next, as ":||:" does (ABC 2.1, 4.8). The start was dropped
+            // from ":|:", and "::" was no bar line at all: what stood on either side of it was one measure
+            const bool startsNext = (musicCode.at(i) == ':')
+                || ((i >= 1) && (musicCode.at(i - 1) == ':') && (i + 1 < (int)musicCode.length())
+                    && (musicCode.at(i + 1) == ':'));
             i = SetBarLine(musicCode, i);
 
             if (m_barLines.second != BARRENDITION_NONE) {
                 Measure *measure = new Measure();
                 measure->SetLeft(m_barLines.first);
                 measure->SetRight(m_barLines.second);
+                this->ImplyRepeatStart(measure);
                 m_barLines = std::make_pair(BARRENDITION_NONE, BARRENDITION_NONE);
                 Staff *staff = new Staff();
 
@@ -1775,6 +1819,12 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
                     measure->AddChild(tempo);
                 }
                 m_tempoStack.clear();
+            }
+            if (startsNext) {
+                // (an end that found its measure empty waits on the left as well)
+                m_barLines.first
+                    = (m_barLines.first == BARRENDITION_rptend) ? BARRENDITION_rptboth : BARRENDITION_rptstart;
+                ++i;
             }
         }
 
