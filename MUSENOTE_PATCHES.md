@@ -18,10 +18,10 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 8 | 2026-10-12 | Do not leave an empty group behind in the MusicXML importer, nor pop the root group (1ec3b2c5c) | `src/iomusxml.cpp`, +9 / -2 | A MusicXML score with a `<part-group>` that has no part in it no longer carries an empty `<staffGrp>`: its MEI export loads again, and its MIDI and timemap are written from the expanded document (repeats played out) where tb.5 played it as loaded. A score with the end of a part-group that was never started now loads (it ended the process). No other id changes: the group is built, then removed. None for a score with neither | Not offered upstream; `develop` of 2026-10-08 has both |
 | 9 | 2026-10-12 | Do not crash on a pedal without a start or an octave over a staff with no layer (db2307d47) | `src/midifunctor.cpp`, +5 / -1 | Scores that ended the process while their MIDI or timemap was written now play: a `<pedal>` whose `@startid` names nothing, and an `<octave>` over a staff with no layer in its measure, are left out of the MIDI. None for a score with neither | Not offered upstream; `develop` of 2026-10-08 has both |
 | 10 | 2026-10-12 | Repair the MEI to Humdrum converter (Tool_mei2hum) (5e2fb6bb9) | `src/hum/humlib.cpp`, +88 / -15 | `Toolkit::ConvertMEIToHumdrum` only: the Humdrum it writes now holds the score (it was damaged for every score tried, and a chord ended the process). No SVG, timemap, MIDI, MEI or id changes: nothing else reaches the converter | Not offered upstream; `develop` of 2026-10-08 has all eleven faults |
-| 11 | 2026-10-12 | Read a MusicXML octave line on its own part, and do not leave one waiting or open (1f1c88522); amended the same day by: Keep a MusicXML octave line on the staff it is written for, and end one that is never stopped on a note (1357f44c5) | `src/iomusxml.cpp`, +40 / -15, then +32 / -10 | A MusicXML `octave-shift` with no `<staff>` in a part that is not the first is on its own part (it was drawn over the first part, and its notes sounded an octave off); one with no note under it is not built (it took the next part's first note); one never stopped runs to the last note of its staff (it was not drawn, and its notes sounded an octave off). With the amendment: on a part of several staves a line starts on the first note of the staff its direction names (it took the next note read), and a line that waits for its first note is not taken away by another staff's stop. None for a score with none of these | Not offered upstream; `develop` of 2026-10-08 has all three |
-| 12 | 2026-10-12 | Do not end the process on what the Humdrum reader or the MEI to Humdrum converter throws (15cd1c51a) | `src/iohumdrum.cpp`, `src/toolkit.cpp`, +19 / -1 | A Humdrum file the reader cannot parse is refused, and an MEI document the converter cannot read a number from gives no Humdrum, where either ended the process. None for a file that did not throw | Not offered upstream; `develop` of 2026-10-08 has both |
-| 13 | 2026-10-12 | Humdrum export: a repeat's signs, the score's key and its changes, and five ways a conversion was lost (f762a7300) | `src/hum/humlib.cpp`, `include/hum/humlib.h`, +91 / -4 | `Toolkit::ConvertMEIToHumdrum` only: the Humdrum it writes has a repeat's start, one barline for a multi-measure rest, the key of a score that says it on its `<scoreDef>` or as `@keysig`, and a change of key or of meter after the start; a hairpin it cannot place, an octave out of all range and a rest with no meter no longer lose the conversion, read out of bounds or end the process. No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 has every one |
-| 14 | 2026-10-12 | Do not put a section at index -1 when a repeat end follows a repeat end (d952f330d) | `src/expansionmap.cpp`, +19 / -6 | A score with no `<expansion>` of its own (ABC, Humdrum, MEI without one) in which a repeat end follows a repeat end with no repeat start between: it ended the process or lost a measure; every measure is now played, the second repeat from where the first ended. None for a score whose repeats have their starts, nor for MusicXML, whose importer writes the expansion itself | Not offered upstream; `develop` of 2026-10-08 has it |
+| 11 | 2026-10-12 | Read a MusicXML octave line on its own part, and do not leave one waiting or open (1f1c88522); amended the same day by: Keep a MusicXML octave line on the staff it is written for, and end one that is never stopped on a note (1357f44c5), and by: Octave lines: no write past m_octDis for a staff the score does not have, and a stop is for its own staff's line first (8ed4a67e1) | `src/iomusxml.cpp`, +40 / -15, then +32 / -10, then +21 / -1 | A MusicXML `octave-shift` with no `<staff>` in a part that is not the first is on its own part (it was drawn over the first part, and its notes sounded an octave off); one with no note under it is not built (it took the next part's first note); one never stopped runs to the last note of its staff (it was not drawn, and its notes sounded an octave off). With the amendment: on a part of several staves a line starts on the first note of the staff its direction names (it took the next note read), and a line that waits for its first note is not taken away by another staff's stop. None for a score with none of these | Not offered upstream; `develop` of 2026-10-08 has all three |
+| 12 | 2026-10-12 | Do not end the process on what the Humdrum reader or the MEI to Humdrum converter throws (15cd1c51a); amended the same day by: Do not read before the start of an empty syllable in the Humdrum reader (6d6edcbe5) | `src/iohumdrum.cpp`, `src/toolkit.cpp`, +19 / -1, then +7 / -5 | A Humdrum file the reader cannot parse is refused, and an MEI document the converter cannot read a number from gives no Humdrum, where either ended the process. None for a file that did not throw | Not offered upstream; `develop` of 2026-10-08 has both |
+| 13 | 2026-10-12 | Humdrum export: a repeat's signs, the score's key and its changes, and five ways a conversion was lost (f762a7300); amended the same day by: Humdrum export: say a key of no sharps or flats, leave out a key that is no number, and two reads out of bounds (ba546c924) | `src/hum/humlib.cpp`, `include/hum/humlib.h`, +91 / -4, then +22 / -5 | `Toolkit::ConvertMEIToHumdrum` only: the Humdrum it writes has a repeat's start, one barline for a multi-measure rest, the key of a score that says it on its `<scoreDef>` or as `@keysig`, and a change of key or of meter after the start; a hairpin it cannot place, an octave out of all range and a rest with no meter no longer lose the conversion, read out of bounds or end the process. No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 has every one |
+| 14 | 2026-10-12 | Do not put a section at index -1 when a repeat end follows a repeat end (d952f330d); amended the same day by: Read a repeat end with no repeat start as MusicXmlInput does: back to the last repeat start, or the beginning (31bb70748) | `src/expansionmap.cpp`, +19 / -6, then +24 / -15 | A score with no `<expansion>` of its own (ABC, Humdrum, MEI without one) in which a repeat end follows a repeat end with no repeat start between: it ended the process or lost a measure; every measure is now played, the second repeat from the last repeat start or the beginning, as `MusicXmlInput` has it (tb.8 alone: from where the first ended). None for a score whose repeats have their starts, nor for MusicXML, whose importer writes the expansion itself | Not offered upstream; `develop` of 2026-10-08 has it |
 
 ### 1. PAE importer crashes
 
@@ -389,13 +389,21 @@ not affected: its importer writes the expansion itself. ABC tunes often
 leave a repeat's start out; MuseNote's composer can write the pattern;
 and tb.7's Humdrum export wrote it for one song in nine.
 
-After a repeat end the next range starts with the next measure, so a
-repeat end with no repeat start since the last one repeats from there
-(one of the two readings the ABC standard allows a player: from the
-start of the tune, or from the latest double bar or end of a repeated
-section). And `CreateSection` makes no section of measures that are
-in one already (one repeat end written on both of the measures it
-stands between).
+After a repeat end the next range starts with the next measure, and
+`CreateSection` makes no section of measures that are in one already
+(one repeat end written on both of the measures it stands between).
+
+Where such a repeat goes back to: tb.8 had it repeat from where the
+last repeat ended (`C :| E :| G` as C C E E G; one of the two readings
+the ABC standard allows a player). `MusicXmlInput::CreateExpansion`
+reads the same signs as back to the last repeat start, or the
+beginning, with what was repeated on the way played once more
+(C C E C E G), so a score played one way from MusicXML and another from
+its own Humdrum or ABC: 12 of 145 scores of the corpus with plain
+repeats differed after a round trip. Since tb.9 the generated expansion
+follows the importer's rule: the sections made since the last repeat
+start are kept, a repeat end plays its own section, those again, and
+its own once more, and a repeat start puts them aside.
 
 Carried because the expansion is made inside the engine as a score is
 loaded: outside it, the pattern could only be found by parsing every
@@ -424,6 +432,65 @@ converted:
   number of notes (endings and jumps are not carried), 156 differ
   otherwise, 1 is refused. 1029 exports hold a repeat's start (none on
   tb.7).
+
+### tb.9: the amendments of patches 11 to 14
+
+From the review of tb.8, which found nothing wrong in what tb.8 changed
+and seven things around it.
+
+- **Patch 14**: the rule for a repeat end with no repeat start (above).
+- **Patch 11**: `m_octDis` holds, for each staff of the score, the
+  octave its notes are moved by; an octave-shift that names a staff the
+  score does not have (staff 2 in a part of one staff) wrote past its
+  end, a heap overflow older than these patches. Such a direction is
+  passed over. And a stop with no number matched every open line of the
+  part with no number, so that on a piano part it ended the other
+  hand's line too, on a note of the wrong staff. A stop is first of all
+  for its own staff's lines; only when that staff has none open is it
+  taken for another staff's line with the same number, as before.
+- **Patch 13**: a key of no sharps and no flats is written (`*k[]`):
+  left unsaid after another key, that key stayed in force for a reader.
+  A key that is no number (`@key.sig="mixed"`, and since patch 13
+  `@keysig` too) threw from `stoi()` and lost the conversion; it is left
+  out. A second `<scoreDef>` at the same time as the first (Verovio
+  writes one in the section, before the first measure) cleared what was
+  known of every staff, and each note after it looked its staff's
+  transposition up in an empty vector: the answer was right only while
+  the memory was still there. What is said for the whole score is
+  cleared; the staves stay. A hairpin's count of measures is checked
+  before it is cast to `int`.
+- **Patch 12**: `HumdrumInput` takes a syllable's connectors off its
+  ends and then read and popped the last character of what was left;
+  for a syllable that is a hyphen and nothing else that is an empty
+  string.
+
+Known, not changed: a never-stopped octave line that starts on a rest
+with no note after it on its staff gets an end before its start, and
+with two voices it ends on the last voice's note; a repeat sign at the
+left of a measure replaces a final barline on the measure before; in a
+generated expansion the measures under `<ending>` elements outside a
+repeated range are not played (upstream); `MusicXmlInput` gives the
+parts after the first no change of key after the start (upstream).
+
+tb.9 against tb.6 (same toolchain, MuseNote's `tool/parity`, 2785
+scores): 19930 outputs compared, 0 differ; seeded ids deterministic on a
+fresh thread for 2785 of 2785.
+
+Measured apart as for tb.8, over the same 2785 scores. The text as it
+is written: as tb.8, score for score (2716 exact). Read back the way an
+application opens a file: none ends the process; 1700 play exactly what
+the original plays (1677 on tb.8): 24 more, and one fewer, a score with
+first and second endings, which the export does not carry, that had
+matched under tb.8's rule by chance; 922 play another number of notes,
+157 differ otherwise, 1 is refused.
+
+Native tests (`verovio_engine_tests`, 52 cases): on tb.8 47 pass, 4
+fail and 1 ends the process (the octave line on a staff the score does
+not have); all 52 pass on tb.9. 7 deliberate breaks of the amendments'
+lines, each caught by a case. Not tried, because what they bring back is
+undefined behaviour that a case cannot hold without a memory checker
+(the review saw each with AddressSanitizer): the staff out of range,
+the empty syllable, the hairpin's count.
 
 Native tests (`verovio_engine_tests`, 46 cases): on tb.7 36 pass, 6
 fail and 4 end the process; all 46 pass on tb.8. 25 deliberate breaks
@@ -500,7 +567,9 @@ tb.1 against `version-6.2.0`:
   of the engine), and patch 14 mends the engine's own expansion of
   repeats, which that export's files ran into and which any ABC, MEI or
   Humdrum file can. Patch 11 was amended after its review; an amendment
-  is not counted as a patch.
+  is not counted as a patch. tb.9 (the same day, by the owner's
+  decision) amends patches 11 to 14 after the review of tb.8 and adds
+  none.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
