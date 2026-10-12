@@ -390,35 +390,44 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
     ListOfObjects::iterator last = children.begin();
 
     bool isStartFromPrevious = false;
+    // A section has just been closed: the measure that follows starts the next one. (The start of the last
+    // section was kept, a measure that had been moved into that section already.)
+    bool isAfterSection = false;
+    // The sections made since the last repeat start, or since the beginning: a repeat end goes back to there, as
+    // it does in MusicXmlInput::CreateExpansion, so what was repeated on the way is played once more.
+    // `C :| E :| G` is C C E C E G from every format.
+    std::vector<std::string> sinceStart;
+    const auto repeat = [&](const std::string &id) {
+        if (id.empty()) return;
+        PlistInterface *plist = expansion->GetPlistInterface();
+        plist->AddRefAllowDuplicate("#" + id);
+        for (const std::string &before : sinceStart) plist->AddRefAllowDuplicate("#" + before);
+        plist->AddRefAllowDuplicate("#" + id);
+        sinceStart.push_back(id);
+    };
 
     for (auto current = children.begin(); current != children.end(); current++) {
         if ((*current)->Is(MEASURE)) {
             Measure *measure = vrv_cast<Measure *>(*current);
             // The current measure has a repeat end on its left
             if (ExpansionMap::IsPreviousRepeatEnd(measure)) {
-                const std::string id = this->CreateSection(section, first, last);
-                if (!id.empty()) {
-                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
-                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
-                }
-                // What follows a repeat end is not part of what was repeated: a repeat end with no repeat start
-                // since the last one repeats from here. (The start of the last section was kept, a measure that
-                // had been moved into that section already.)
-                isStartFromPrevious = true;
+                repeat(this->CreateSection(section, first, last));
+                isAfterSection = true;
             }
             if (isStartFromPrevious || ExpansionMap::IsRepeatStart(measure)) {
+                sinceStart.clear();
                 first = current;
             }
+            else if (isAfterSection) {
+                first = current;
+            }
+            isAfterSection = false;
             // The current measure has a repeat start on its right
             isStartFromPrevious = ExpansionMap::IsNextRepeatStart(measure);
             last = current;
             if (ExpansionMap::IsRepeatEnd(measure)) {
-                const std::string id = this->CreateSection(section, first, last);
-                if (!id.empty()) {
-                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
-                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
-                }
-                isStartFromPrevious = true;
+                repeat(this->CreateSection(section, first, last));
+                isAfterSection = true;
             }
         }
     }
