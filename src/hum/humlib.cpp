@@ -15380,6 +15380,12 @@ void HumGrid::cleanTempos(GridSlice* slice) {
 			GridStaff* gs = gp->at(staff);
 			for (int voice=0; voice<(int)gs->size(); voice++) {
 				GridVoice* gv = gs->at(voice);
+				// A voice the measure before had and this slice has
+				// none for (a layer with nothing in it): no pointer,
+				// and it was read.
+				if (gv == NULL) {
+					continue;
+				}
 				token = gv->getToken();
 				if (token) {
 					break;
@@ -15404,6 +15410,9 @@ void HumGrid::cleanTempos(GridSlice* slice) {
 			GridStaff* gs = gp->at(staff);
 			for (int voice=0; voice<(int)gs->size(); voice++) {
 				GridVoice* gv = gs->at(voice);
+				if (gv == NULL) {
+					continue;
+				}
 				if (gv->getToken()) {
 					continue;
 				}
@@ -102124,16 +102133,19 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 		if (staffinfo.base40 != 0) {
 			adjust = Convert::base40IntervalToLineOfFifths(staffinfo.base40);
 		}
-		count += adjust;
+		// Adjust for transposition to C score here.  The sum is of
+		// numbers with a sign, sharps above zero and flats below:
+		// the count alone has none, and a B-flat staff written in two
+		// flats (four at concert pitch) came out as no flats at all.
+		const int fifths = accid * count + adjust;
+		count = abs(fifths);
 
-		// Adjust for transposition to C score here.
-
-		if (count == 0) {
+		if (fifths == 0) {
 			// No sharps and no flats is a key too, and has to be said
 			// when it follows another: left unsaid, the key before it
 			// stayed in force for whoever reads the file.
 			staffinfo.keysig = "*k[]";
-		} else if (accid > 0) {
+		} else if (fifths > 0) {
 			switch (count) {
 				case 1: staffinfo.keysig = "*k[f#]";             break;
 				case 2: staffinfo.keysig = "*k[f#c#]";           break;
@@ -102143,7 +102155,7 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 				case 6: staffinfo.keysig = "*k[f#c#g#d#a#e#]";   break;
 				case 7: staffinfo.keysig = "*k[f#c#g#d#a#e#b#]"; break;
 			}
-		} else if (accid < 0) {
+		} else {
 			switch (count) {
 				case 1: staffinfo.keysig = "*k[b-]";             break;
 				case 2: staffinfo.keysig = "*k[b-e-]";           break;
