@@ -396,9 +396,15 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
             Measure *measure = vrv_cast<Measure *>(*current);
             // The current measure has a repeat end on its left
             if (ExpansionMap::IsPreviousRepeatEnd(measure)) {
-                std::string ref = "#" + this->CreateSection(section, first, last);
-                expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
-                expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+                const std::string id = this->CreateSection(section, first, last);
+                if (!id.empty()) {
+                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
+                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
+                }
+                // What follows a repeat end is not part of what was repeated: a repeat end with no repeat start
+                // since the last one repeats from here. (The start of the last section was kept, a measure that
+                // had been moved into that section already.)
+                isStartFromPrevious = true;
             }
             if (isStartFromPrevious || ExpansionMap::IsRepeatStart(measure)) {
                 first = current;
@@ -407,9 +413,12 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
             isStartFromPrevious = ExpansionMap::IsNextRepeatStart(measure);
             last = current;
             if (ExpansionMap::IsRepeatEnd(measure)) {
-                std::string ref = "#" + this->CreateSection(section, first, last);
-                expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
-                expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+                const std::string id = this->CreateSection(section, first, last);
+                if (!id.empty()) {
+                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
+                    expansion->GetPlistInterface()->AddRefAllowDuplicate("#" + id);
+                }
+                isStartFromPrevious = true;
             }
         }
     }
@@ -425,6 +434,10 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
 std::string ExpansionMap::CreateSection(
     Section *section, const ListOfObjects::iterator &first, const ListOfObjects::iterator &last)
 {
+    // Nothing to make a section of: its measures are in one already (the same repeat end written on both of the
+    // measures it stands between)
+    if (section->GetChildIndex(*first) == -1) return "";
+
     Section *subSection = new Section();
     section->InsertBefore(*first, subSection);
     for (auto sectionCurrent = first; sectionCurrent != std::next(last); sectionCurrent++) {
