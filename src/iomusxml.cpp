@@ -1877,12 +1877,24 @@ bool MusicXmlInput::ReadMusicXmlPart(pugi::xml_node node, Section *section, shor
         delete octave;
     }
     m_octaveStack.clear();
-    // One that was started and never stopped runs to the last note of the part. Without an end it is not drawn,
-    // while its notes are written an octave from where they sound
+    // One that was started and never stopped runs to the last note of its staff. Without an end it is not drawn,
+    // while its notes are written an octave from where they sound. (Not to m_ID: what was read last need not be
+    // a note, nor be in the score at all)
     for (const auto &element : m_controlElements) {
         if (!element.second->Is(OCTAVE)) continue;
         Octave *octave = vrv_cast<Octave *>(element.second);
-        if (octave->HasStartid() && !octave->HasEndid()) octave->SetEndid(m_ID);
+        if (!octave->HasStartid() || octave->HasEndid()) continue;
+        const std::vector<int> own = octave->GetStaff();
+        if (own.empty()) continue;
+        AttNIntegerComparison isOwnStaff(STAFF, own.front());
+        const ArrayOfObjects &measures = section->GetChildren();
+        for (auto measure = measures.rbegin(); measure != measures.rend(); ++measure) {
+            Object *ownStaff = (*measure)->FindDescendantByComparison(&isOwnStaff, 1);
+            Object *last = ownStaff ? ownStaff->FindDescendantByType(NOTE, UNLIMITED_DEPTH, BACKWARD) : NULL;
+            if (!last) continue;
+            octave->SetEndid("#" + last->GetID());
+            break;
+        }
     }
 
     return false;
@@ -2652,6 +2664,12 @@ void MusicXmlInput::ReadMusicXmlDirection(
                     ++iter;
                     continue;
                 }
+                // A line that waits for its first note on another staff is not this stop's (a piano part: the left
+                // hand's line is written before the right hand's is stopped)
+                if (!sameStaff) {
+                    ++iter;
+                    continue;
+                }
                 // Stopped before a note came: there is no note for it to stand over. Left waiting, it was given the
                 // next note for its start and the note before for its end
                 m_octaveStack.erase(waiting);
@@ -2674,6 +2692,8 @@ void MusicXmlInput::ReadMusicXmlDirection(
             else {
                 octave->SetDisPlace(STAFFREL_basic_above);
             }
+            // The staff it is written for, while it waits for its first note
+            octave->SetStaff(octave->AttStaffIdent::StrToXsdPositiveIntegerList(std::to_string(staffNum)));
             m_controlElements.push_back({ measureNum, octave });
             m_octaveStack.push_back(octave);
         }
@@ -4014,13 +4034,15 @@ void MusicXmlInput::ReadMusicXmlNote(
         }
         m_harmStack.clear();
     }
-    if (!m_octaveStack.empty()) {
-        for (Octave *oct : m_octaveStack) {
-            oct->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
-            oct->SetStartid(m_ID);
-        }
-        m_octaveStack.clear();
-    }
+    // A waiting octave line starts on the first note of the staff it is written for: that staff's notes are the
+    // ones moved an octave (m_octDis). It took the next note read, whatever its staff
+    std::erase_if(m_octaveStack, [&](Octave *oct) {
+        const std::vector<int> own = oct->GetStaff();
+        if (!own.empty() && (own.front() != staff->GetN())) return false;
+        oct->SetStaff(staff->AttNInteger::StrToXsdPositiveIntegerList(std::to_string(staff->GetN())));
+        oct->SetStartid(m_ID);
+        return true;
+    });
     if (!m_pedalStack.empty()) {
         for (Pedal *ped : m_pedalStack) {
             if (!ped->HasStaff()) {
