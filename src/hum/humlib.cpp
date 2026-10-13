@@ -13843,6 +13843,17 @@ void HumGrid::addNullTokensForLayoutComments(void) {
 		nextnote = NULL;
 
 		for (int j=i+1; j<(int)m_allslices.size(); j++) {
+			if (m_allslices[j]->isTempoSlice()) {
+				// A tempo or a section label before the next notes.  Such
+				// a line is written in one voice for each staff, whatever
+				// the notes around it are in: the voices are joined before
+				// it and parted again after it.  A layout line before it
+				// stays in one voice with it.  (Made as wide as the notes
+				// around, it was left before the join, and what it said
+				// went to the join: the text of an ending's bracket was
+				// lost where its staff is in two voices before and after.)
+				break;
+			}
 			if (m_allslices[j]->isNoteSlice()) {
 				nextnote = m_allslices[j];
 				break;
@@ -101061,6 +101072,18 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 
 	processHairpins();
 
+	// A measure that nothing was found in (no staff, or none that the
+	// score has) holds no line, and the grid cannot write such a measure:
+	// it left out the barline of the measure before it, so that the two
+	// measures around it were one, and it looked for the last line of a
+	// score that ends with one in a list with nothing in it (where the
+	// standard library's own checks end the process).  It is taken out.
+	for (int i=(int)m_outdata.size()-1; i>=0; i--) {
+		if (m_outdata[i]->empty()) {
+			m_outdata.deleteMeasure(i);
+		}
+	}
+
 	// set the duration of the last slice
 
 	HumdrumFile outfile;
@@ -102208,6 +102231,57 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 // Tool_mei2hum::parseSection -- Process a <section> element in an MEI file.
 //
 
+// The order a score is played in.  Verovio's MusicXML importer keeps the
+// measures in <section> and <ending> children of the score's one
+// <section>, and says the order they are played in (repeats, first and
+// second endings, D.C., D.S., coda, fine) with an <expansion plist> of
+// their ids.  In Humdrum that is a label where each starts (*>A) and one
+// expansion list (*>[A,A1,A,A2,B]).  Neither was written: read back, a
+// score with endings or a jump was played once through, or with its
+// repeat signs alone.
+//
+// Returns the ids that <expansion> names, in its order, or none when
+// labels cannot say the order: for any section but the score's one, for
+// two lists, for music that is in no child a list can name, and for a
+// list that names what is no child.
+static vector<string> orderOfPlay(xml_node section, const vector<xml_node>& children) {
+	vector<string> order;
+	if (strcmp(section.parent().name(), "score") != 0) {
+		return order;
+	}
+	if (section.previous_sibling("section") || section.next_sibling("section")) {
+		return order;
+	}
+	xml_node list;
+	set<string> ids;
+	for (xml_node child : children) {
+		string name = child.name();
+		if (name == "expansion") {
+			if (list) {
+				// two lists: which of them is played is a reader's choice
+				return order;
+			}
+			list = child;
+		} else if ((name == "measure") || (name == "app") || (name == "staff")) {
+			// music that is in nothing a list can name
+			return order;
+		} else if ((name == "section") || (name == "ending")) {
+			ids.insert(child.attribute("xml:id").value());
+		}
+	}
+	ids.erase("");
+	std::istringstream refs(list.attribute("plist").value());
+	string ref;
+	while (refs >> ref) {
+		order.push_back(ref.substr(ref[0] == '#' ? 1 : 0));
+		if (ids.count(order.back()) == 0) {
+			return vector<string>();
+		}
+	}
+	return order;
+}
+
+
 HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 	// A <section>, or an <ending>: a first or second ending holds its
 	// measures as a section does, and they are written out in the order
@@ -102221,10 +102295,26 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 	}
 	MAKE_CHILD_LIST(children, section);
 
+	// The children that are written, each with the first measure made of
+	// it, where its label goes.  A child with no measure gets no label,
+	// nor does one whose measures hold no note and no rest.  (That one
+	// got a label: a reader drops a section with nothing in it, and what
+	// it had read was then written with no label at all, because the
+	// list named one that was not there.)
+	vector<pair<xml_node, GridMeasure*>> written;
+
 	for (int i=0; i<(int)children.size(); i++) {
 		string nodename = children[i].name();
 		if ((nodename == "section") || (nodename == "ending")) {
+			int first = (int)m_outdata.size();
 			starttime = parseSection(children[i], starttime);
+			if (any_of(m_outdata.begin() + first, m_outdata.end(), [](GridMeasure* gm) {
+						return any_of(gm->begin(), gm->end(), [](GridSlice* slice) { return slice->isDataSlice(); });
+					})) {
+				written.push_back(make_pair(children[i], m_outdata[first]));
+			}
+		} else if (nodename == "expansion") {
+			// read by orderOfPlay()
 		} else if (nodename == "measure") {
 			// A multi-measure rest is one <measure> that stands for several:
 			// written out as that many measures of rest.  (It was left
@@ -102271,6 +102361,84 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 			parseStaff_mensural(children[i], starttime);
 		} else {
 			cerr << DKHTP << section.name() << "/" << nodename << CURRLOC << endl;
+		}
+	}
+
+	if (m_staffcount < 1) {
+		return starttime;
+	}
+
+	// Verovio's Humdrum reader takes a label that ends in a number for an
+	// ending when the label with no number before it is its start ("A1"
+	// after "A"), and passes over any other such label.  So a section is
+	// named with letters (A to Z, then AA), and an ending with the
+	// letters of the section before it and its place among that section's
+	// endings.  What its bracket says is written apart when it is not
+	// that number, as the text of the label.  An ending with no section
+	// before it is named as a section: played in its turn, with no
+	// bracket.
+	map<string, string> labels;
+	vector<string> names;
+	vector<string> brackets;
+	string letters;
+	int sections = 0;
+	int endings = 0;
+	for (auto& part : written) {
+		string bracket;
+		if ((strcmp(part.first.name(), "ending") == 0) && !letters.empty()) {
+			names.push_back(letters + to_string(++endings));
+			bracket = cleanDirText(part.first.attribute("n").value());
+			if (bracket == to_string(endings)) {
+				bracket.clear();
+			}
+		} else {
+			letters.clear();
+			for (int k = ++sections; k > 0; k = (k - 1) / 26) {
+				letters.insert(letters.begin(), (char)('A' + (k - 1) % 26));
+			}
+			names.push_back(letters);
+			endings = 0;
+		}
+		brackets.push_back(bracket);
+		labels[part.first.attribute("xml:id").value()] = names.back();
+	}
+
+	// The list: the labels in the order the score names them.  What has
+	// no label is left out of it (a list that names a label that is not
+	// there is not followed), and with no list no label is written: a
+	// reader then plays every measure once, and makes no order of its own
+	// from the repeat signs of a score in several sections.
+	string expansion;
+	for (const string& id : orderOfPlay(section, children)) {
+		auto label = labels.find(id);
+		if (label != labels.end()) {
+			expansion += (expansion.empty() ? "*>[" : ",") + label->second;
+		}
+	}
+	if (expansion.empty()) {
+		return starttime;
+	}
+
+	// At the start of its first measure: the label, and above it the
+	// bracket's text, a layout parameter of the label.  The list once,
+	// above the first label: before any note.  Each in the first spine
+	// (the last staff's), where a reader looks for them; a label and the
+	// list are written as a tempo is, which the grid copies into every
+	// other spine.
+	for (int i=(int)written.size()-1; i>=0; i--) {
+		GridMeasure* gm = written[i].second;
+		vector<string> lines(1, "*>" + names[i]);
+		if (!brackets[i].empty()) {
+			lines.push_back("!LO:TX:t=" + brackets[i]);
+		}
+		if (i == 0) {
+			lines.push_back(expansion + "]");
+		}
+		for (const string& line : lines) {
+			GridSlice* gs = new GridSlice(gm, gm->getTimestamp(),
+					(line[0] == '!') ? SliceType::Layouts : SliceType::Tempos, m_staffcount);
+			gs->at(m_staffcount - 1)->at(0)->at(0)->setToken(line);
+			gm->push_front(gs);
 		}
 	}
 
@@ -105548,7 +105716,9 @@ string Tool_mei2hum::cleanDirText(const string& input) {
 			if ((!output.empty()) && (output.back() != ' ')) {
 				output += ' ';
 			}
-		} else if (input[i] == '\n') {
+		} else if ((input[i] == '\n') || (input[i] == '\r')) {
+			// (A carriage return gets past the XML reader as a reference,
+			// and ends the line for whoever reads the file.)
 			if ((!output.empty()) && (output.back() != ' ')) {
 				output += ' ';
 			}
