@@ -32069,6 +32069,34 @@ std::vector<int> HumdrumInput::analyzeMultiRest(hum::HumdrumFile &infile)
         }
     }
 
+    // A whole-measure rest that keeps its measure: the rest of measure i
+    // is not folded into the rest of the measure before it.
+    // One that starts a section or an ending: a label (*>A, not an
+    // expansion list) stands between the two rests.  (It was folded: the
+    // section went with its first measure, and a list that names it was
+    // not followed.)
+    // And one under a chord symbol in a spine of free text (**cdata),
+    // which is not looked for above.  (Of several measures of rest with
+    // a chord symbol each, all but the first were folded away, and their
+    // chord symbols were lost.)  Such a rest still takes the plain rests
+    // after it into a rest of its own, as the first loop below always
+    // made one of them: not across a repeat sign or a double barline.
+    const auto keepsItsMeasure = [&](int i) {
+        for (int j = dataline[i - 1] + 1; j < dataline[i]; ++j) {
+            if ((infile.token(j, 0)->compare(0, 2, "*>") == 0)
+                && (infile.token(j, 0)->find("[") == std::string::npos)) {
+                return true;
+            }
+        }
+        for (int j = 0; j < infile[dataline[i]].getFieldCount(); ++j) {
+            hum::HTp tok = infile.token(dataline[i], j);
+            if (!tok->isNull() && (tok->getDataType().compare(0, 7, "**cdata") == 0)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     // group sequences of whole-meaure rests
     for (int i = (int)wholerest.size() - 2; i >= 0; i--) {
         if (bardur[i] != bardur[i + 1]) {
@@ -32077,7 +32105,7 @@ std::vector<int> HumdrumInput::analyzeMultiRest(hum::HumdrumFile &infile)
         if (regex_search(*infile.token(barindex[i + 1], 0), regex("[^=0-9]"))) {
             continue;
         }
-        if (wholerest[i] && wholerest[i + 1]) {
+        if (wholerest[i] && wholerest[i + 1] && !keepsItsMeasure(i + 1)) {
             wholerest[i] += wholerest[i + 1];
             wholerest[i + 1] = -1;
         }
@@ -32089,7 +32117,7 @@ std::vector<int> HumdrumInput::analyzeMultiRest(hum::HumdrumFile &infile)
         if (bardur[i] != bardur[i + 1]) {
             continue;
         }
-        if ((textrest[i] == 1) && (wholerest[i + 1] >= 1)) {
+        if ((textrest[i] == 1) && (wholerest[i + 1] >= 1) && !keepsItsMeasure(i + 1)) {
             wholerest[i] = wholerest[i + 1] + 1;
             wholerest[i + 1] = -1;
         }
