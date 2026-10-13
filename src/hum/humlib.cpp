@@ -12525,7 +12525,8 @@ void HumGrid::setHarmonyPresent(int partindex) {
 //
 
 void HumGrid::setHarmonyCount(int partindex, int count) {
-	if ((partindex < 0) || (partindex > (int)m_harmonyCount.size())) {
+	// (">" let the index that is one past the end through.)
+	if ((partindex < 0) || (partindex >= (int)m_harmonyCount.size())) {
 		return;
 	}
 	m_harmonyCount[partindex] = count;
@@ -101140,6 +101141,29 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 		m_outdata.transferTokens(outfile, 0, interp);
 	}
 
+	// A chord symbol is the text that is written ("B-flat 7", "G-",
+	// "C/E"): **cdata to a reader.  HumGrid names the spine **mxhm, which
+	// is MusicXML's root and kind, and a reader of that takes "-" for a
+	// flat and drops the "/".  And it stands above the staff, which a
+	// reader of **cdata has to be told.  The exclusive interpretations are
+	// the first line until the header records are put before them.
+	if (outfile.getLineCount() > 0) {
+		string above;
+		bool found = false;
+		for (int j=0; j<outfile[0].getFieldCount(); j++) {
+			HTp token = outfile.token(0, j);
+			if (*token == "**mxhm") {
+				token->setText("**cdata");
+				found = true;
+			}
+			above += (j ? "\t" : "");
+			above += (*token == "**cdata") ? "*above" : "*";
+		}
+		if (found) {
+			outfile.insertLine(1, above);
+		}
+	}
+
 	addHeaderRecords(outfile, doc);
 	addExtMetaRecords(outfile, doc);
 	addFooterRecords(outfile, doc);
@@ -102338,8 +102362,19 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 				before->setBarStyle(starts && ends ? MeasureStyle::RepeatBoth
 						: (starts ? MeasureStyle::RepeatForward : MeasureStyle::RepeatBackward));
 			}
+			bool first = true;
 			do {
 				starttime = parseMeasure(children[i], starttime);
+				// Its chord symbols, now that its notes and its length are
+				// known (parseMeasure() has just made the measure they are
+				// written into, the last of m_outdata).  Those of a
+				// multi-measure rest go with the first of the measures it
+				// is written out as: under every one of them, a reader
+				// could not fold the rests into one again.
+				for (xml_node harm = first ? children[i].child("harm") : xml_node(); harm; harm = harm.next_sibling("harm")) {
+					parseHarm(harm, starttime);
+				}
+				first = false;
 				// The measure's own barline closes the last of the measures
 				// a multi-measure rest is written out as, not each of them.
 				if (bars > 1) {
@@ -102565,6 +102600,10 @@ HumNum Tool_mei2hum::parseLem(xml_node lem, HumNum starttime) {
 			starttime = parseSection(children[i], starttime);
 		} else if (nodename == "measure") {
 			starttime = parseMeasure(children[i], starttime);
+			// its chord symbols, as in parseSection()
+			for (xml_node harm = children[i].child("harm"); harm; harm = harm.next_sibling("harm")) {
+				parseHarm(harm, starttime);
+			}
 		} else {
 			cerr << DKHTP << lem.name() << "/" << nodename << CURRLOC << endl;
 		}
@@ -102590,6 +102629,10 @@ HumNum Tool_mei2hum::parseRdg(xml_node rdg, HumNum starttime) {
 			starttime = parseSection(children[i], starttime);
 		} else if (nodename == "measure") {
 			starttime = parseMeasure(children[i], starttime);
+			// its chord symbols, as in parseSection()
+			for (xml_node harm = children[i].child("harm"); harm; harm = harm.next_sibling("harm")) {
+				parseHarm(harm, starttime);
+			}
 		} else {
 			cerr << DKHTP << rdg.name() << "/" << nodename << CURRLOC << endl;
 		}
@@ -102665,7 +102708,8 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 		} else if (nodename == "hairpin") {
 			parseHairpin(children[i], starttime);
 		} else if (nodename == "harm") {
-			parseHarm(children[i], starttime);
+			// A chord symbol is written when the notes of its measure are
+			// known, wherever it stands in it: by who called.
 		} else if (nodename == "tempo") {
 			parseTempo(children[i], starttime);
 		} else if (nodename == "dir") {
@@ -105671,7 +105715,9 @@ string Tool_mei2hum::cleanWhiteSpace(const string& input) {
 			if ((!output.empty()) && (output.back() != ' ')) {
 				output += ' ';
 			}
-		} else if (input[i] == '\n') {
+		} else if ((input[i] == '\n') || (input[i] == '\r')) {
+			// (A carriage return gets past the XML reader as a reference,
+			// and ends the line for whoever reads the file.)
 			if ((!output.empty()) && (output.back() != ' ')) {
 				output += ' ';
 			}
@@ -105962,13 +106008,12 @@ void Tool_mei2hum::parseTempo(xml_node tempo, HumNum starttime) {
 
 //////////////////////////////
 //
-// Tool_mei2hum::parseHarm -- Not yet ready to convert <harm> data.
-//    There will be different types of harm (such as figured bass), which
-//    will need to be subcategorized into different datatypes, such as
-//    *fb for figured bass.  Also free-text can be present in <harm>
-//    data, so the current datatype for that is **cdata  (meaning chord-like
-//    data that will be mapped back into <harm> which converting back to
-//    MEI data.
+// Tool_mei2hum::parseHarm -- A chord symbol, into the measure made last
+//    (whose own time is used, not the one given here): its text as it is
+//    written, in a spine of free text (**cdata) beside its staff, which a
+//    reader maps back into <harm>.  (It was read and dropped: no export
+//    held a chord symbol.)  Figured bass and the other kinds of <harm>
+//    are not told apart.
 //
 // Example:
 //     <harm staff="1" tstamp="1.000000">C major</harm>
@@ -106009,77 +106054,80 @@ void Tool_mei2hum::parseHarm(xml_node harm, HumNum starttime) {
 		}
 	}
 
-	if (text.empty()) {
+	// One token of its spine: no tab and no line break in it, and nothing
+	// that a reader takes for a comment, an interpretation, a barline or
+	// no token at all.
+	text = cleanWhiteSpace(text);
+	if (text.empty() || (text == ".") || (text[0] == '!') || (text[0] == '*') || (text[0] == '=')) {
 		return;
 	}
 
-   // cerr << "FOUND HARM DATA " << text << endl;
-
-/*
-
-	string startid = harm.attribute("startid").value();
-
-	int staffnum = harm.attribute("staff").as_int();
-	if (staffnum == 0) {
-		cerr << "Error: staff number required on harm element" << endl;
+	// The staff it is written for (the top one when it names none), and
+	// when: a number of beats from the start of the measure.
+	int staffnum = harm.attribute("staff").as_int(1);
+	if ((staffnum < 1) || (staffnum > m_staffcount)) {
+		cerr << "Warning: harm for a staff the score does not have" << CURRLOC << endl;
 		return;
 	}
-	double meterunit = m_currentMeterUnit[staffnum - 1];
+	double tsd = (harm.attribute("tstamp").as_double() - 1.0) * 4.0 / m_currentMeterUnit.at(staffnum - 1);
 
-	if (!startid.empty()) {
-		// Harmony is (or at least should) be attached directly
-		// do a note, so it is handled elsewhere.
-		cerr << "Warning DYNAMIC " << text << " is not yet processed." << endl;
-		return;
-	}
-
-	string ts = harm.attribute("tstamp").value();
-	if (ts.empty()) {
-		cerr << "Error: no timestamp on harm element" << endl;
-		return;
-	}
-	double tsd = (stof(ts)-1) * 4.0 / meterunit;
-	double tolerance = 0.001;
+	// On the line of the notes that start there; when none does, after
+	// the last that started before it.
 	GridMeasure* gm = m_outdata.back();
 	double tsm = gm->getTimestamp().getFloat();
-	bool foundslice = false;
-	GridSlice *nextgs = NULL;
-	for (auto gs : *gm) {
-		if (!gs->isDataSlice()) {
+	GridSlice* target = NULL;
+	auto after = gm->begin();
+	for (auto it = gm->begin(); it != gm->end(); it++) {
+		if (!(*it)->isNoteSlice()) {
 			continue;
 		}
-		double gsts = gs->getTimestamp().getFloat();
-		double difference = (gsts-tsm) - tsd;
-		if (difference < tolerance) {
-			// did not find data line at exact timestamp, so move
-			// the harm to the next event. Need to think about adding
-			// a new timeslice for the harm when it is not attached to
-			// a note.
-			nextgs = gs;
+		if ((*it)->getTimestamp().getFloat() - tsm > tsd + 0.001) {
 			break;
 		}
-		if (!(fabs(difference) < tolerance)) {
-			continue;
-		}
-		GridPart* part = gs->at(staffnum-1);
-		part->setHarmony(text);
-		m_outdata.setHarmonyPresent(staffnum-1);
-		foundslice = true;
-		break;
+		target = *it;
+		after = it;
+		after++;
 	}
-	if (!foundslice) {
-		if (nextgs == NULL) {
-			cerr << "Warning: harmony not attched to system events "
-					<< "are not yet supported in measure " << m_currentMeasure << endl;
-		} else {
-			GridPart* part = nextgs->at(staffnum-1);
-			part->setHarmony(text);
-			m_outdata.setHarmonyPresent(staffnum-1);
-			// Give a time offset for displaying the harmmony here.
-		}
+	if (target == NULL) {
+		// before the first beat, with no time said, or in a measure with
+		// nothing in it
+		cerr << "Warning: harm with no note or rest to stand on" << CURRLOC << endl;
+		return;
 	}
-*/
 
+	// A spine for the chord symbols of its staff.  (HumGrid keeps count
+	// of them for its first hundred staves: past those a symbol would be
+	// written into a column the file does not have.)
+	m_outdata.setHarmonyCount(staffnum - 1, 1);
+	if (m_outdata.getHarmonyCount(staffnum - 1) < 1) {
+		cerr << "Warning: harm on staff " << staffnum << " is not converted" << CURRLOC << endl;
+		return;
+	}
+
+	double late = tsd - (target->getTimestamp().getFloat() - tsm);
+	if ((late > 0.001) && (tsd < gm->getDuration().getFloat() - 0.001)) {
+		// Between two notes: a line of its own, with nothing in the
+		// staves.  (A reader spaces such lines evenly between the notes
+		// around them: the place is exact for one symbol half way, and
+		// near it otherwise.)  At the measure's end or after it, it
+		// stays on the last note.
+		HumNum when = gm->getTimestamp() + HumNum((int)lround(tsd * 960), 960);
+		target = new GridSlice(gm, when, SliceType::Notes, m_staffcount);
+		gm->insert(after, target);
+	}
+	// Two at the same place are one token, one after the other.  The
+	// same text a second time at that place is not written again: a file
+	// can draw one symbol twice, one on top of the other, and joined to
+	// itself it was read back as "A A".  (Each text of the token is kept
+	// with it, to know one by.)
+	GridPart* part = target->at(staffnum - 1);
+	HTp before = part->getHarmony();
+	if (before == NULL) {
+		part->setHarmony(text);
+	} else if (!before->isDefined("auto", "symbol", text)) {
+		before->setText((string)*before + " " + text);
+	}
+	part->getHarmony()->setValue("auto", "symbol", text, "1");
 }
 
 
