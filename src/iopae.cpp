@@ -2573,10 +2573,10 @@ void PAEInput::LogPAE(int errCode, pae::Token &token, std::string value)
     std::string fullMsg = StringFormat("PAE: %s %s", msg.c_str(), posStr.c_str());
 
     if (m_pedanticMode) {
-        LogError(fullMsg.c_str());
+        LogError("%s", fullMsg.c_str());
     }
     else {
-        LogWarning(fullMsg.c_str());
+        LogWarning("%s", fullMsg.c_str());
     }
 }
 
@@ -2599,21 +2599,21 @@ void PAEInput::LogDebugTokens(bool vertical)
             row.push_back(c);
         }
         row = std::regex_replace(row, std::regex("%"), "%%");
-        LogDebug(row.c_str());
+        LogDebug("%s", row.c_str());
         if (m_hasErrors) {
             row.clear();
             for (pae::Token &token : m_pae) {
                 char c = (token.m_isError) ? '^' : ' ';
                 row.push_back(c);
             }
-            LogDebug(row.c_str());
+            LogDebug("%s", row.c_str());
         }
         row.clear();
         for (pae::Token &token : m_pae) {
             std::string className = (token.m_object) ? token.m_object->GetClassName() : " ";
             row.push_back(className.at(0));
         }
-        LogDebug(row.c_str());
+        LogDebug("%s", row.c_str());
         row.clear();
         for (pae::Token &token : m_pae) {
             char c = (token.m_char) ? token.m_char : ' ';

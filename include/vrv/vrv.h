@@ -35,10 +35,21 @@ class Object;
  * Most of them differ if they are used in the command line tool or in emscripten
  */
 
-void LogDebug(const char *fmt, ...);
-void LogError(const char *fmt, ...);
-void LogInfo(const char *fmt, ...);
-void LogWarning(const char *fmt, ...);
+/**
+ * The first argument is a format, as printf's: a compiler that is told so checks every call, and refuses one
+ * whose format is not a literal (-Wformat-security). Text of a file handed over as the format ended the process on
+ * a percent sign in it.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define VRV_LOG_FORMAT __attribute__((format(printf, 1, 2)))
+#else
+#define VRV_LOG_FORMAT
+#endif
+
+void LogDebug(const char *fmt, ...) VRV_LOG_FORMAT;
+void LogError(const char *fmt, ...) VRV_LOG_FORMAT;
+void LogInfo(const char *fmt, ...) VRV_LOG_FORMAT;
+void LogWarning(const char *fmt, ...) VRV_LOG_FORMAT;
 
 /**
  * Member and functions specific to logging that uses a vector of string to buffer the logs.

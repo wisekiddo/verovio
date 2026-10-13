@@ -1588,7 +1588,9 @@ void Toolkit::LogRedirectStart()
     if (!m_cerrCaptured.str().empty()) {
         vrv::LogWarning("In Toolkit::LogRedirectStart: Log capture buffer not empty, sending current contents to "
                         "LogWarning and resetting.");
-        vrv::LogWarning(m_cerrCaptured.str().c_str());
+        // (As text, not as the format of the message: what was captured holds words of the file, and a
+        // percent sign in them was read as a place for an argument that is not there.)
+        vrv::LogWarning("%s", m_cerrCaptured.str().c_str());
         m_cerrCaptured.str("");
     }
     m_cerrOriginalBuf = std::cerr.rdbuf();
@@ -1598,7 +1600,9 @@ void Toolkit::LogRedirectStart()
 void Toolkit::LogRedirectStop()
 {
     if (!m_cerrCaptured.str().empty()) {
-        vrv::LogWarning(m_cerrCaptured.str().c_str());
+        // (As text, not as the format of the message: what was captured holds words of the file, and a
+        // percent sign in them was read as a place for an argument that is not there.)
+        vrv::LogWarning("%s", m_cerrCaptured.str().c_str());
         m_cerrCaptured.str("");
     }
 
