@@ -26,6 +26,11 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 16 | 2026-10-13 | Do not follow an order of play that costs more than any score's (in 26069d6fa and de66ee4e0) | `src/doc.cpp`, `src/iomusxml.cpp`, +29 / -1 | A score whose order of play would cost more than 1,000,000 by the count below (200 repeat ends in a row with no start) is played as written, once through, where its timemap and MIDI took minutes and a gigabyte; a MusicXML repeat is read as at most 100 times (a measure marked 2,000 times, which never came back, is played 100 times). None for a score within that cost: the dearest of the corpus comes to 30,000 | Not offered upstream; `develop` of 2026-10-08 has both |
 | 17 | 2026-10-13 | A MusicXML clef for a staff the part does not have is passed over (in de66ee4e0) | `src/iomusxml.cpp`, +6 / -1 | A MusicXML part with a `<clef number>` for a staff it does not have, or does not have yet (its `<staves>` comes in a later measure), now loads; it ended the process. The clef is not built. None for a score without one | Not offered upstream; `develop` of 2026-10-08 has it |
 | 18 | 2026-10-13 | Give a MusicXML note with no accidental written the sound its file says (b7b3512c9) | `src/iomusxml.cpp`, +25 / -1 | A MusicXML note with no `<accidental>` gets the sound its `<alter>` says, where the key and the accidentals the importer carries would play another key: its `<accid>` is given that `accid.ges` (a natural too, as `accid.ges="n"`), and a tie whose two notes are then of one pitch gets its end. Of the 2785 scores of the corpus 407 change in MIDI, pitch map and MEI (2968 `<accid>` lines and 507 `<tie>` lines; no line added or removed), 222 of them in drawing (244 of 3376 pages, each by its ties), and their Humdrum export; the timemap changes in none and no id of a document moves. None for a note that has an `<accidental>`, and none for MEI, ABC or Humdrum input | Not offered upstream. `develop` of 2026-10-08 reads `<alter>` too (PR #4383), but builds other objects and writes nothing for a natural |
+| 19 | 2026-10-13 | Humdrum export: write the order a score is played in, as a label where each section and ending starts and one expansion list (09542e944) | `src/hum/humlib.cpp`, +171 / -1 | `Toolkit::ConvertMEIToHumdrum` only. A score whose one `<section>` holds an `<expansion>` that names its `<section>` and `<ending>` children (every score that came as MusicXML: 2785 of the 2785 of the corpus) gains one line `*>[A,A1,A,A2,B]`, one line `*>A` for each of them that holds a note or a rest, and a line `!LO:TX:t=` right above the label of an ending whose bracket says something else than its number. Read back, it is played in that order, and its endings are endings. A measure the converter finds nothing in is no longer written; before, it took the barline of the measure before it. A carriage return in the words of a `<dir>` is a space. None for a score with no `<expansion>`, or with one the labels cannot say. The notes and the syllables of every export are as they were (2785 of 2785); three exports gain a barline that was lost. **Not to be shipped without patch 21.** No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 writes neither |
+| 20 | 2026-10-13 | Humdrum export: write the chord symbols, as text in a spine beside their staff (c92e8fa32) | `src/hum/humlib.cpp`, +115 / -67 | `Toolkit::ConvertMEIToHumdrum` only. A score with `<harm>` elements (2565 of the 2785) gains a `**cdata` spine after each staff that has one, a second line that says `*above` in it, and a line with nothing in the staves for each chord symbol that stands between two notes. Two symbols at one place are one token; the same text twice at one place is written once. A score with none is written as before. `HumGrid::setHarmonyCount` no longer writes one past the end of its counts for the hundred-and-first staff. **Declared limit: the chord symbols of a re-opened export do not follow a transposition.** No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 has the stub and the bound |
+| 21 | 2026-10-13 | Humdrum reader: do not fold a whole-measure rest into the rest before it across a section label, nor one that stands under a chord symbol (c3a3eedb4) | `src/iohumdrum.cpp`, +30 / -2 | **Changes what a seeded load builds, for two kinds of Humdrum file.** A file in which the reader made one `<multiRest>` of a run of whole-measure rests that has (1) a non-null token of a `**cdata` spine on the line of a rest after the run's first, or (2) a section label (`*>A`) in its first spine between two of its rests, now keeps a measure of its own from each such rest on: it has more `<measure>` elements, every measure after that place has another ordinal, and the seeded ids of what is built after it move. Its chord symbols and its sections are no longer dropped. The patch makes no rest of several measures that was not made before. None for a file with neither: all 189 Humdrum files of the parity gate and all 2785 exports of tb.11 give the same MEI, byte for byte | Not offered upstream; `develop` of 2026-10-08 has both |
+| 22 | 2026-10-13 | Humdrum export: a double barline, a dynamic at its beat and beside its hairpin, words where no note starts, the segno and coda signs, a mark given by the note it starts on, and a staff, a beat or a text the file says wrongly (22ebddf9e) | `src/hum/humlib.cpp`, +299 / -68 | `Toolkit::ConvertMEIToHumdrum` only. `right="dbl"` is written `=\|\|` (850 exports of the corpus hold one); a `<dynam>` is on the note of its beat where it was on the first note of its measure, and stays when a hairpin starts or ends on its note (17 exports of the corpus gain dynamics or hairpin signs that tb.11 lost, 38 dynamics and 19 signs; none loses one that tb.11 wrote); the words of a `<dir>` at a time no note starts (every "D.C. al Fine" and "To Coda") are written on the note before, where they were left out; `<repeatMark func="segno">` and `"coda"` are written `[segno]` and `[coda]`; a `<dir>` or a `<repeatMark>` with no `@tstamp` is written on the note, rest or chord its `@startid` names (MuseNote's own navigation marks). A `<dir>`, `<repeatMark>`, `<dynam>`, `<hairpin>` or `<staff>` for a staff the score does not have, and one whose beat is no number, is left out with a warning where it read past the end of a vector or lost the whole export; a measure that holds nothing but a change of clef keeps the barline before it. No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 has none of it |
+| 23 | 2026-10-14 | What the engine says of a file is text, not the format of a message (57188f37b) | `include/vrv/vrv.h`, `src/toolkit.cpp`, `src/iohumdrum.cpp`, `src/iopae.cpp`, `src/convertfunctor.cpp`, +60 / -45 | None for any score. Forty-one log calls pass their text as the argument of `"%s"` where they passed it as the format: a percent sign in a score's words no longer ends the process when the score is exported to Humdrum, nor one in a Humdrum header line when the file is opened. The four log functions are marked as printf-like | Not offered upstream; `develop` not looked at for it |
 
 ### 1. PAE importer crashes
 
@@ -906,6 +911,874 @@ number of notes (1700 play exactly what the original plays). The text
 as it is written: as tb.10 but for 5 of the 407 scores, whose exports
 already differed from their score and now differ in other notes.
 
+### 19. The order a score is played in
+
+Up to tb.11 the export held each measure once, in the order the measures
+stand in, with its repeat signs. The order they are played in was not
+written: first and second endings, D.C., D.S., coda and fine. Read back,
+such a score was played once through, or with its repeat signs alone. Of
+the 2785 scores of the corpus, each exported and read back with its
+repeats played out, 1700 played what the original plays; 924 played
+another number of notes, 160 differed otherwise and 1 was refused.
+
+Verovio's MusicXML importer keeps the measures in `<section>` and
+`<ending>` children of the score's one `<section>` and says the order
+with an `<expansion plist>` of their ids. The converter passed the
+`<expansion>` over ("Don't know how to process section/expansion").
+
+In Humdrum the order is a label where each part starts and one list of
+the labels. The converter now writes both, at the start of the first
+measure it makes of each child:
+
+- A section is named with letters (A to Z, then AA, AB). An ending is
+  named with the letters of the section before it and its place among
+  that section's endings (A1, A2): Verovio's Humdrum reader takes a label
+  that ends in a number for an ending only when the label with no number
+  before it is its start, and passes over any other such label.
+- What an ending's bracket says is written as the text of its label
+  (`!LO:TX:t=1, 2`, a line right above the label) when it is not that
+  number.
+- An ending with no section before it is named as a section: played in
+  its turn, with no bracket.
+- A child gets a label when it holds a note or a rest. One the
+  converter makes no measure of gets none, nor does one whose measures
+  hold nothing (no staff, or a tempo mark and nothing to play), and the
+  list leaves it out. A reader drops a section with nothing in it: with
+  a label for it, the read-back was exported again with no label at
+  all, because the list named a section that was not there. A list that
+  names a label that is not there is not followed by a reader.
+- With no list to write, no label is written. Labels with no list keep
+  Verovio's reader from playing the repeats at all ("An expansion cannot
+  be generated with more than one section").
+- The list and the labels are written in the first spine as a tempo
+  mark is, which the converter's grid copies into every other spine; the
+  text of a bracket is a layout line in the first spine alone.
+
+**The text of a bracket and two voices.** The grid writes a label in
+one voice for each staff, whatever the notes around it are in: where
+the measure before a label ends with a staff in two voices, it joins the
+voices before the label (`*v *v`) and parts them again after it. A
+layout line it made as wide as the notes around, so the text of a
+bracket stood before the join; a reader gives it to the join, and shows
+the ending's count in its place (in Olsen-Banden a bracket that says 2
+came back saying 1). `HumGrid::addNullTokensForLayoutComments` now
+leaves a layout line that stands before a label or a tempo mark in one
+voice, so the join comes first and the text stands right above its
+label. Words on a note in the middle of two voices keep the two voices
+around them, as before.
+
+The same joining is why the barline before a label can have fewer
+fields than on tb.11: in 8 exports of the corpus a barline has another
+number of fields in its staves than on tb.11 (26 barlines: An_die_Musik,
+Caruso, Cry_Me_A_River, El_dia_que_me_quieras, Ma_Cherie_(simple),
+Nyan_Cat, Olsen-Banden, Spain). The notes, their order and what is
+played are the same.
+
+**A measure with nothing in it.** A `<measure>` in which the converter
+finds no staff (or none that the score has, patch 22) makes a measure
+of the grid with no line in it, and the grid cannot write one: it left
+out the barline of the measure before it, so that the two measures
+around it came out as one, and for a score that ends with such a measure
+it looked for the last line in a list with nothing in it. Such a
+measure is now taken out of the grid before it is written, and the score
+then ends with the barline of the last measure that holds something.
+Three exports of the corpus show it (a measure of an `<mSpace>`, which
+the converter does not know). All_Through_the_Night ends with one: its
+export ended with a line of fewer fields than its spines and was refused
+when read back, on tb.11 and with these patches as first built; it is
+read back now and plays the same. In Fatback and Green_Onions a section
+starts with one, after a repeat (in Green_Onions it holds a change of
+clef, which the grid moved out of it): the label stands in that measure,
+so it is no longer one with no line, and the barline before it with its
+repeat sign, which tb.11 loses, is written.
+
+Nothing is written, and the export is as before, for: a score with no
+`<expansion>` (MEI, ABC and Humdrum imports with no labels, and the
+scores made in MuseNote's own editor, which puts `<ending>` beside loose
+measures); two `<expansion>` elements; a measure, an `<app>` or a
+`<staff>` beside the sections; a list that names what is no child of the
+section; an `<expansion>` in a section that is not the score's one; and a
+score in which the converter finds no staff.
+
+One more change, for what the text of a bracket goes through: a carriage
+return in the words of a `<dir>` (it gets past the XML reader as a
+reference) ended the line of its layout parameter for whoever reads the
+file. It is a space now, as a line feed is.
+
+The label is written as a tempo mark is, and tb.11 already carries the
+crash fix that needs (`HumGrid::cleanTempos`, two null checks): a staff
+with a layer that holds nothing before the layer with the notes, which
+the reader writes for a voice that rests through a measure.
+
+**This patch is not to be shipped without patch 21.** With the converter
+change alone, a section that starts between two whole-measure rests is
+folded away by the reader, the list then names a section that is not
+there, and nothing of it is followed. Measured (the exports of patches
+19, 20 and 22 read back by tb.11's reader, 2785 scores): 2613 play what
+the original plays where 2619 do with patch 21; one score that matches
+on tb.11 (Early_Mornin_Rain) no longer does; 9 scores lose an ending.
+
+Still not carried: the order of a score with no `<expansion>` (the
+engine's own generated order has faults of its own with endings, patch
+14's "known"); an `<expansion>` under an inner section; a bracket that
+says nothing (the reader shows the ending's count: 8 scores of the
+corpus); the shape of a bracket's end.
+
+Known, and left: the export writes a list of whatever length the file
+gives, and Verovio's Humdrum reader stores a long list in quadratic time
+(`PlistInterface::AddRefAllowDuplicate` copies the whole list for every
+reference: a hand-made MEI of 120 KB with 40000 references exports to a
+file that takes 3.6 s to load, measured by the review). The list is not
+followed at that length (patch 16), so the time buys nothing. Hostile
+input only; the cause is in `src/plistinterface.cpp`, which is being
+mended apart from these patches.
+
+Regression test: `test_mei_to_humdrum_engine.cpp`, ten cases of the
+first build and "the text of an ending's bracket stands right above its
+label where the staff is in two voices", "a measure that holds nothing
+is left out, and the barlines around it stand", "a section whose
+measures hold nothing gets no label, and the export of the read-back
+export has its labels".
+
+### 20. Chord symbols
+
+`Tool_mei2hum::parseHarm` read a chord symbol's text and returned: the
+code that places it was commented out, and no export held one (117051
+`<harm>` elements in 2565 of the 2785 scores of the corpus).
+
+Each `<harm>` is now a token of a spine of free text beside its staff:
+
+- **`**cdata`, not `**mxhm`.** The converter's grid names the spine
+  `**mxhm`, which is MusicXML's root and kind: a reader of that takes
+  "G-" for G flat, drops the "/" of "C/E", and garbles every "♭". The
+  spine is renamed after the grid is written out, and a second line says
+  `*above` in it (a reader puts `**cdata` below the staff unless told).
+- **Where.** On the line of the notes that start at its beat. Where none
+  does, on a line of its own after the last note that started before it,
+  with nothing in the staves: a reader spaces such lines evenly between
+  the notes around them, so the place is exact for a symbol half way and
+  near it otherwise. At the end of its measure or after it, on the last
+  note. The beat is counted in the meter of the staff the symbol is for.
+- **Two at one place** are one token, one after the other with a space
+  between: a reader gives them back as one symbol with both texts.
+  **The same text a second time at one place is not written again.** A
+  file can draw one symbol twice, one on top of the other (633 places in
+  86 scores of the corpus hold the same text two or more times and
+  nothing else, and 40 more hold a text twice among others); joined to
+  itself it came back as "A A".
+- **A rest of several measures** is written out as that many measures
+  (patch 10). Its chord symbols are written with the first of them only:
+  under every one, a reader could not make one rest of them again.
+- **Left out, with a warning:** a symbol for a staff the score does not
+  have; one with no `@tstamp`, or before the first beat, or in a measure
+  with nothing in it; one on a staff past the hundredth (the grid keeps
+  count of chord spines for a hundred staves, and the symbol would stand
+  in a column the file does not have). Left out in silence: a text that
+  is empty, ".", or starts with "!", "*" or "=", which a reader would
+  take for no token, a comment, an interpretation or a barline.
+- A tab, a line break or a carriage return in the text is a space.
+
+`parseHarm` writes into the last measure of the grid. That is always the
+measure `parseMeasure` has just made: `parseMeasure` adds its measure to
+the grid before it does anything else and takes none away, and
+`parseHarm` is called right after it has returned (from `parseSection`,
+`parseLem` and `parseRdg`), with nothing between. The only other place
+that adds a measure is `parseStaffDef`, which is reached from a
+`<scoreDef>` outside a measure. (The measures that hold nothing are
+taken out of the grid when the whole score has been read, not before.)
+
+`HumGrid::setHarmonyCount` tested its index with `>` where `>=` is
+meant: for the hundred-and-first staff it wrote one past the end of its
+vector (seen with AddressSanitizer). Nothing called it for the converter
+before; `Tool_musicxml2hum` does, for a score of more than a hundred
+parts.
+
+**Declared limit, not mended.** The chord symbols of a re-opened export
+do not follow a transposition. The notes of a Humdrum file move with the
+transposition the reader is asked for; its chord symbols are free text,
+which the reader wraps in a `<rend>`, and the engine's transposer looks
+for a chord's root one level down only. A score opened from MusicXML and
+transposed a tone up shows D, Bm7, A/C♯; its export, opened and
+transposed, shows C, Am7, G/B over the same notes. A case holds this as
+it is ("the chord symbols of a re-opened export stay as they are written
+when the score is transposed"). On tb.11 an export has no chord symbols,
+so nothing wrong is shown there.
+
+**What comes back, counted for each `<harm>` element** (the 2619 scores
+of the corpus that play the same, 2515 of them with chord symbols):
+114148 go out. 109480 come back as themselves, with their text on their
+staff, measure and beat. 3338 stand with another text at their place
+(1581 places) and come back as one symbol with the texts joined. 694
+are a text that is already written at their place, and are written
+once (at 587 places every text is the same). 610 come back in their
+measure on another beat, and 26 are lost (in 12 scores); 12 symbols are
+read back at a place the original has none at. In all, 111683 `<harm>`
+elements are read back. On the patches as first built, of 114081: 108826
+as themselves, 3252 joined, 1359 doubled into a symbol with one text in
+it twice (623 places), 606 on another beat, 38 lost. (The first entry said "110990
+of 111629 come back": that counted places after joining the texts of a
+place on both sides, which hid the joined and the doubled ones.)
+
+Still not carried: the exact beat of a symbol between two notes unless
+it is half way; two different symbols at one place as two elements (they
+come back as one, with a space); a symbol before the first beat or with
+no `@tstamp`; figured bass and the other kinds of `<harm>` are written
+as their text; a symbol after the first beat of a rest of several
+measures (it is written on a line of its own in the first of them, which
+then comes back as a measure of rest of its own, and the others as one
+rest). In a measure the converter has no length for (a staff whose only
+notes are in a layer after one that holds nothing), a symbol between two
+notes is written on the note before it.
+
+Regression test: `test_mei_to_humdrum_engine.cpp`, eleven cases of the
+first build and "the same chord symbol twice at one place is written
+once", "chord symbols a little after a note have lines of their own, in
+the order of their beats", "a beat is counted in the meter of the staff
+it is said for".
+
+### 21. The reader: rests of several measures, labels and chord symbols
+
+`HumdrumInput::analyzeMultiRest` makes one `<multiRest>` of consecutive
+measures that hold nothing but a whole-measure rest of the same length,
+parted by plain barlines. A measure whose rest stands under a `**mxhm`,
+`**dynam` or `**text` token, or under words, is not folded into the rest
+before it. Two things were not looked at:
+
+- **A `**cdata` token.** Of several measures of rest with a chord symbol
+  each, all but the first were folded into one rest and their chord
+  symbols dropped (five measures under G, C and D came back as one rest
+  under G).
+- **A section label.** Two whole-measure rests with a label between them
+  (the last measure of one section and the first of the next) were made
+  one rest: the second section went with its first measure, an expansion
+  list that names it then names what is not there, and nothing of the
+  list is followed.
+
+Both are what patches 19 and 20 write. The patch adds one question,
+asked in the two places where a rest is folded into the rest before it:
+does this rest keep its measure? It does when a label stands between it
+and the rest before (before or after the barline that parts them), and
+when a non-null token of a spine whose type starts with `**cdata` stands
+on its line. Nothing else of the function is changed, so **the patch
+only ever takes folds away**: it makes no rest of several measures that
+tb.11 did not make. A rest under a chord symbol still takes the plain
+rests after it into a rest of its own, by the rule for plain rests (the
+same length, a plain barline between).
+
+**What this changes for a file that loads today.** A Humdrum file is
+built differently by a seeded load when, and only when, tb.11's reader
+made one rest of several measures out of a run of whole-measure rests
+that has
+
+1. a non-null token of a spine whose type starts with `**cdata` on the
+   line of a rest of the run that is not its first, or
+2. a line whose first field is a section label (`*>` followed by a name,
+   with no `[` in it: not an expansion list) between two rests of the
+   run. A label that stands in another spine only does not count: such
+   a run is one rest, as it was (a case holds that).
+
+Such a run is cut before each such rest. The file then has more
+`<measure>` elements (one more for each cut); every measure after the
+first cut has another ordinal; the ids the reader makes from line and
+field numbers stay, and the seeded ids of what is built after the cut
+(rests of several measures, the text of chord symbols) move; the chord
+symbols and the section or ending that were dropped are built; and
+where a section was dropped the order of play is another. Two examples,
+each as tb.11 built it and as it is built now:
+
+- one staff, `c | r | r under G | r | d`: one rest of three measures
+  and no chord symbol; a measure of rest, then a rest of two measures
+  under G;
+- two staves, list `[A,A,B]`, a label between two measures of rest:
+  played C r r, C r r, D; played C r, C r, r D.
+
+A mark anchored by measure ordinal on such an imported file would move.
+
+No file MuseNote wrote before tb.12 is of either kind (its exports held
+neither a label nor a `**cdata` spine: all 2785 exports of tb.11 give
+the same MEI on both readers), none of the 189 Humdrum files of the
+parity gate is, and MuseNote has no Humdrum file among its assets and
+test fixtures. As patch 15 does for the ABC files it is about, this
+patch changes what an importer builds for an input that loads today.
+
+A plain run of rests is one rest as before, also with a blank line, a
+change of clef or an expansion list between two of them.
+
+**Patch 19 is not to be shipped without this one** (the numbers are in
+its section); and without it the chord symbols of patch 20 that stand on
+runs of rest measures are lost on the way back (487 `<harm>` elements
+fewer are read back, in 144 scores of the corpus).
+
+Known, and left as it is: a rest under a `**mxhm`, `**dynam` or `**text`
+token, or under words, takes the plain rests after it across any
+barline, a repeat sign or a double barline too, and the sign then stands
+after the whole rest: `c | r under p :| r | d` is played with the repeat
+ending a measure late. That is upstream's and on tb.9; the patch leaves
+those files as they load today, and does not give the fault to a rest
+under a `**cdata` token (a case holds that).
+
+Regression test: `test_mei_to_humdrum_engine.cpp`, five cases of the
+first build and "a Humdrum file with a label before the barline between
+two measures of rest keeps both, and one with a label in another spine
+than the first does not".
+
+### 22. A double barline, dynamics and hairpins, words where no note starts, signs and marks, and what a file says wrongly
+
+What the export left out or misplaced, and what it did with a staff or a
+beat that a file gives wrongly, each a few lines of `Tool_mei2hum`.
+
+**What was left out or misplaced.**
+
+- **`right="dbl"`** was not read: a double barline came out as a plain
+  one (850 exports of the corpus hold one now, 1778 in all).
+- **A dynamic** went to the first note of its measure, whatever its
+  beat: the test for "past it" was true of every note up to it. It is on
+  the note that starts at its beat. Where none does, it is moved to the
+  next note, or to the last of its measure. Two dynamics are not joined
+  in one token: a reader takes the letters of "f ff" for one dynamic,
+  "fff". So one of two at one note is left out, and that is said: a
+  dynamic that is moved to a note that has one already is left out ("a
+  dynamic with no note of its own is left out"), and a dynamic at its
+  own beat takes the place of whatever its note holds, one that was
+  moved there or another at the same beat ("a dynamic takes the place of
+  another at its note"). (The first entry said the one on its own beat
+  is kept "with a warning" whichever is written first; when the moved
+  one was written first it went without a word.)
+- **A hairpin and the dynamic on its line.** The signs of a hairpin are
+  written when every measure has been read, each on the note of its
+  beat, and they took the place of what stood there. With dynamics on
+  their own beat, "p, a crescendo from that note, f where it ends" came
+  out with neither dynamic, and a crescendo that ends where a diminuendo
+  starts lost one of the two. That is the shape MuseNote's own editor
+  writes (`<dynam>` and `<hairpin>` with `@tstamp`). A sign now joins
+  what its line holds: `p <` at the start, `[ f` at the end, `[ f >`
+  where one hairpin ends, a dynamic stands and the next hairpin starts.
+  Verovio's reader takes the letters of such a token for the dynamic
+  and the rest for hairpins, and takes an opening sign with a closing
+  one straight after it (`< [`) for a hairpin as long as its note; so
+  the sign that closes a hairpin stands first and the sign that opens
+  one last, unless it closes the hairpin that opens on that very line.
+  No dynamic is lost to a hairpin and no hairpin to a dynamic.
+- **The words of a `<dir>`** at a time no note starts were left out
+  ("dir elements not occuring at note/rest times are not yet
+  supported"): every "D.C. al Fine", "To Coda" and "Fine", which stand
+  at the end of their measure. They are written on the last note or rest
+  of the staff's first voice before them. Never on a line where that
+  voice has nothing (the line of another staff's note, or of its grace
+  note): Verovio's reader puts a space into the voice for words on no
+  token, and what follows is played late. (Words at the very time a note
+  of another voice starts are on that line, as before.) The beat is
+  counted in the meter of the staff the words are for.
+- **`<repeatMark>`** was not known. `func="segno"` and `func="coda"` are
+  written as the words of a direction, `[segno]` and `[coda]`, which
+  Verovio's reader draws as the signs (514 signs in 287 exports of the
+  corpus); it gives them back as `<dir><symbol glyph.name>`, which is
+  written the same way again. A repeat mark with words is written as its
+  words. One with neither keeps a warning. No other `<symbol>` is
+  written: the reader's names for them are not the engine's.
+- **A mark given by the note it starts on.** MuseNote's own editor
+  writes a navigation mark as `<repeatMark func=".." startid="#note"
+  place="above">`, with no `@tstamp` and no `@staff`; the converter read
+  only a beat and left every such mark out ("no timestamp on dir
+  element"). A `<repeatMark>` or a `<dir>` with no beat (none, or one
+  that is no number) is now written on the line and the staff of the
+  note, rest, chord or whole-measure rest its `@startid` names: the id
+  of what a token was made of is kept with the token. So a segno, a
+  coda, a "Fine" and a "D.C. al Fine" made in MuseNote are exported and
+  come back on their beat, the signs as signs and the others as their
+  words. (Not one on the first note of a measure in which its staff goes
+  from one voice to two, nor in a first measure of two voices: it is
+  written before the voices part, where a reader does not find it, as
+  words with a beat are. Found by the second review.) A mark that names nothing of its own measure (no id, a note of
+  another measure, a note inside a chord, a grace note at the very start
+  of a measure) is left out with a warning that says its measure. A
+  `<dynam>` with `@startid` and no beat is left out as before (its own
+  function, not this path); the editor writes dynamics and hairpins
+  with `@tstamp`.
+
+**What a file says wrongly.** The staff of a `<dir>`, a `<repeatMark>`,
+a `<dynam>`, a `<hairpin>` and a `<staff>` is a number the file gives,
+and the converter looks up by it what it keeps for each staff.
+
+- **A staff the score does not have.** The meter of the staff was read
+  with the number unchecked in `parseDir` and `parseDynam`: past the end
+  of where the meters are kept for a number above a thousand or below
+  one (a heap-buffer-overflow under AddressSanitizer, on tb.11 too;
+  `<repeatMark>` was a new way to it with the first build of this
+  patch), and with the first build the whole export was given up for a
+  `<dynam>` with a negative staff. A
+  hairpin's staff was read with `stoi()`, which throws on text that is
+  no number, and looked up unchecked when its signs were written. A
+  `<staff>` with such a number had each of its notes refused where they
+  were to be written, but a whole-measure rest or a syllable on it was
+  looked up first, and the whole export was given up. Each of these is
+  now refused before anything is looked up, with a warning that says the
+  element and its measure and nothing of the file's own text ("dynam for
+  a staff the score does not have in measure 7"), and the rest is
+  written: in `parseDir`, `parseDynam`, `parseHairpin`, and for a
+  `<staff>` in `parseMeasure` and `parseSection`. (`parseHarm` refused
+  such a staff from the start.) A staff with no number of its own is the
+  one after the staff read last, as before.
+- **More staves than are kept count of.** What is kept for a staff (its
+  meter, the length of its measure, its count of verses) is kept for a
+  thousand staves, and the number of staves was taken from the first
+  measure, however many it has. A score of more is written as far as a
+  thousand, with a warning.
+- **A beat that is no number.** `@tstamp` and `@tstamp2` were read with
+  `stof()` and `stod()`, which throw on text that starts with no number
+  ("x", "soon") or with one that is none to count with ("nan",
+  "1e999"), and nothing in the converter catches: one such attribute and
+  there was no export. Such a beat is no beat: the element is left out
+  as one with no `@tstamp` is (or, for a mark, written by its
+  `@startid`), and the rest is written. A number with something after it
+  ("3rd") is read as it always was, up to where the number ends.
+- **Words, or a tempo mark, that stand in their measure before the
+  staff they are for.** The line made for them had as many staves as had
+  been read so far, not as the score has: the words had no place in it,
+  and the line had too few fields, so that the file was refused when it
+  was read back. (The tempo mark's line was found by the second review.)
+- **The text of a dynamic** was written as it stood: a tab or a line
+  break in it made a line of a field too many, or two lines, and a text
+  that begins as an interpretation, a comment or a barline does was
+  taken for one. The file was refused when it was read back; with the
+  first build a hairpin on the same note took the text's place, and the
+  file was read by that accident alone. The text is one token, as a
+  chord symbol's is, and one that a reader takes for no token is left
+  out. (Found by the second review.)
+- **A measure that holds nothing but a change of clef.** The grid moves
+  a clef that a measure starts with to the end of the measure before it,
+  and left such a measure with no line at all, which it cannot write:
+  the measure before lost its barline (a repeat sign with it), and when
+  it was the last measure of a score the grid looked for the last line
+  in a list with nothing in it (the process ends there under the
+  standard library's own checks). `HumGrid::adjustClefChanges` now
+  leaves a clef that is the only line of its measure where it is.
+- **A syllable on a note of a chord** (`<note syl="la">` inside
+  `<chord>`), or on a grace note at the very start of a measure: such a
+  note has no line of its own, the syllable was written into the line
+  that is not there, and the process ended. It is left out, as a
+  `<verse>` of such a note is.
+
+**What is said.** The warnings these patches add say what is left out,
+with its measure where it stands in one, and nothing of the file's own
+text. Older warnings of the converter do say text of the file, as on
+tb.11: the words of a `<dir>` or a `<repeatMark>` that has a beat and
+names no staff ("staff number required on dir element in measure 3
+(ignoring text: ...)"), the text of a `<dynam>` given by `@startid`, an
+octave that is no number, the name of an element the converter does not
+know. What the converter says
+reaches the log as text since the integrator's patch of the log calls
+(both places in `toolkit.cpp`), so a percent sign in such words is no
+longer the format of a message. (The first entry said that all the
+warnings of this patch are free of the file's text; that was true of
+the warnings added, not of the one for words with no staff, which the
+patch gave a second element to reach.)
+
+Still not carried: `<repeatMark>` as an element (it comes back as a
+`<dir>` with the sign or the words) and the `@type` of jump words; the
+sign in MuseNote's "To Coda", which its editor writes as a letter of the
+music font inside the words (U+E048 in `<rend fontfam="smufl">`): it is
+written as that letter, which a reader draws in the font of the words (a
+case holds that); words with a sign in them at the second export (the
+reader nests the sign in a `<rend>` the converter does not look into:
+"To [coda]" is written once and not again from the read-back); a double
+barline before a repeat start; a final barline before a repeat start; a
+tempo mark that is not on the first beat; words on the first note of a
+measure in which a staff splits into two voices (they are written before
+the split, where the reader does not find them: as on tb.11); a hairpin
+with a dynamic between its two ends (the reader then shows the word
+"cresc." in the hairpin's place).
+
+Known, and left: **a staff that transposes by more than an octave** is
+exported by whole octaves only (`Convert::transToBase40` knows no
+interval past an octave); mending it changes how every file exported so
+far reads back, which needs the owner's word. **A negative meter unit**
+(`meter.unit="-4"`) is exported as `*M4/-4`, and the read-back does not
+come back (`smf::MidiMessage::makeTimeSignature`; on tb.11 too). **An
+MEI whose later measure has a staff with no `<staffDef>`** ends the
+process when the engine loads it (`setscoredeffunctor.cpp`, on tb.11
+too); the converter leaves such a staff out. **A `<staff>`, a
+`<staffDef>` or a meter unit whose number is no number** gives the whole
+export up (`stoi`); the engine does not load such a file either. **A
+chord symbol's text of any length** is written, and the reader is slow
+on a very long one (200,000 letters: a minute). Three hairpins that open
+on one note come back as one, and word dynamics ("cresc.", "poco f") are
+written and not read back as dynamics, on tb.11 too.
+
+Regression test: `test_mei_to_humdrum_engine.cpp`, four cases of the
+first build and "a mark, a dynamic or a hairpin for a staff the score
+does not have is left out, and the rest is written", "a beat that is no
+number is no beat: its mark, dynamic or hairpin is left out, and the
+rest is written", "a staff the score does not have is left out with what
+stands on it, and the rest is written", "a score of more staves than the
+converter keeps count for is written as far as it does", "a hairpin
+stands with the dynamic on its line, and with the hairpin that ends or
+starts there", "a navigation mark made in MuseNote is written on the
+note it starts on", "a measure that holds a change of clef and nothing
+to play keeps its clef, and the barlines around it stand", "a syllable
+written on a note of a chord is left out, and the engine goes on",
+"words that stand in their measure before the staff they are for are
+written in a line as wide as the others", "a dynamic that takes the
+place of another is said to", "words where no note starts are not put on
+the line of another staff's grace note", "a sign with words before it is
+written with them, upright as a sign alone is"; and, after the second
+review, "a dynamic's text is one token: a tab or a line break in it is a
+space, and what a reader takes for no token is left out", "a tempo mark
+that stands in its measure before one of the staves is written in a
+line as wide as the others", "a hairpin in a measure that holds nothing
+is left out with its measure, and the engine goes on", "a hairpin that
+ends in a later measure stands before the dynamic on its line, and two
+that start on one note are both written", "a chord symbol whose text is
+part of another's at its place is a symbol of its own".
+
+### tb.12: patches 19 to 23
+
+By the owner's decision of 2026-10-12 ("Build it all"): the whole of
+what the investigation of the export proposed, as separate patches with
+their own tests, under an exception to this branch's rules on size and
+on features, and with one declared limit, which is pinned by a case and
+not mended: the chord symbols of a re-opened export do not follow a
+transposition (patch 20). The four patches were built, then reviewed by
+an engineer who had not written them, and made again with what the
+review found mended: this is the second build, and every number below
+is measured on it. A second engineer then reviewed the second build and
+found it safe to ship; what that review found is at the end of this
+section. Patch 23 is another matter and has its own section.
+
+Measured apart, as for tb.9 and tb.10: the parity gate sees neither the
+export nor the order a Humdrum file is played in. tb.11 against tb.11
+with the four patches and the integrator's patch of the log calls, the
+same toolchain, one process per score, over the 2785 scores of the
+corpus. "As first built" is the same with the four patches before
+their review.
+
+**The round trip.** Each score exported, the export read back with
+default options, and what it plays compared with what the original
+plays:
+
+| | the same | another number of notes | differ otherwise | refused | end the process |
+| --- | --- | --- | --- | --- | --- |
+| tb.11 | 1700 | 924 | 160 | 1 | 0 |
+| patches 19 to 22 as first built | 2618 | 2 | 164 | 1 | 0 |
+| patches 19 to 22 | 2619 | 2 | 164 | 0 | 0 |
+| patches 19, 20 and 22 without patch 21 (tb.11's reader) | 2613 | 2 | 170 | 0 | 0 |
+
+No score that matches on tb.11 stops matching, and none that matches
+on the first build. 919 match that did not on tb.11: 900 of the 924
+that played another number of notes (22 of them now differ otherwise, 2
+are as they were), 18 of the 160 that differed otherwise (142 still
+do), and the one that was refused, All_Through_the_Night (patch 19, "a
+measure with nothing in it"). The two with another number of notes are
+Le_mille_bolle_blu and the MEI fixture BrookeWestSample. Without patch
+21, Early_Mornin_Rain matches on tb.11 and no longer does, six scores
+match only with it, and 9 scores lose an ending.
+
+**Read back the way the apps read a file** (drawn, then loaded again
+with `expandAlways` for the timemap and the MIDI): the same verdict for
+every score, 2619 / 2 / 164.
+
+**Second generation** (the read-back exported again, and that read
+back): 2610 play what the original plays, 5 another number of notes,
+170 differ otherwise; none ends the process, at either generation. Ten
+play the same at the first generation and not at the second
+(Caresse_sur_l'océan, Electric_Feel, Heartbeats, Here_Comes_the_Sun,
+Home, Les_Feuilles_Mortes, Oh,_Pretty_Woman, Song_For_Ireland,
+The_Logical_Song, Woman_In_Love), the same ten as on the first build.
+Ten second exports hold "ZZZ" tokens, five first exports do (as on
+tb.11).
+
+**Endings.** All 2364 endings of the 1063 scores that have one come
+back as endings; what the brackets say is the same in 1055 of the 1063
+(1054 on the first build: Olsen-Banden is right now). In the other 8 a
+bracket says nothing, and the reader shows the ending's count. 400
+bracket texts are written, in 336 exports, each right above its label.
+
+**Chord symbols**, counted for each `<harm>` element in the 2619 scores
+that play the same (2515 of them have chord symbols): 114148 go out;
+109480 come back as themselves; 3338 come back joined to another text
+at their place (1581 places); 694 are a text already written at their
+place, written once (587 places hold nothing but one text several
+times); 610 come back on another beat of their measure; 26 are lost, in
+12 scores (a symbol before the first beat, which is left out; one in a
+measure the converter finds nothing in; symbols at the end of a short
+measure, which are joined to the one before; and those after a measure
+the converter writes nothing for, which are counted a measure off); 12
+are read back at a place the original has none at. With tb.11's reader
+in the place of patch 21, 487 fewer `<harm>` elements are read back, in
+144 scores.
+
+**The text of every export against tb.11's**, column by column, through
+every split and merge of the spines: the same notes in the same order in
+all 2785, and the same syllables. What differs:
+
+- every export has a list and its labels (8382 labels: 6018 of sections
+  and 2364 of endings, the endings in 1063 exports), and 2565 have a
+  chord spine (114473 tokens);
+- 850 exports hold double barlines (1778);
+- three exports have one barline more: Fatback and Green_Onions (the
+  end of a repeat before a section whose first measure the converter
+  finds nothing to play in) and All_Through_the_Night (its last, where
+  tb.11 writes a broken line);
+- in 8 exports a barline has another number of fields in its staves (26
+  barlines), because the voices of a staff are joined before a label
+  and parted after it (patch 19);
+- 17 exports gain dynamics or hairpin signs, 38 dynamics and 19 signs
+  (356 where tb.11 writes 299); none loses one;
+- 1095 exports hold the words of directions and signs (4135 tokens)
+  where 911 did (2984), and 287 of them hold segno and coda signs (514).
+  In 6 exports words stand right before a tempo mark of the same beat,
+  where a reader does not find them (as on tb.11), and in 4 a sign
+  stands among words.
+
+**Against the first build of these patches**, the same way: 2656 of the
+2785 exports are the same file, byte for byte. Of the other 129: in 113
+a chord token no longer holds one text twice (the tokens are as many);
+15 gain dynamics or hairpin signs that the sign of a hairpin had taken
+the place of (15 dynamics and 19 signs; none loses one); Olsen-Banden has the
+text of its bracket above its label; All_Through_the_Night has its last
+barline and a well-formed last line. The notes and the syllables are
+the same in all 2785.
+
+**What the reader patch changes for files that load today**, each file
+loaded with `{"xmlIdSeed":1}` on tb.11 and with the patches, the MEI
+compared byte for byte but for the time it was written:
+
+- the 189 Humdrum files of the parity gate: the same for all 189 (4 are
+  refused, on both);
+- the 2785 exports of tb.11, which are the Humdrum files MuseNote wrote
+  up to now: the same for all 2785 (1 refused, on both);
+- MuseNote has no `.krn` file among its assets and its test fixtures;
+  the two Humdrum files its device test holds as text have labels and no
+  measure of rest.
+
+Of the 2785 exports of the patched converter, 146 are built differently
+by the two readers (more measures with patch 21, never fewer): that is
+what patch 21 is for. The reader is the first build's, unchanged by the
+second.
+
+**Memory.** A Debug build of the final sources with AddressSanitizer
+and the standard library's own checks switched on
+(`_LIBCPP_HARDENING_MODE_DEBUG`): the 141 native cases, together and each
+in a process of its own, with no report. And hostile inputs, one process
+each, every one taken each way an app takes a file: the raw MEI
+converted; the MEI loaded, taken back from the engine and converted;
+each export read back with default options and the apps' way, drawn and
+played, exported again, and that read back (about 2000 conversions and
+4000 read-backs in all).
+
+- The review's 321 hand-made and random inputs: 315 end with 0 and no
+  report (one of them, a measure of several thousand long notes, only
+  when run alone: beside the other runs it did not come back in ten
+  minutes). The other 6 end the process when the engine itself loads the
+  hostile MEI, after the converter and the reader have taken the raw
+  file and its export without a report: an assertion of the Debug build
+  in `setscoredeffunctor.cpp` (a staff with no `<staffDef>` in a later
+  measure, 1 input) and in `preparedatafunctor.cpp` (an `<ending>` or a
+  `<section>` that holds nothing, 5 inputs). Neither is in the converter
+  or the Humdrum reader, and both are on tb.11.
+- The review's two slow inputs (a negative meter unit; a list of 120000
+  references) do not come back in two minutes: the two "known" of
+  patches 19 and 22.
+- The first build's 112 hand-made inputs and 182 scores of the corpus:
+  all end with 0, no report.
+- 67 inputs made for this build (a staff, a beat and a number of staves
+  that a file says wrongly; measures with nothing in them or with a clef
+  alone; scores of 102 and of 1100 staves): 61 end with 0 and no
+  report; 4 end the process when the engine loads them, by the same
+  assertion about a staff with no `<staffDef>`; and the two scores of
+  1100 staves come back only when run alone.
+
+The three inputs of the review that ended the process on the first
+build and not on tb.10 (a `<repeatMark>` with percent signs in its
+words, twice, and one for staff 5000) end with 0 and no report.
+
+**Native tests** (`verovio_engine_tests`, 141 cases; 90 on tb.11): all
+pass, together and each in a process of its own, on the Release build
+and on the sanitizer build. On a fresh copy of tb.11 the four patches
+apply in order with no offset, each stage builds and passes tb.11's own
+90 cases, and after the fourth 139 of the 141 pass: the two that do not
+are the integrator's cases about the log text, which need its patch of
+the log calls. Of the 51 new cases, 49 fail or end the process on
+tb.11's engine (46 fail, 3 end the process: the two about the log and
+the syllable on a note of a chord). The two that pass there hold what
+must not change: a score in which the converter finds no staff is
+written with no label and the engine goes on, and a rest under a chord
+symbol is not made one with the rest after a repeat sign or a double
+barline. With the patches as first built, 14 of the 19 cases of the
+second build fail or end the process (13 fail, the syllable on a note of
+a chord ends it), and the 5 that pass hold what the first build did
+right and no case held (the review's surviving breaks).
+
+**Deliberate breaks.** 209 breaks of the lines and conditions of the
+four patches, each compiled into a second copy of the tree behind a
+number and switched on one at a time, in a build with AddressSanitizer
+and the standard library's own checks, against the cases of the Humdrum
+file: the 77 of this build, the review's 19, and 113 of the first
+build's 115 (the text two of them stand on is gone; a break of this
+build stands for each). 207 are caught, 192 by a failing case and 15
+by ending the process. All 19 of the review's are caught, the seven no
+case caught before among them: the two about a chord symbol a little
+after a note and the one about the first staff's meter, the one about
+words on a grace note's line, the one about a sign with words, and the
+two about a label before the barline of the second rest and in a spine
+that is not the first. Two breaks are caught by no case, and each is
+the same program as the sources:
+
+- "the place of a mark that starts on a note is worked out from its
+  beat too": that place is read only for a mark with no note to start
+  on, so working it out for the others changes nothing.
+- (of the first build) "labels are written where there is no staff":
+  with patch 22 a score in which the converter finds no staff has every
+  staff refused, so it holds no note, no child gets a label, and the
+  test that was broken never decides. It stays for patch 19 on its own,
+  where a case needs it.
+
+**The second review**, by an engineer who had written neither build:
+safe to ship. Its 302 hostile inputs of its own, each taken every way an
+application takes a file, on the sanitizer build with the standard
+library's checks: none ends the process in the converter or in reading
+an export, and no report; 28 trip the engine's own assertion when it
+loads the hostile MEI (a staff with no `<staffDef>`), as on tb.11, one
+another of its assertions (a hairpin whose end is before its start),
+and one is the long chord text above. Every input the first review
+named is mended. On every eighth score of the corpus (349) none that
+matches stops matching and no dynamic is lost. It found the two faults
+that section 22 marks as its own (a dynamic's text, a tempo mark's
+line), both mended, and nine deliberate breaks that no case noticed:
+five cases were added, which catch the four that matter (a hairpin in a
+measure that holds nothing, which is memory given back and written to;
+the sign that closes a hairpin in a later measure; a second hairpin on
+one line; a chord text that is part of another), and the others are
+recorded here: a mark with a beat, a staff and a note it starts on goes
+by its beat; a mark that starts on a note stands after a grace note
+before it; a layout line before a clef; two measures in a row that hold
+nothing; a label that is not the very next line.
+
+After it, on the final sources: 146 native cases (90 on tb.11), all
+passing together and each in a process of its own, and on the sanitizer
+build. Nine more deliberate breaks, of the two fixes and of four of the
+review's: eight caught; the ninth (the tempo set in the staves read so
+far only) is the same program, as the grid copies a tempo mark to every
+staff of its line. The round trip, read back the way the applications
+read a file: 2619 the same, 2 another number of notes, 159 differ
+otherwise, 5 with no verdict (as on tb.11), none refused; no score that
+matches on tb.11 stops matching, and the two fixes change the export of
+no corpus score. Parity gate, tb.11 against tb.12: 19930 outputs, 0
+differ; seeded ids on a fresh thread the same for 2785 of 2785.
+
+Known, not changed (beyond what each section says): the 164 scores whose
+export does not play what the original plays for other reasons and the
+two that play another number of notes; the ten scores of the second
+generation above; a chord symbol after the first beat of a rest of
+several measures (the first of its measures comes back as a measure of
+rest of its own under it, the others as one rest); under a
+transposition, the chord symbols of a re-opened export (the declared
+limit); the reader's time for a long expansion list, a staff that
+transposes by more than an octave, a negative meter unit and a staff
+with no `<staffDef>` in a later measure (patches 19 and 22, "known").
+
+**Found on the way, not in these patches** (each with a file that shows
+it, in the work's scratch directory; all of them on tb.11 too):
+
+- `Tool_mei2hum::processHairpin` counts the beat of a hairpin wrongly
+  in a meter whose unit is not a quarter note (it multiplies a time in
+  quarter notes by four and divides by the unit, where the beat is that
+  time by the unit over four), and with the meter of the thousandth
+  staff, which only a meter in the `<scoreDef>` sets: in 6/8 a hairpin from beat 1 to
+  beat 4 is written from the first eighth note to the sixth, in 2/2 one
+  from beat 1 to beat 2 ends on the second quarter note. In 4/4 it is
+  right. Mending it moves the hairpins of every export in such a meter.
+- Words and a tempo mark at one beat, the words written first: the
+  layout line stands before `*MM`, and a reader does not find the words
+  (6 exports of the corpus).
+- Words with a sign in them ("To" and a coda sign) come back from the
+  reader with the sign inside a `<rend>`, which the converter does not
+  look into: the second export has neither the words nor the sign (4
+  such tokens in the corpus).
+- A tempo mark that stands in its measure before one of the staves is
+  written in a line as wide as the staves read so far: with two staves,
+  a line of one field, and the file is refused when read back.
+  (`parseTempo` sizes its line by `m_maxStaffInFile`, as `parseDir`
+  did.)
+- The grid counts verses for a hundred staves: a score whose
+  hundred-and-first staff is sung gives no export
+  (`HumGrid::setVerseCount` lets the index one past the end through),
+  and one whose hundred-and-second is sung gets a line with one field
+  too many.
+- `analyzeMultiRest`: a rest under a `**mxhm`, `**dynam` or `**text`
+  token, or under words, takes the plain rests after it across a repeat
+  sign or a double barline (patch 21's "known").
+- `Tool_mei2hum::parseStaff` takes a staff's length from its first
+  layer: a staff whose first layer holds nothing and whose notes are in
+  a later one makes a measure of no length, the next measure is written
+  into it, and its barline is lost.
+- In the Dart wrapper, `stripHumdrumSecondaryExpansions` left a
+  secondary list as it was when it stood in the first spine with null
+  interpretations beside it (`*>norep[A,B]<TAB>*`): every column had to
+  match. The engine then followed no list, and the file was played
+  without its repeat. Mended in the wrapper (MuseNote's side) with the
+  vendoring of this tag.
+- Loading an MEI with an `<ending>` or a `<section>` that holds nothing
+  trips an assertion of a Debug build (`preparedatafunctor.cpp`, line
+  1587); found by the review, in five of its random inputs.
+
+### 23. What the engine says of a file is text, not the format of a message
+
+`LogWarning`, `LogError`, `LogInfo` and `LogDebug` take a format, as
+`printf` does. Forty-one calls handed them, as that format, text that
+holds words of the file:
+
+- `Toolkit::LogRedirectStop` and `LogRedirectStart` (`toolkit.cpp`), with
+  everything a converter wrote to `cerr` while it worked. The MEI to
+  Humdrum converter says what it leaves out with the words themselves
+  ("staff number required on dir element ... (ignoring text: ...)"). A
+  score whose words hold a percent sign ended the process when it was
+  exported: "%s" eight times read memory that is no text, "%n" wrote to
+  it.
+- 33 warnings of the Humdrum reader (`iohumdrum.cpp`), several of which
+  name a line or a token of the file ("Decoration is invalid: ...",
+  "Problem parsing mensuration: ...", "dirtok for ... is empty"). A
+  Humdrum file with a percent sign in such a line ended the process when
+  it was opened; and a rhythm written with a percent sign (`4%3`), which
+  is ordinary kern, was read as a format wherever a warning named its
+  token.
+- 5 messages of the PAE reader (`iopae.cpp`) and one debug line
+  (`convertfunctor.cpp`).
+
+The applications run the engine with its log switched on and at the level
+of warnings, so each of these was reached.
+
+**What the patch does.** Each of the forty-one calls passes its text as
+the argument of `"%s"`. And the four functions are marked as printf-like
+(`VRV_LOG_FORMAT` in `vrv.h`, an attribute for GCC and Clang, nothing
+elsewhere), which is what lets a compiler see such a call at all: with
+the mark, `-Wformat-security` names every call whose format is not a
+literal. The applications build the vendored engine with every warning
+off, so no build of theirs says anything; the package has an audit for
+it (`tool/log_format_audit.py`, MuseNote's side, run at each vendoring):
+it compiles every engine source again, syntax only, with that one check
+as an error, and it refuses to run when the mark is not there. It found
+the forty-first call.
+
+No output of any score changes: a message that held no percent sign is
+the same text. No object is built or removed.
+
+Carried because the calls are the engine's.
+
+Regression test: `test_mei_to_humdrum_engine.cpp`, two cases (words
+with percent signs in a score that is exported; a Humdrum header line
+with percent signs in a file that is opened). On tb.11 both end the
+process. Six deliberate breaks, each caught: the two calls the cases
+reach by the cases, two of the other calls by the audit, and the mark
+taken away or emptied by the audit, which then says it cannot see.
+
+Known and left: the same check with `-Wformat` names 12 calls whose
+arguments are of another type than their format says (a `size_t` for
+`%d` in `doc.cpp`, `iomusxml.cpp`, `preparedatafunctor.cpp`,
+`resources.cpp` and `editortoolkit_shared.cpp`; one argument too many in
+`ioabc.cpp`; and in `editortoolkit_neume.cpp`, which the applications
+do not use, a number given for `%s`). Upstream's, not changed here.
+
 ## Rules for this branch
 
 - A patch is carried only when the change cannot be made outside the
@@ -954,6 +1827,24 @@ already differed from their score and now differ in other notes.
   pitches by design; it builds no object and removes none, and no id of
   a document of the corpus changed (on two pages a text the engine makes
   while it draws has another id: see the entry).
+  Twenty-two since 2026-10-13, by the owner's decision of 2026-10-12
+  ("Build it all"), under an exception to two rules at once: patches 19
+  to 22 are features (the Humdrum export says the order a score is
+  played in and holds its chord symbols), and they add 615 lines (171,
+  115, 30 and 299) where a patch is to be about 30. They are separate
+  patches, each with its own cases; patch 22 is the largest because it
+  also holds what the review of the first build found in the converter
+  (a staff or a beat that a file says wrongly, a hairpin beside a
+  dynamic, a mark given by the note it starts on). Patch 21 is in an
+  importer and changes what it builds for two kinds of Humdrum file,
+  declared in its section: no file MuseNote wrote, and none of the
+  parity set. Patch 19 is not shipped without patch 21. One limit is
+  declared and pinned by a case, not mended: the chord symbols of a
+  re-opened export do not follow a transposition.
+  Twenty-three since 2026-10-14: patch 23 is a crash fix (text of a file
+  was the format of a log message), of the kind this queue has carried
+  since patch 7. It marks four functions in a header and changes the
+  output of no score.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
