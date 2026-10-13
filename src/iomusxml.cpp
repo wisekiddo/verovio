@@ -3263,8 +3263,32 @@ void MusicXmlInput::ReadMusicXmlNote(
             if (note->HasPname()) {
                 ListOfObjects accids = note->FindAllDescendantsByType(ACCID);
                 if (!accids.size()) {
+                    // How the file says the note sounds: its <alter> (none is a natural). What is carried over below
+                    // is only how the importer believes it sounds, from one key and one bar of accidentals held for
+                    // the whole score: a part after the first is read under the key it began in (its changes of key
+                    // are not read), a tie does not hold an accidental over the barline, an accidental is carried to
+                    // every octave and staff, and a sound the file gives with no <accidental> is not known at all.
+                    const float alter = pitch.child("alter").text().as_float();
+                    const data_ACCIDENTAL_WRITTEN said = Att::AccidentalGesturalToWritten(ConvertAlterToAccid(alter));
+                    // Taken only where the accidental made from it plays exactly what the file says: whole
+                    // semitones the importer has a sign for. A quarter tone or three flats would be played as a
+                    // natural, further from the file than what is carried (an <alter> with no sign at all gives
+                    // no accidental here, which plays 0, and is never the file's own 0: that one is a natural)
+                    const bool saidIsPlayed
+                        = (TransPitch::GetChromaticAlteration(ACCIDENTAL_GESTURAL_NONE, said) == alter);
                     try {
-                        for (const auto &current : m_currentAccids.at(note->GetPname())) {
+                        // (each a copy: what the file says of this note changes nothing of what the bar carries)
+                        for (musicxml::Accidental current : m_currentAccids.at(note->GetPname())) {
+                            // Where the two would not play the same key, the file is right: the note is given what
+                            // a carried accidental of the file's sound gives. A natural is written out too
+                            // (accid.ges="n", as a carried natural is): a reader of the MEI that fills in the key for
+                            // a note with no accidental, as MuseNote's own does, must find it said
+                            if (saidIsPlayed
+                                && (TransPitch::GetChromaticAlteration(ACCIDENTAL_GESTURAL_NONE, said)
+                                    != TransPitch::GetChromaticAlteration(
+                                        Att::AccidentalWrittenToGestural(current.m_accid), ACCIDENTAL_WRITTEN_NONE))) {
+                                current = musicxml::Accidental(said, "", "");
+                            }
                             Accid *accid = new Accid();
                             note->AddChild(accid);
                             accid->IsAttribute(false);
