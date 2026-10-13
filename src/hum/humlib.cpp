@@ -14415,6 +14415,16 @@ void HumGrid::adjustClefChanges(void) {
 		if (!(*it)->isClefSlice()) {
 			continue;
 		}
+		// A clef that is the only line of its measure stays in it.  (A
+		// measure that holds a change of clef and nothing to play was
+		// left with no line at all, which the grid cannot write: the
+		// measure before it lost its barline, and when it was the last
+		// measure of a score the grid looked for the last line in a
+		// list with nothing in it, where the standard library's own
+		// checks end the process.)
+		if (count_if(measures[i]->begin(), measures[i]->end(), [](GridSlice* slice) { return slice->hasSpines(); }) == 1) {
+			continue;
+		}
 		// move clef to end of previous measure
 		GridSlice* tempslice = *it;
 		measures[i]->pop_front();
@@ -101061,6 +101071,15 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 			cerr << "error: no music detected in <score>" << endl;
 		}
 	}
+	// No more staves than a meter, a length of measure and a count of
+	// verses are kept for: a staff past those is one the score does not
+	// have.  (What is kept for a staff was looked up for every staff of
+	// the first measure, however many it has: past the end of where it
+	// is kept, or the whole conversion was given up.)
+	if (m_staffcount > m_maxstaff) {
+		cerr << "Warning: only the first " << m_maxstaff << " staves are converted" << endl;
+		m_staffcount = m_maxstaff;
+	}
 
 	if (m_recipQ) {
 		m_outdata.enableRecipSpine();
@@ -101180,6 +101199,70 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 
 //////////////////////////////
 //
+// readNumber -- A number that the file gives for a beat (@tstamp,
+//    @tstamp2), read from the start of its text as stof() and stod() read
+//    it.  False for text that starts with no number, or with one that is
+//    none to count with.  (Those two throw on such text, and nothing here
+//    catches: one <hairpin>, <dynam>, <dir> or <repeatMark> with such a
+//    beat, and the whole conversion was given up.)
+//
+
+static bool readNumber(const string& text, double& number) {
+	char* end = NULL;
+	number = strtod(text.c_str(), &end);
+	return (end != text.c_str()) && std::isfinite(number);
+}
+
+
+
+//////////////////////////////
+//
+// keepId, startOf -- A mark can say where it stands by the note, rest or
+//    chord it starts on (@startid) and name no beat and no staff:
+//    MuseNote's own editor writes its navigation marks so (a segno, a
+//    coda, "D.C. al Fine").  The id of what a token was made of is kept
+//    with the token, and such a mark finds the line of its token by it,
+//    and its staff.  (Only a beat was read: every such mark was left
+//    out.)
+//
+
+static void keepId(GridSlice* slice, int staffindex, int voiceindex, xml_node node) {
+	// (No line is given back for a grace note at the start of a measure.)
+	if (slice) {
+		slice->at(staffindex)->at(0)->at(voiceindex)->getToken()->setValue("auto", "xmlid", node.attribute("xml:id").value());
+	}
+}
+
+
+static GridSlice* startOf(xml_node mark, GridMeasure* gm, int& staffnum) {
+	string id = mark.attribute("startid").value();
+	if (id.rfind("#", 0) == 0) {
+		id.erase(0, 1);
+	}
+	// (What has no id is kept with none: a mark that names none starts on
+	// nothing.)
+	if (id.empty()) {
+		return NULL;
+	}
+	for (GridSlice* slice : *gm) {
+		for (int p=0; p<(int)slice->size(); p++) {
+			for (GridVoice* voice : *slice->at(p)->at(0)) {
+				// (A voice that has nothing on this line has no token.)
+				HTp token = voice->getToken();
+				if (token && (token->getValue("auto", "xmlid") == id)) {
+					staffnum = p + 1;
+					return slice;
+				}
+			}
+		}
+	}
+	return NULL;
+}
+
+
+
+//////////////////////////////
+//
 // Tool_mei2hum::processHairpins --
 //
 
@@ -101203,14 +101286,8 @@ void Tool_mei2hum::processHairpin(hairpin_info& info) {
 	GridMeasure *gm = info.gm;
 	int mindex = info.mindex;
 
-	string tstamp  = hairpin.attribute("tstamp").value();
 	string tstamp2 = hairpin.attribute("tstamp2").value();
 	string form    = hairpin.attribute("form").value();
-	string staff   = hairpin.attribute("staff").value();
-	if (staff == "") {
-		cerr << "Error: hairpin requires a staff number" << endl;
-		return;
-	}
 
 	auto myit = m_outdata.begin();
 	while (myit != m_outdata.end()) {
@@ -101220,28 +101297,33 @@ void Tool_mei2hum::processHairpin(hairpin_info& info) {
 		myit++;
 	}
 
-	int staffnum = stoi(staff);
+	// (A staff of the score: see parseHairpin().)
+	int staffnum = hairpin.attribute("staff").as_int();
 	string hairopen = "<";
 	string hairclose = "[";
 	if (form == "dim") {
 		hairopen = ">";
 		hairclose = "]";
 	}
-	// A hairpin given by the notes it starts and ends on has neither, and
-	// stod() throws on an empty string: it is left out, where the whole
-	// conversion was given up.
-	if (tstamp.empty() || tstamp2.empty()) {
-		return;
-	}
-	double starttime = stod(tstamp) - 1.0;
+	// The beats it starts and ends on, and how many measures on it ends
+	// ("1m+2.5").  A hairpin given by the notes it starts and ends on has
+	// none of them, and a file can hold text there that is no number: such
+	// a hairpin is left out, where the whole conversion was given up.
+	double starttime = 0.0;
 	double measure = 0.0;
+	double endtime = 0.0;
 	auto loc = tstamp2.find("m+");
 	if (loc != string::npos) {
-		string mnum = tstamp2.substr(0, loc);
-		measure = stod(mnum);
+		if (!readNumber(tstamp2.substr(0, loc), measure)) {
+			return;
+		}
 		tstamp2 = tstamp2.substr(loc+2, string::npos);
 	}
-	double endtime = stod(tstamp2) - 1;
+	if (!readNumber(hairpin.attribute("tstamp").value(), starttime) || !readNumber(tstamp2, endtime)) {
+		return;
+	}
+	starttime -= 1.0;
+	endtime -= 1.0;
 
 	HumNum measurestart = gm->getTimestamp();
 	HumNum timestamp;   // timestamp of event in measure
@@ -101273,9 +101355,19 @@ void Tool_mei2hum::processHairpin(hairpin_info& info) {
 		it++;
 	}
 
+	// A sign joins what its line holds already: a dynamic, or the sign of
+	// another hairpin.  (It took its place: "p, a crescendo from that
+	// note, f where it ends" was written with neither dynamic.)  Verovio's
+	// reader takes the letters of such a token for the dynamic and the
+	// rest for hairpins, and an opening sign with a closing one straight
+	// after it ("< [") for a hairpin as long as its note.  So the sign
+	// that opens one stands last, and the sign that closes one first,
+	// unless it closes the hairpin that opens on that very line.
+	GridSlice* opened = lastgs;
 	if (lastgs) {
 		GridPart* part = lastgs->at(staffnum-1);
-		part->setDynamics(hairopen);
+		HTp there = part->getDynamics();
+		part->setDynamics(there ? (string)*there + " " + hairopen : hairopen);
 		m_outdata.setDynamicsPresent(staffnum-1);
 	}
 
@@ -101314,7 +101406,14 @@ void Tool_mei2hum::processHairpin(hairpin_info& info) {
 	}
 	if (lastgs) {
 		GridPart* part = lastgs->at(staffnum-1);
-		part->setDynamics(hairclose);
+		HTp there = part->getDynamics();
+		if (there == NULL) {
+			part->setDynamics(hairclose);
+		} else if (lastgs == opened) {
+			part->setDynamics((string)*there + " " + hairclose);
+		} else {
+			part->setDynamics(hairclose + " " + (string)*there);
+		}
 		m_outdata.setDynamicsPresent(staffnum-1);
 	}
 
@@ -102393,6 +102492,13 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 		   // ignore for now
 		} else if (nodename == "staff") {
 			// section/staff is possible in mensural music.
+			// (One the score does not have is left out, as in
+			// parseMeasure().)
+			long number = strtol(children[i].attribute("n").value(), NULL, 10);
+			if (((number < 1) ? m_currentStaff + 1 : number) > m_staffcount) {
+				cerr << "Warning: a staff the score does not have is left out" << endl;
+				continue;
+			}
 			parseStaff_mensural(children[i], starttime);
 		} else {
 			cerr << DKHTP << section.name() << "/" << nodename << CURRLOC << endl;
@@ -102690,6 +102796,18 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 	for (int i=0; i<(int)children.size(); i++) {
 		string nodename = children[i].name();
 		if (nodename == "staff") {
+			// A staff the score does not have is left out: its number is
+			// the file's own, and what stands on a staff is looked up by
+			// it.  (Each note of such a staff was refused where it was to
+			// be written, but a whole-measure rest or a syllable on it
+			// was looked up first, in what the score does not have: the
+			// whole conversion was given up.)  A staff with no number of
+			// its own is the one after the staff read last: parseStaff().
+			long number = strtol(children[i].attribute("n").value(), NULL, 10);
+			if (((number < 1) ? m_currentStaff + 1 : number) > m_staffcount) {
+				cerr << "Warning: a staff the score does not have is left out" << CURRLOC << endl;
+				continue;
+			}
 			durations.push_back(parseStaff(children[i], starttime) - starttime);
 		} else if (nodename == "fermata") {
 			// handled in process processNodeStartLinks()
@@ -102712,7 +102830,7 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 			// known, wherever it stands in it: by who called.
 		} else if (nodename == "tempo") {
 			parseTempo(children[i], starttime);
-		} else if (nodename == "dir") {
+		} else if ((nodename == "dir") || (nodename == "repeatMark")) {
 			parseDir(children[i], starttime);
 		} else if (nodename == "reh") {
 			parseReh(children[i], starttime);
@@ -102828,6 +102946,9 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 		gm->setBarStyle(MeasureStyle::RepeatForward);
 	} else if (rightstyle == "rptboth") {
 		gm->setBarStyle(MeasureStyle::RepeatBoth);
+	} else if (rightstyle == "dbl") {
+		// (It was not read: a double barline came out as a plain one.)
+		gm->setBarStyle(MeasureStyle::Double);
 	} else if (rightstyle == "invis") {
 		gm->setInvisibleBarline();
 	}
@@ -102855,6 +102976,17 @@ void Tool_mei2hum::parseHairpin(xml_node hairpin, HumNum starttime) {
 	for (int i=0; i<(int)children.size(); i++) {
 		string nodename = children[i].name();
 		cerr << DKHTP << hairpin.name() << "/" << nodename << CURRLOC << endl;
+	}
+
+	// The staff it is written for is a number of the file's own: one the
+	// score does not have is left out, here where its measure is known.
+	// (The staff was looked up unchecked when the hairpin was written,
+	// and its number was read with stoi(), which throws on text that is
+	// none: for either the whole conversion was given up.)
+	int staffnum = hairpin.attribute("staff").as_int();
+	if ((staffnum < 1) || (staffnum > m_staffcount)) {
+		cerr << "Warning: hairpin for a staff the score does not have" << CURRLOC << endl;
+		return;
 	}
 
 	// Store the hairpin for later parsing when more of the
@@ -103735,6 +103867,7 @@ HumNum Tool_mei2hum::parseNote(xml_node note, xml_node chord, string& output,
 			dataslice = m_outdata.back()->addGraceToken(tok, starttime QUARTER_CONVERT,
 					m_currentStaff-1, 0, m_currentLayer-1, m_staffcount, gracenumber);
 		}
+		keepId(dataslice, m_currentStaff-1, m_currentLayer-1, note);
 	} else {
 		output += tok;
 	}
@@ -103768,7 +103901,11 @@ HumNum Tool_mei2hum::parseNote(xml_node note, xml_node chord, string& output,
 		}
 	}
 
-	if (!hasverse) {
+	// (A note of a chord has no line of its own, and a grace note at the
+	// start of a measure is given none back.  A syllable written as an
+	// attribute of such a note was put into the line that is not there:
+	// the process ended.  It is left out, as a <verse> of such a note is.)
+	if (!hasverse && (dataslice != NULL)) {
 		string attsyl = note.attribute("syl").value();
 		if (!attsyl.empty()) {
 			parseSylAttribute(attsyl, dataslice->at(m_currentStaff-1)->at(0));
@@ -104147,8 +104284,8 @@ HumNum Tool_mei2hum::parseMRest(xml_node mrest, HumNum starttime) {
 	// Deal here with calculating number of dots needed for
 	// measure duration.
 
-	m_outdata.back()->addDataToken(tok, starttime QUARTER_CONVERT,
-			m_currentStaff-1, 0, m_currentLayer-1, m_staffcount);
+	keepId(m_outdata.back()->addDataToken(tok, starttime QUARTER_CONVERT,
+			m_currentStaff-1, 0, m_currentLayer-1, m_staffcount), m_currentStaff-1, m_currentLayer-1, mrest);
 
 	return starttime + duration; // convert to whole-note units
 }
@@ -104191,8 +104328,8 @@ HumNum Tool_mei2hum::parseRest(xml_node rest, HumNum starttime) {
 	processLinkedNodes(output, rest);
 	processFermataAttribute(output, rest);
 
-	m_outdata.back()->addDataToken(output, starttime QUARTER_CONVERT,
-			m_currentStaff-1, 0, m_currentLayer-1, m_staffcount);
+	keepId(m_outdata.back()->addDataToken(output, starttime QUARTER_CONVERT,
+			m_currentStaff-1, 0, m_currentLayer-1, m_staffcount), m_currentStaff-1, m_currentLayer-1, rest);
 
 	return starttime + duration;
 }
@@ -104498,6 +104635,8 @@ void Tool_mei2hum::processNodeStartLinks(string& output, xml_node node,
 			parseArpeg(output, node, nodelist[i]);
 		} else if (nodename == "tupletSpan") {
 			// handled in processNodeStartLinks2
+		} else if ((nodename == "dir") || (nodename == "repeatMark")) {
+			// written with its measure, on the line of this note: parseDir()
 		} else {
 			cerr << DKHTP << nodename
 			     << " element in processNodeStartLinks()" << endl;
@@ -105439,8 +105578,8 @@ HumNum Tool_mei2hum::parseChord(xml_node chord, HumNum starttime, int gracenumbe
 		processFermataAttribute(tok, chord);
 	}
 
-	m_outdata.back()->addDataToken(tok, starttime QUARTER_CONVERT, m_currentStaff-1,
-		0, m_currentLayer-1, m_staffcount);
+	keepId(m_outdata.back()->addDataToken(tok, starttime QUARTER_CONVERT, m_currentStaff-1,
+		0, m_currentLayer-1, m_staffcount), m_currentStaff-1, m_currentLayer-1, chord);
 
 	return starttime + duration;
 }
@@ -105556,7 +105695,14 @@ void Tool_mei2hum::buildIdLinkMap(xml_document& doc) {
 //
 
 void Tool_mei2hum::parseDir(xml_node dir, HumNum starttime) {
-	NODE_VERIFY(dir, )
+	// A <dir>, or a <repeatMark>: a segno or a coda sign is written as
+	// the words of a direction are, as "[segno]" and "[coda]", which
+	// Verovio's Humdrum reader draws as the signs.  (A <repeatMark> was
+	// not known: every such sign was lost.)
+	bool sign = (strcmp(dir.name(), "repeatMark") == 0);
+	if (!sign) {
+		NODE_VERIFY(dir, )
+	}
 	MAKE_CHILD_LIST(children, dir);
 
 	string font = "i";  // italic by default in verovio
@@ -105575,6 +105721,7 @@ void Tool_mei2hum::parseDir(xml_node dir, HumNum starttime) {
 		int count = 0;
 		for (int i=0; i<(int)children.size(); i++) {
 			string nodename = children[i].name();
+			string glyph = children[i].attribute("glyph.name").value();
 			if (nodename == "rend") {
 				if (count) {
 					text += " ";
@@ -105594,13 +105741,27 @@ void Tool_mei2hum::parseDir(xml_node dir, HumNum starttime) {
 				}
 				count++;
 				text += children[i].value();
+			} else if ((nodename == "symbol") && ((glyph == "segno") || (glyph == "coda"))) {
+				// the sign as it is written here and as a reader gives
+				// it back: it is written again
+				text += "[" + glyph + "]";
+				font = "";
 			} else {
 				cerr << DKHTP << dir.name() << "/" << nodename << CURRLOC << endl;
 			}
 		}
 	}
 
+	string func = dir.attribute("func").value();
+	if (text.empty() && ((func == "segno") || (func == "coda"))) {
+		text = "[" + func + "]";
+		font = "";
+	}
+
 	if (text.empty()) {
+		if (sign) {
+			cerr << "Warning: a repeatMark that is no segno or coda and has no words is not converted" << CURRLOC << endl;
+		}
 		return;
 	}
 
@@ -105611,30 +105772,69 @@ void Tool_mei2hum::parseDir(xml_node dir, HumNum starttime) {
 	}
 	message += "t=" + cleanDirText(text);
 
-	string ts = dir.attribute("tstamp").value();
-	if (ts.empty()) {
-		cerr << "Error: no timestamp on dir element and can't currently processes with @startid." << endl;
-		return;
-	}
-
-	xml_attribute atstaffnum = dir.attribute("staff");
-	if (!atstaffnum) {
-		cerr << "Error: staff number required on dir element in measure "
-		     << m_currentMeasure  << " (ignoring text: " << cleanWhiteSpace(text) << ")" << endl;
-		return;
-	}
-	int staffnum = dir.attribute("staff").as_int();
-	if (staffnum <= 0) {
-		cerr << "Error: staff number on dir element in measure should be positive.\n";
-		cerr << "Instead the staff number is: " << m_currentMeasure  << " (ignoring text: " <<  cleanWhiteSpace(text) << ")" << endl;
-		return;
-	}
-
-	double meterunit = m_currentMeterUnit[staffnum - 1];
-	double tsd = (stof(ts)-1) * 4.0 / meterunit;
-
+	// Where it stands: at the beat and on the staff it names (@tstamp,
+	// @staff); or, when it names no beat, on the line and the staff of the
+	// note, rest or chord it starts on (@startid).  (The beat was read
+	// with stof(), which throws on text that is no number: the whole
+	// conversion was given up.)
 	GridMeasure* gm = m_outdata.back();
 	double tsm = gm->getTimestamp().getFloat();
+	double beat = 0.0;
+	int staffnum = 0;
+	GridSlice* anchor = NULL;
+	if (readNumber(dir.attribute("tstamp").value(), beat)) {
+		xml_attribute atstaffnum = dir.attribute("staff");
+		if (!atstaffnum) {
+			cerr << "Error: staff number required on dir element in measure "
+			     << m_currentMeasure  << " (ignoring text: " << cleanWhiteSpace(text) << ")" << endl;
+			return;
+		}
+		staffnum = atstaffnum.as_int();
+	} else {
+		anchor = startOf(dir, gm, staffnum);
+		if (anchor == NULL) {
+			cerr << "Warning: a " << dir.name() << " with no beat and no note of its measure to start on is left out"
+			     << CURRLOC << endl;
+			return;
+		}
+	}
+	// The staff is a number of the file's own: one the score does not
+	// have is left out.  (It was looked up unchecked: past the end of
+	// where the meters are kept for a number above a thousand, which a
+	// sanitizer sees.)
+	if ((staffnum < 1) || (staffnum > m_staffcount)) {
+		cerr << "Warning: " << dir.name() << " for a staff the score does not have" << CURRLOC << endl;
+		return;
+	}
+
+	double at = 0.0;
+	if (anchor == NULL) {
+		// Where no note or rest starts at that time (the words at the
+		// end of a measure: "D.C. al Fine", "To Coda", "Fine"), on the
+		// last note or rest of the staff's first voice before it.  Not
+		// on a line where that voice has nothing: Verovio's reader puts
+		// a space into the voice for words on no token, and what follows
+		// is played late.  (Such words were left out.)
+		double tsd = (beat - 1) * 4.0 / m_currentMeterUnit.at(staffnum - 1);
+		at = tsd;
+		for (GridSlice* slice : *gm) {
+			if (!slice->isDataSlice()) {
+				continue;
+			}
+			double offset = slice->getTimestamp().getFloat() - tsm;
+			if (offset > tsd + 0.0001) {
+				break;
+			}
+			if (offset > tsd - 0.0001) {
+				// a note or rest starts there: on it, as before
+				at = tsd;
+				break;
+			}
+			if (slice->at(staffnum-1)->at(0)->at(0)->getToken()) {
+				at = offset;
+			}
+		}
+	}
 	bool foundslice = false;
 	GridSlice* gs;
 	for (auto gsit = gm->begin(); gsit != gm->end(); gsit++) {
@@ -105643,8 +105843,8 @@ void Tool_mei2hum::parseDir(xml_node dir, HumNum starttime) {
 			continue;
 		}
 		double gsts = gs->getTimestamp().getFloat();
-		double difference = (gsts-tsm) - tsd;
-		if (!(fabs(difference) < 0.0001)) {
+		double difference = (gsts-tsm) - at;
+		if (anchor ? (gs != anchor) : !(fabs(difference) < 0.0001)) {
 			continue;
 		}
 		// GridVoice* voice = gs->at(staffnum-1)->at(0)->at(0);
@@ -105680,7 +105880,11 @@ void Tool_mei2hum::parseDir(xml_node dir, HumNum starttime) {
 		}
 
 		// Insert a layout slice in front of current data slice.
-		GridSlice* ngs = new GridSlice(gm, gs->getTimestamp(), SliceType::Layouts, m_maxStaffInFile);
+		// (As many staves as every other line has.  It was as many as
+		// had been read so far: words that stand in their measure before
+		// the staff they are for had no place in the line made for them,
+		// and that line had too few fields.)
+		GridSlice* ngs = new GridSlice(gm, gs->getTimestamp(), SliceType::Layouts, m_staffcount);
 		int parti = staffnum - 1;
 		int staffi = 0;
 		int voicei = 0;
@@ -105969,12 +106173,16 @@ void Tool_mei2hum::parseTempo(xml_node tempo, HumNum starttime) {
 	// notes around it were overwritten.)
 	HumNum timestamp = starttime QUARTER_CONVERT;
 	GridMeasure* gm = m_outdata.back();
-	GridSlice* gs = new GridSlice(gm, timestamp, SliceType::Tempos, m_maxStaffInFile);
+	// As wide as the score, as every other line.  (It was as wide as the
+	// staves read so far: a tempo mark that stands in its measure before
+	// one of the staves made a line of too few fields, and the file was
+	// refused when it was read back.)
+	GridSlice* gs = new GridSlice(gm, timestamp, SliceType::Tempos, m_staffcount);
 	stringstream stok;
 	stok << "*MM" << value;
 	string token = stok.str();
 
-	for (int i=0; i<m_maxStaffInFile; i++) {
+	for (int i=0; i<m_staffcount; i++) {
 		gs->at(i)->at(0)->at(0)->setToken(token);
 	}
 
@@ -106175,18 +106383,28 @@ void Tool_mei2hum::parseDynam(xml_node dynam, HumNum starttime) {
 		}
 	}
 
-	if (text.empty()) {
+	// One token of its staff's dynamics: no tab and no line break in it,
+	// and nothing that a reader takes for a comment, an interpretation, a
+	// barline or no token at all.  (It was written as it stood, and a file
+	// with such a text was refused when it was read back.)
+	text = cleanWhiteSpace(text);
+	if (text.empty() || (text == ".") || (text[0] == '!') || (text[0] == '*') || (text[0] == '=')) {
 		return;
 	}
 
 	string startid = dynam.attribute("startid").value();
 
+	// The staff is a number of the file's own: one the score does not
+	// have is left out.  (It was looked up unchecked: past the end of
+	// where the meters are kept for a number above a thousand or below
+	// one, which a sanitizer sees, and for any other the whole conversion
+	// was given up.)
 	int staffnum = dynam.attribute("staff").as_int();
-	if (staffnum == 0) {
-		cerr << "Error: staff number required on dynam element" << endl;
+	if ((staffnum < 1) || (staffnum > m_staffcount)) {
+		cerr << "Warning: dynam for a staff the score does not have" << CURRLOC << endl;
 		return;
 	}
-	double meterunit = m_currentMeterUnit[staffnum - 1];
+	double meterunit = m_currentMeterUnit.at(staffnum - 1);
 
 	if (!startid.empty()) {
 		// Dynamic is (or at least should) be attached directly
@@ -106195,12 +106413,14 @@ void Tool_mei2hum::parseDynam(xml_node dynam, HumNum starttime) {
 		return;
 	}
 
-	string ts = dynam.attribute("tstamp").value();
-	if (ts.empty()) {
+	// (The beat was read with stof(), which throws on text that is no
+	// number: the whole conversion was given up.)
+	double beat = 0.0;
+	if (!readNumber(dynam.attribute("tstamp").value(), beat)) {
 		cerr << "Error: no timestamp on dynam element" << endl;
 		return;
 	}
-	double tsd = (stof(ts)-1) * 4.0 / meterunit;
+	double tsd = (beat - 1) * 4.0 / meterunit;
 	double tolerance = 0.001;
 	GridMeasure* gm = m_outdata.back();
 	double tsm = gm->getTimestamp().getFloat();
@@ -106212,17 +106432,23 @@ void Tool_mei2hum::parseDynam(xml_node dynam, HumNum starttime) {
 		}
 		double gsts = gs->getTimestamp().getFloat();
 		double difference = (gsts-tsm) - tsd;
-		if (difference < tolerance) {
-			// did not find data line at exact timestamp, so move
-			// the dynamic to the next event. Maybe think about adding
-			// a new timeslice for the dynamic.
-			nextgs = gs;
-			break;
-		}
-		if (!(fabs(difference) < tolerance)) {
+		// Where no note or rest starts at its time the dynamic is moved
+		// to the next that does, or to the last of the measure.  (The
+		// test for "past it" was true of every note and rest up to it:
+		// each dynamic went to the first of its measure.)
+		nextgs = gs;
+		if (difference < -tolerance) {
 			continue;
 		}
+		if (difference > tolerance) {
+			break;
+		}
 		GridPart* part = gs->at(staffnum-1);
+		if (part->getDynamics() != NULL) {
+			// (One moved there, or another at the same beat: it went
+			// without a word.)
+			cerr << "Warning: a dynamic takes the place of another at its note" << CURRLOC << endl;
+		}
 		part->setDynamics(text);
 		m_outdata.setDynamicsPresent(staffnum-1);
 		foundslice = true;
@@ -106232,6 +106458,11 @@ void Tool_mei2hum::parseDynam(xml_node dynam, HumNum starttime) {
 		if (nextgs == NULL) {
 			cerr << "Warning: dynamics not attched to system events "
 					<< "are not yet supported in measure " << m_currentMeasure << endl;
+		} else if (nextgs->at(staffnum-1)->getDynamics() != NULL) {
+			// One is there already, at its own time or moved there
+			// before: it stays.  (Not both in one token: a reader takes
+			// the letters of "f ff" for one dynamic, "fff".)
+			cerr << "Warning: a dynamic with no note of its own is left out" << CURRLOC << endl;
 		} else {
 			GridPart* part = nextgs->at(staffnum-1);
 			part->setDynamics(text);
