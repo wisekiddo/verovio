@@ -23,8 +23,9 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 13 | 2026-10-12 | Humdrum export: a repeat's signs, the score's key and its changes, and five ways a conversion was lost (f762a7300); amended the same day by: Humdrum export: say a key of no sharps or flats, leave out a key that is no number, and two reads out of bounds (ba546c924) | `src/hum/humlib.cpp`, `include/hum/humlib.h`, +91 / -4, then +22 / -5 | `Toolkit::ConvertMEIToHumdrum` only: the Humdrum it writes has a repeat's start, one barline for a multi-measure rest, the key of a score that says it on its `<scoreDef>` or as `@keysig`, and a change of key or of meter after the start; a hairpin it cannot place, an octave out of all range and a rest with no meter no longer lose the conversion, read out of bounds or end the process. No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 has every one |
 | 14 | 2026-10-12 | Do not put a section at index -1 when a repeat end follows a repeat end (d952f330d); amended the same day by: Read a repeat end with no repeat start as MusicXmlInput does: back to the last repeat start, or the beginning (31bb70748) | `src/expansionmap.cpp`, +19 / -6, then +24 / -15 | A score with no `<expansion>` of its own (ABC, Humdrum, MEI without one) in which a repeat end follows a repeat end with no repeat start between: it ended the process or lost a measure; every measure is now played, the second repeat from the last repeat start or the beginning, as `MusicXmlInput` has it (tb.8 alone: from where the first ended). None for a score whose repeats have their starts, nor for MusicXML, whose importer writes the expansion itself | Not offered upstream; `develop` of 2026-10-08 has it |
 | 15 | 2026-10-13 | ABC: a double repeat however it is spelled, a repeat end with no start as ABC says, and no read before an empty field value (42b7c120f) | `src/ioabc.cpp`, `include/vrv/ioabc.h`, +63 / -5 | An ABC file with `::` or `:|:` (the sign was read as a repeat end alone, or not as a bar line at all), or with a repeat end that has no start after a repeat end or a double bar (it went back to the beginning, since tb.9; it goes back to that end or double bar, as ABC 2.1 says, and the start that is meant is written on its measure). The MEI of such a file changes, with the ids after a `::`. None for any other ABC file, and none for another format | Not offered upstream; `develop` of 2026-10-08 has all three |
-| 16 | 2026-10-13 | Do not follow an order of play that costs more than any score's (in 26069d6fa and de66ee4e0) | `src/doc.cpp`, `src/iomusxml.cpp`, +29 / -1 | A score whose order of play would cost more than 1,000,000 by the count below (200 repeat ends in a row with no start; a measure marked to be played 2,000 times) is played as written, once through, where its timemap and MIDI took minutes and a gigabyte or never came back; a MusicXML repeat is played at most 100 times. None for a score within that cost: the dearest of the corpus comes to 23,000 | Not offered upstream; `develop` of 2026-10-08 has both |
+| 16 | 2026-10-13 | Do not follow an order of play that costs more than any score's (in 26069d6fa and de66ee4e0) | `src/doc.cpp`, `src/iomusxml.cpp`, +29 / -1 | A score whose order of play would cost more than 1,000,000 by the count below (200 repeat ends in a row with no start) is played as written, once through, where its timemap and MIDI took minutes and a gigabyte; a MusicXML repeat is read as at most 100 times (a measure marked 2,000 times, which never came back, is played 100 times). None for a score within that cost: the dearest of the corpus comes to 30,000 | Not offered upstream; `develop` of 2026-10-08 has both |
 | 17 | 2026-10-13 | A MusicXML clef for a staff the part does not have is passed over (in de66ee4e0) | `src/iomusxml.cpp`, +6 / -1 | A MusicXML part with a `<clef number>` for a staff it does not have, or does not have yet (its `<staves>` comes in a later measure), now loads; it ended the process. The clef is not built. None for a score without one | Not offered upstream; `develop` of 2026-10-08 has it |
+| 18 | 2026-10-13 | Give a MusicXML note with no accidental written the sound its file says (b7b3512c9) | `src/iomusxml.cpp`, +25 / -1 | A MusicXML note with no `<accidental>` gets the sound its `<alter>` says, where the key and the accidentals the importer carries would play another key: its `<accid>` is given that `accid.ges` (a natural too, as `accid.ges="n"`), and a tie whose two notes are then of one pitch gets its end. Of the 2785 scores of the corpus 407 change in MIDI, pitch map and MEI (2968 `<accid>` lines and 507 `<tie>` lines; no line added or removed), 222 of them in drawing (244 of 3376 pages, each by its ties), and their Humdrum export; the timemap changes in none and no id of a document moves. None for a note that has an `<accidental>`, and none for MEI, ABC or Humdrum input | Not offered upstream. `develop` of 2026-10-08 reads `<alter>` too (PR #4383), but builds other objects and writes nothing for a natural |
 
 ### 1. PAE importer crashes
 
@@ -583,8 +584,9 @@ the times it is named, squared, by the number of its elements, and
 does not follow an order that comes to more than 1,000,000: the score
 is played as written, once through, with a warning. `MusicXmlInput`
 reads a repeat's `times` as at most 100. The dearest of the 2,785
-scores of the corpus comes to 23,009 (Piano Man), and no section of
-any is played more than 6 times. Not counted: an `<expansion>` named
+scores of the corpus comes to 29,977 (Piano Man; first written here as
+23,009, which no run gives), and no section of any is played more than
+6 times. Not counted: an `<expansion>` named
 inside another.
 
 **17. A clef for a staff the part does not have.** `ReadMusicXmlAttributes`
@@ -653,15 +655,256 @@ for 2785 of 2785.
 Measured apart as for tb.9, over the same 2785 scores. Read back the
 way an application opens a file: as tb.9 score for score (1700 play
 exactly what the original plays, 922 another number of notes, 157
-differ otherwise, 1 is refused; none ends the process). The text as it
-is written: as tb.9 for 2773; 12 hold one line more, the key of a
-transposing staff that had none.
+differ otherwise, 1 is refused; none ends the process; 5 give the
+comparison no verdict on either tag, the converter printing text of its
+own into their output). The text as it is written: as tb.9 for 2768.
+Of the 17 that differ, all with a transposing staff, 11 hold one line
+more (a key that had none), 5 have another key, and one loses its key
+line (Superstition: six flats written for a B-flat instrument are eight
+at concert pitch, which the converter has no key for).
 
 Native tests (`verovio_engine_tests`, 66 cases; 52 on tb.9): all pass,
 and all pass under AddressSanitizer with no report. 36 deliberate
 breaks of the lines of this tag, 35 caught by a case (five of them by
 ending the process); the 36th is the first of the two null checks in
 `cleanTempos`, which no tempo mark reaches today.
+
+### 18. The sound of a MusicXML note that has no accidental written (tb.11)
+
+`MusicXmlInput::ReadMusicXmlNote` never read a pitched note's `<alter>`. A
+note with no `<accidental>` was given the sound the importer believed it
+had: the key and the accidentals of the bar, of which it holds one set for
+the whole score. Four things followed.
+
+- **A part after the first** was read under the key it began in: a change
+  of key after the start is read from the first part only. Every note of a
+  later part on a step the change moves was played a semitone off. No score
+  of the corpus has this; a file a user imports can.
+- **A tie over a barline lost its accidental.** The carried accidentals are
+  set back at each barline, so an F sharp tied into the next bar, written
+  there without a sign, was read as F. The tie then found no note of its
+  pitch: it was left without an end and not drawn, and the held note was
+  struck again a semitone off (630 notes in 236 scores of the corpus).
+- **An accidental was carried to every octave, staff and voice** of the
+  part: the importer keeps one per step (115 notes in 45 scores).
+- **A sound the file gives by `<alter>` alone** was never seen: the note
+  was played as the key has it (2211 notes in 187 scores; 811 of the 2656
+  songs write no `<accidental>` at all).
+
+Measured note by note, each note's engine pitch (the pitch map) against its
+file's `<step>`, `<alter>`, `<octave>` and the part's transposition: 2971
+of the pitched notes in 407 of the 2765 MusicXML scores of the corpus, and
+2511 in 377 of the 2656 songs users have. (Of the 429211 pitched notes of
+the corpus, 1095 are not in the pitch map on either engine and were not
+compared: 611 in three scores whose later parts the engine does not hold,
+484 in 35 others.) By route: the four above, 5 notes in 2 scores after a
+change of key the importer misses in the first part itself, and 10 notes
+at a sign that the importer does not know or that says another sound than
+its `<alter>` (My Prayer and Nobody's Perfect, below).
+
+**What the patch does.** Where a note has no `<accidental>`, the importer
+still builds one `<accid>` for each accidental it carries for the note's
+step, as before. Each is now made from the file's sound instead of the
+carried one when the two would not play the same key: the `<alter>` is
+read (none is a natural), and where its number of semitones differs from
+the carried accidental's, the `<accid>` gets the `accid.ges` and the glyph
+name a carried accidental of that sound would have given. Where they play
+the same key the note is written exactly as before (so a quarter-tone sign
+carried through the bar keeps its own glyph). What the bar carries is not
+changed by it: the next note with no sign is compared with the same
+carried accidental.
+
+**Only an `<alter>` the engine plays exactly is taken**: a whole number of
+semitones the importer has a sign for (-2 to 2). For a quarter tone, for
+three flats or sharps, and for a text that is no number, the accidental
+the importer makes is played as a natural, which is further from the file
+than what is carried: such a note is left as tb.10 read it. (The form
+first built took these too; its review found the 29 combinations where
+that moved a note away from its file. No file of the corpus, the songs,
+the scales or MuseSync's starter songs has such an `<alter>`: the values
+there are 1, -1, 2 and -2, counted over every file.)
+
+**A natural is written out** (`accid.ges="n"`, glyph name
+`accidentalNatural`), although the engine plays a note with no accidental
+as a natural anyway. MuseNote reads the engine's MEI export again through
+its own `engineInputOf` (an editable copy of a score, the MEI and MusicXML
+exports), and that reading gives a note with no gestural accidental the
+bar's or the key's. A first form of this patch wrote nothing for a
+natural: 99 scores and 915 notes of the corpus were then played
+differently in a copy or an export than in the reader (measured by the
+review of that form on 2026-10-12; a deliberate break that brings the form
+back fails three cases). With the natural written out it is 1 score and 2
+notes, the same two as on tb.10 (below). This is the form tb.9 already
+writes for a natural it carries.
+
+**No object is built and none removed**, so no id moves. The patch adds no
+`new`, no `AddChild` and no removal; the loop runs once for each entry of
+the same list as before (over a copy of each entry, where it ran over a
+reference); what it calls builds no `Object`. Measured: the ordered list
+of every `xml:id` of the MEI export is the same on tb.10 and tb.11 for all
+2785 scores (2304293 ids) and for the 2656 songs (2280803 ids), and the
+pitch map and the timemap name the same notes.
+
+Carried because the sound of a note is fixed while the engine reads the
+file: after it, nothing outside the engine can tell a carried accidental
+from a written one, and a tie that found no end is already lost.
+
+**Declared change**, tb.10 against tb.11, the 2785 scores of the corpus,
+each loaded with `{"xmlIdSeed":1}` in a process of its own, and its MIDI,
+timemap, pitch map, MEI export (without its timestamp) and the SVG of
+every page compared byte for byte, by the builder and again by its
+reviewer with scripts of their own:
+
+- 2378 scores are identical in all five.
+- 407 differ in MIDI, pitch map and MEI, all three in each of them; 222 of
+  those also in the SVG. The timemap differs in none. No score loads on
+  one engine and not on the other, and none has another number of pages.
+- MEI: 2968 `<accid>` lines and 507 `<tie>` lines differ; no line is added
+  or removed and no other line differs. None of the changed `<accid>`
+  lines has a written accidental (`accid=`). By `accid.ges` before and
+  after: none to flat 951, none to sharp 738, flat to natural 678, sharp
+  to natural 464, natural to flat 61, flat to sharp 38, natural to sharp
+  18, none to double sharp 12, sharp to flat 7, flat to double flat 1. Of
+  the ties, 490 gain an end, 10 lose theirs and 7 end on another note.
+  Over the whole corpus, of 34529 ties, those with no end go from 3517 in
+  475 scores to 3037 in 286.
+- Drawing: 244 of the 3376 pages differ, in 222 scores (page 1 in 208 of
+  them). Each of the 244 holds a tie that the MEI changes. On 229 only the
+  tie curves differ; on 13 the tie curves and the places of what stands
+  around them (a tie takes room); 2 are the pages named next. No
+  accidental is drawn that was not, and none is taken away.
+- Ids on the pages: the same, in order, on every page but 2 (God Put a
+  Smile Upon Your Face page 2, Money, Money, Money page 1). On each of the
+  two, one id differs, and it is no id of the document: the text of a
+  volta bracket's number, a `Text` the engine builds each time it draws
+  the bracket (`View::DrawEnding`). It is in neither the MEI, the timemap
+  nor the pitch map, and it is another id every time the page is drawn, on
+  tb.10 as on tb.11. It takes its number from the counter all ids come
+  from, and that counter stands elsewhere because of a tie: before a page
+  is drawn the engine lays out every page that a tie of its first and last
+  bars reaches, and laying out builds objects.
+- The Humdrum export of the 407 scores differs in 403 (4 cannot be
+  exported and read back on either engine). A kern note says its sound, so
+  the export now says the file's; read back, 655 more natural signs are
+  drawn than from tb.10's export (the Humdrum reader draws a natural where
+  a note goes against the key), and a sharp or flat given by `<alter>`
+  alone is written hidden. The pitches read back agree with the direct
+  load exactly as often as on tb.10 (399 of 403).
+- Among the 407 are 30 of the 103 scales MuseNote generates itself (460
+  notes): every harmonic and melodic minor, the chromatic scales and the
+  four G sharp minor files. Its generator writes `<alter>` and never
+  `<accidental>`.
+
+The wrong notes, tb.10 to tb.11: corpus 2971 in 407 scores to 3 in 2; the
+songs 2511 in 377 to 3 in 2. The three that stay are notes that have an
+`<accidental>` (see "Known and left").
+
+MuseNote's reading of the engine's own export: every score's MEI export,
+through `engineInputOf`, loaded again, its pitch map against the direct
+load's. tb.10: 1 score, 2 notes. tb.11: 1 score, 2 notes, the same (My
+Prayer, bars 3 and 7). The export loaded again as it is, which is what the
+reader does: 0 scores on both.
+
+MuseSync takes its game notes from the pitch map. 3 of its 24 starter
+songs change: dont_speak 28 notes, unforgettable 1 note and 1 tie,
+waltz_of_the_flowers 1 note. The other 21 are byte-identical in MIDI,
+timemap and pitch map.
+
+**Where the change is no improvement.** Four bars of the collection, each
+a place where the file itself says two things:
+
+- Three bars tie two notes of different sounds (ties written for slurs, or
+  a wrong `<alter>`): Skyfall bar 38, You Know I'm No Good bar 9,
+  Unforgettable bar 26. tb.10 read the second note as the first and held
+  it; now it is struck as the file gives it, and a tie is ended elsewhere
+  or left open. `MatchTies` is not changed by this patch.
+- Nobody's Perfect bar 73: a C written with a sharp whose `<alter>` is -1,
+  and seven C after it with the same `<alter>` and no sign. tb.10 played
+  all eight as C sharp, the sign carried; now the first is C sharp, by its
+  sign, and the seven are C flat, by their `<alter>`. The chord around
+  them (A, G, A) makes the sharp the likelier truth: the file's `<alter>`
+  is wrong there.
+
+The other 14 of the 17 ties that lose their end or end on another note are
+improvements: a tie that tb.10 had ended on a wrong note many bars on now
+ends on the next bar's note (Money, Money, Money bars 23 to 28), or a tie
+its file never ends is let go where tb.10 had ended it bars later on a
+note it read wrong.
+
+**Known and left.**
+
+- *Heard, not shown.* The page is drawn from the `<accidental>` elements,
+  and this patch draws nothing more. 2211 notes in 188 scores of the
+  corpus (1753 in 158 of the songs) have an `<alter>` that the page as the
+  file writes it does not show: 2183 against the key alone, 25 against an
+  accidental written earlier in the bar, 3 at a tie. (The reviewer's own
+  model of the page counts 2215 in 189 and 1755 in 159.) tb.10 played all
+  but 2 of them as that page reads, against the file; tb.11 plays them as
+  the file says, and the page is as it was. Showing them is the next step,
+  outside the engine. Of the 1755 in the songs, 1261 are in 82 songs that
+  write no `<accidental>` at all, and 494 in 77 songs that do write some:
+  there either the page or the `<alter>` is wrong, and only Nobody's
+  Perfect has been judged by ear.
+- *A file that leaves `<alter>` out and counts on the key* is now played
+  in naturals. That is MusicXML's own rule, and no song of the collection
+  was found to count on the key, but for such a file it is a change. Held
+  by a test.
+- *A note with an `<accidental>` is read by its sign, as before, not by
+  its `<alter>`.* Three notes of the corpus stay wrong by their file for
+  it: Nobody's Perfect bar 73 (above), and My Prayer bars 3 and 7, a B
+  with `<accidental>double-flat</accidental>` and `<alter>-2`.
+  `double-flat` is no name of MusicXML's (it is `flat-flat`) and the
+  importer does not know it: the note gets an `<accid>` that says nothing
+  and is played as B natural, on tb.10 and on tb.11. Taking the `<alter>`
+  for a note whose sign gives no value was weighed and left out: 2 notes
+  in 1 score, and a wrong `<alter>` beside a sign exists (Nobody's
+  Perfect). Held by a test, so that a change of it is seen.
+- *A double sharp given by `<alter>` alone* is written `accid.ges="ss"`
+  with the glyph name `accidentalSharpSharp`, where a written double sharp
+  is `accid="x"`. Nothing is drawn from it today; whoever draws it must
+  write `x`, or two sharps are drawn.
+- *The key signature drawn for a later part.* A part in another key than
+  the first, or a change of key in one part alone, is still drawn with the
+  first part's signature after a change. The sound is right since this
+  patch; the drawing needs new objects.
+- *`ConvertAlterToAccid`* has `2` twice in its table and no `3`: a triple
+  sharp given by `<alter>` alone is not known and the note keeps what is
+  carried (upstream).
+- *Found beside it, in the same function, older, and not mended here:* a
+  `<chord/>` on the first note of a layer ends the process (an empty stack
+  is read), a rest whose `<display-octave>` is no number ends it too (an
+  exception nothing catches), and a note before a part's first
+  `<attributes>` reads one past the end of the octave-line table. For the
+  next tag.
+- *The move to 6.3.0.* This patch does not simply drop there. Upstream
+  reads `<alter>` but writes no `<accid>` for a natural, and MuseNote's
+  reading of an MEI would give such a note the key's accidental back (the
+  99 scores and 915 notes above). Before that move either that reading
+  stops filling in the key on an engine export of MusicXML, or the written
+  natural is carried on. (Upstream as read on 2026-10-12.)
+
+Regression test: `test_midi_document_engine.cpp`, 24 new cases.
+
+Native tests (`verovio_engine_tests`, 90 cases; 66 on tb.10): all pass, in
+one process and each in a process of its own, and under AddressSanitizer
+with no report. 26 deliberate breaks of the lines of this patch, each caught by a case
+(the 19 of its builder and the 17 of its reviewer are among them, in the
+form the final lines take). Under AddressSanitizer 150 scores of the corpus (75
+the patch touches, 75 it does not) were loaded, drawn, played, exported
+and read back, one process each: no report. 1670 hostile files of the
+reviewer's: nothing new in the changed lines.
+
+Parity gate, tb.10 against tb.11: 19930 outputs, 2257 differ. They are
+the MIDI, the pitch map and the MEI of the 407 scores, their two locator
+exports, and the page of 222 of them: the same 407 and the same 222 as
+measured above, and nothing else. No timemap differs. Seeded ids on a
+fresh thread: the same for 2785 of 2785.
+
+Measured apart as for tb.10, over the same 2785 scores. Read back the
+way an application opens a file: as tb.10 score for score, verdict and
+number of notes (1700 play exactly what the original plays). The text
+as it is written: as tb.10 but for 5 of the 407 scores, whose exports
+already differed from their score and now differ in other notes.
 
 ## Rules for this branch
 
@@ -704,6 +947,13 @@ ending the process); the 36th is the first of the two null checks in
   the ABC files it is about (a measure more at a `::`, a repeat start
   written where ABC means one): 8 of the 194 ABC files of the parity
   set, declared above, and no file of another format.
+  Eighteen since 2026-10-13, by the owner's decision of 2026-10-12
+  ("Sound now, page next"): patch 18 is no crash fix. It gives a
+  MusicXML note with no accidental written the sound its file says,
+  which only the importer can do. It is in the importer and changes
+  pitches by design; it builds no object and removes none, and no id of
+  a document of the corpus changed (on two pages a text the engine makes
+  while it draws has another id: see the entry).
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
