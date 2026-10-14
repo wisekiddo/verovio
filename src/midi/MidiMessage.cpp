@@ -1648,7 +1648,12 @@ void MidiMessage::makeKeySignature(int fifths, bool mode) {
 void MidiMessage::makeTimeSignature(int top, int bottom, int clocksPerClick,
 		int num32ndsPerQuarter) {
 	int base2 = 0;
-	while (bottom >>= 1) base2++;
+	// (a bottom below zero stays below zero when shifted: the loop
+	// "while (bottom >>= 1)" never ended for it)
+	while (bottom > 1) {
+		bottom >>= 1;
+		base2++;
+	}
 	resize(7);
 	(*this)[0] = 0xff;
 	(*this)[1] = 0x58;
