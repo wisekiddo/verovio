@@ -1709,18 +1709,23 @@ void Doc::ExpandExpansions()
 
     // What following the order costs. A section played again is a copy of its elements, and every copy of an
     // element is listed with all the others of it (ExpansionMap): k times played is k times k. The dearest of
-    // 2,785 real scores comes to 23,000 by this count; 200 repeat ends in a row with no start, or one measure
-    // marked to be played 2,000 times, come to millions, a gigabyte and minutes from a file of 2 KB. Such a score
-    // is played as it is written, once through.
-    static const size_t maxOrderCost = 1000000;
+    // 2,785 real scores comes to 30,000 by this count; 200 repeat ends in a row with no start come to millions,
+    // a gigabyte and minutes from a file of 2 KB. An order that costs more than OrderOfPlay::s_maxCost is not
+    // followed at all: the score is played as it is written, once through, every repeat of it dropped and not
+    // only the dear one. (A MusicXML repeat is read as at most 100 times before it comes here: a measure marked
+    // 2,000 times is played 100 times, if the order that makes is within the cost.) The writers of an order
+    // (ExpansionMap::GenerateExpansionFor, MusicXmlInput::CreateExpansion) stop at the same limit by a count that
+    // is never more than this one; what they leave is the beginning of an order, and is refused here.
     std::map<std::string, size_t> timesPlayed;
     for (const std::string &ref : startExpansion->GetPlist()) ++timesPlayed[ref];
-    size_t orderCost = 0;
+    // (Counted in 64 bits: a size_t is 32 on some of the processors the engine runs on, where a section named
+    // 65,536 times came to nothing, and was followed.)
+    uint64_t orderCost = 0;
     for (const auto &[ref, times] : timesPlayed) {
         const Object *played = this->FindDescendantByID((ref.rfind("#", 0) == 0) ? ref.substr(1) : ref);
-        if (played) orderCost += times * times * (1 + CountDescendants(played));
+        if (played) orderCost += uint64_t(times) * times * (1 + CountDescendants(played));
     }
-    if (orderCost > maxOrderCost) {
+    if (orderCost > OrderOfPlay::s_maxCost) {
         LogWarning("The order of %d sections is not followed (too many repeats): the score is played as written",
             (int)startExpansion->GetPlist().size());
         return;

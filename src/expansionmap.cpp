@@ -30,6 +30,19 @@
 namespace vrv {
 
 //----------------------------------------------------------------------------
+// OrderOfPlay
+//----------------------------------------------------------------------------
+
+bool OrderOfPlay::Add(const std::string &ref)
+{
+    if (m_leastCost > s_maxCost) return false;
+    m_refs.push_back(ref);
+    // named t times, then once more: (t + 1) squared is 2t + 1 more than t squared
+    m_leastCost += 2 * m_timesNamed[ref]++ + 1;
+    return true;
+}
+
+//----------------------------------------------------------------------------
 // ExpansionMap
 //----------------------------------------------------------------------------
 
@@ -402,12 +415,17 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
     // it does in MusicXmlInput::CreateExpansion, so what was repeated on the way is played once more.
     // `C :| E :| G` is C C E C E G from every format.
     std::vector<std::string> sinceStart;
+    // The order is gathered here and given to the expansion once, and no more of it is written than can be
+    // followed. (Each reference was added to the expansion's own list, which is copied whole for every one, and
+    // the cost was counted when all of the order stood there: 400 repeat ends in a row took half a minute)
+    OrderOfPlay order;
     const auto repeat = [&](const std::string &id) {
         if (id.empty()) return;
-        PlistInterface *plist = expansion->GetPlistInterface();
-        plist->AddRefAllowDuplicate("#" + id);
-        for (const std::string &before : sinceStart) plist->AddRefAllowDuplicate("#" + before);
-        plist->AddRefAllowDuplicate("#" + id);
+        order.Add("#" + id);
+        for (const std::string &before : sinceStart) {
+            if (!order.Add("#" + before)) break;
+        }
+        order.Add("#" + id);
         sinceStart.push_back(id);
     };
 
@@ -438,10 +456,11 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
         }
     }
 
-    if (expansion->GetPlist().empty()) {
+    if (order.GetRefs().empty()) {
         delete expansion;
     }
     else {
+        expansion->GetPlistInterface()->SetPlist(order.GetRefs());
         section->InsertChild(expansion, 0);
     }
 }

@@ -20,6 +20,27 @@ namespace vrv {
 class Score;
 class Section;
 
+/**
+ * An order of play while it is written, and the least that following it can cost: each section by the times it is
+ * named, squared (it holds one element at the least; the count itself is in Doc::ExpandExpansions). Whoever writes
+ * an order stops when that is past what is followed. What it has written by then costs more than is followed too.
+ */
+class OrderOfPlay {
+public:
+    /** What following an order of play may cost */
+    static constexpr size_t s_maxCost = 1000000;
+
+    /** Adds a reference. False, and nothing added, once the order costs more than is followed */
+    bool Add(const std::string &ref);
+
+    const xsdAnyURI_List &GetRefs() const { return m_refs; }
+
+private:
+    xsdAnyURI_List m_refs;
+    std::map<std::string, size_t> m_timesNamed;
+    size_t m_leastCost = 0;
+};
+
 class ExpansionMap {
 
 public:

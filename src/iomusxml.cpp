@@ -1329,6 +1329,13 @@ void MusicXmlInput::CreateExpansion(Section *section)
     Expansion *expansion = new Expansion();
     section->InsertChild(expansion, 0);
 
+    // The order is gathered here and given to the expansion once, and no more of it is written than can be
+    // followed. (Each reference was added to the expansion's own list, which is copied whole for every one, and
+    // the cost was counted when all of the order stood there: 60 measures each marked to be played 100 times took
+    // two minutes and more to load, 100 of them a quarter of an hour)
+    OrderOfPlay order;
+    bool isFollowed = true;
+
     // iterate on sections to create expansion
     // prepopulate the labels map because there are forward jumps (tocoda)
     bool jumpBack = false;
@@ -1342,7 +1349,7 @@ void MusicXmlInput::CreateExpansion(Section *section)
             labels.insert({ it->first.m_label, it });
         }
     }
-    while (iter != m_sections.end()) {
+    while (isFollowed && (iter != m_sections.end())) {
         // increment visited count
         iter->first.m_visited++;
 
@@ -1353,14 +1360,14 @@ void MusicXmlInput::CreateExpansion(Section *section)
         if (iter->first.m_classId == SECTION) {
             // add the section
             std::string ref = "#" + iter->first.m_target->GetID();
-            expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+            isFollowed = order.Add(ref);
 
             // repeat the sections, beginning with the repeat start
             int times = (jumpBack && !iter->first.m_repeatInfo.m_afterJump) ? 1 : iter->first.m_repeatInfo.m_times;
-            for (int t = 2; t <= times; ++t) {
-                for (auto it = rptIter; it != std::next(iter); ++it) {
+            for (int t = 2; isFollowed && (t <= times); ++t) {
+                for (auto it = rptIter; isFollowed && (it != std::next(iter)); ++it) {
                     std::string ref = "#" + it->first.m_target->GetID();
-                    expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+                    isFollowed = order.Add(ref);
                 }
             }
 
@@ -1394,15 +1401,15 @@ void MusicXmlInput::CreateExpansion(Section *section)
 
             // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
             // skip section first time because it was already added in the SECTION block
-            for (auto ending = endings.begin(); ending != endings.end(); ++ending) {
+            for (auto ending = endings.begin(); isFollowed && (ending != endings.end()); ++ending) {
                 if (ending != endings.begin()) {
-                    for (auto it = rptIter; it != std::next(secIter); ++it) {
+                    for (auto it = rptIter; isFollowed && (it != std::next(secIter)); ++it) {
                         std::string ref = "#" + it->first.m_target->GetID();
-                        expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+                        isFollowed = order.Add(ref);
                     }
                 }
                 std::string endref = "#" + ending->second->first.m_target->GetID();
-                expansion->GetPlistInterface()->AddRefAllowDuplicate(endref);
+                isFollowed = order.Add(endref);
             }
 
             // set the repetition to the (latest) nested one
@@ -1439,6 +1446,7 @@ void MusicXmlInput::CreateExpansion(Section *section)
             }
         }
     }
+    expansion->GetPlistInterface()->SetPlist(order.GetRefs());
 }
 
 void MusicXmlInput::ReadMusicXmlTitle(pugi::xml_node root)
