@@ -34,6 +34,7 @@
 #include "measure.h"
 #include "metersig.h"
 #include "mordent.h"
+#include "mrest.h"
 #include "multirest.h"
 #include "note.h"
 #include "pb.h"
@@ -1840,14 +1841,24 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
 
         // multi-measure rests
         else if (musicCode.at(i) == 'Z') {
-            MultiRest *multiRest = new MultiRest();
             std::string numString;
             while (i + 1 < (int)musicCode.length() && isdigit(musicCode.at(i + 1))) {
                 numString.push_back(musicCode.at(i + 1));
                 ++i;
             }
-            multiRest->SetNum(atoi(numString.c_str()));
-            m_layer->AddChild(multiRest);
+            // "Z" with no number is one measure of rest (ABC 2.1, 4.5), and is written as an empty bar is, an
+            // <mRest>; so is a number that is none (0, or one too long for an int, which comes out below zero).
+            // (No number was read as 0, and a <multiRest> of no measures has no time: the tune was played a measure
+            // short for each. MuseNote's own ABC export writes "Z" for an empty bar)
+            const int num = atoi(numString.c_str());
+            if (num < 1) {
+                m_layer->AddChild(new MRest());
+            }
+            else {
+                MultiRest *multiRest = new MultiRest();
+                multiRest->SetNum(num);
+                m_layer->AddChild(multiRest);
+            }
         }
 
         // text elements
