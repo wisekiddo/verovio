@@ -10,7 +10,10 @@
 //----------------------------------------------------------------------------
 
 #include <cassert>
+#include <climits>
+#include <cmath>
 #include <numeric>
+#include <optional>
 #include <regex>
 #include <sstream>
 
@@ -90,6 +93,16 @@
 #include "vrv.h"
 
 namespace vrv {
+
+// The whole number [text] begins with, if it begins with one that an int holds. (std::stoi throws for a text of
+// the file that is no number, or one too large: out of the library, and the process ended)
+static std::optional<int> ToInt(const std::string &text)
+{
+    char *end = NULL;
+    const long long number = std::strtoll(text.c_str(), &end, 10);
+    if ((end == text.c_str()) || (number < INT_MIN) || (number > INT_MAX)) return std::nullopt;
+    return static_cast<int>(number);
+}
 
 // Using flags mordent can be easily visualized with the value. E.g.
 // 0x212 - approach and depart are both below and form is normal
@@ -856,8 +869,9 @@ void MusicXmlInput::PrintMetronome(pugi::xml_node metronome, Tempo *tempo)
                 std::string matches("0123456789");
                 std::size_t offset = iter->second.find_first_of(matches);
                 if (offset < iter->second.length()) {
-                    const double mmval = std::stod(iter->second.substr(offset));
-                    tempo->SetMm(mmval);
+                    // (std::stod threw, out of the library, for a number too large or too small for a double)
+                    const double mmval = std::strtod(iter->second.c_str() + offset, NULL);
+                    if (std::isfinite(mmval)) tempo->SetMm(mmval);
                 }
                 if (!iter->second.empty()) {
                     Text *text = new Text();
@@ -1548,7 +1562,11 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
     short int nbStaves = 1;
     pugi::xpath_node staves = node.select_node("attributes[1]/staves");
     if (staves) {
-        nbStaves = staves.node().text().as_int();
+        // A part has one staff at the least. (A <staves> that is no number of staves, below 1 or more than the
+        // count's type holds, left the part with no staff at all, and its first note was put on the staff that
+        // was not there)
+        const int count = staves.node().text().as_int();
+        nbStaves = ((count >= 1) && (count <= SHRT_MAX)) ? count : 1;
     }
     if (nbStaves > 1) {
         if (m_label) staffGrp->AddChild(m_label);
@@ -1558,6 +1576,29 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
         m_labelAbbr = NULL;
         m_instrdef = NULL;
     }
+
+    // The <staffDef> of the part's staff [i], made when it is first asked for
+    const auto staffDefOf = [&](int i) {
+        AttNIntegerComparison comparisonStaffDef(STAFFDEF, i + 1 + staffOffset);
+        StaffDef *staffDef = vrv_cast<StaffDef *>(staffGrp->FindDescendantByComparison(&comparisonStaffDef, 1));
+        if (!staffDef) {
+            staffDef = new StaffDef();
+            staffDef->SetN(i + 1 + staffOffset);
+            if (nbStaves == 1) {
+                staffDef->SetID(staffGrp->GetID());
+                if (m_label) staffDef->AddChild(m_label);
+                if (m_labelAbbr) staffDef->AddChild(m_labelAbbr);
+                if (m_instrdef) staffDef->AddChild(m_instrdef);
+                m_label = NULL;
+                m_labelAbbr = NULL;
+                m_instrdef = NULL;
+            }
+            staffGrp->AddChild(staffDef);
+            // set initial octave shift
+            m_octDis.push_back(0);
+        }
+        return staffDef;
+    };
 
     for (pugi::xml_node child : node) {
 
@@ -1580,24 +1621,7 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
         // Create as many staffDef
         for (int i = 0; i < nbStaves; ++i) {
             // Find or create the staffDef
-            AttNIntegerComparison comparisonStaffDef(STAFFDEF, i + 1 + staffOffset);
-            StaffDef *staffDef = vrv_cast<StaffDef *>(staffGrp->FindDescendantByComparison(&comparisonStaffDef, 1));
-            if (!staffDef) {
-                staffDef = new StaffDef();
-                staffDef->SetN(i + 1 + staffOffset);
-                if (nbStaves == 1) {
-                    staffDef->SetID(staffGrp->GetID());
-                    if (m_label) staffDef->AddChild(m_label);
-                    if (m_labelAbbr) staffDef->AddChild(m_labelAbbr);
-                    if (m_instrdef) staffDef->AddChild(m_instrdef);
-                    m_label = NULL;
-                    m_labelAbbr = NULL;
-                    m_instrdef = NULL;
-                }
-                staffGrp->AddChild(staffDef);
-                // set initial octave shift
-                m_octDis.push_back(0);
-            }
+            StaffDef *staffDef = staffDefOf(i);
 
             // clef sign - first look if we have a clef-sign with the corresponding staff @number
             std::string xpath = StringFormat("clef[@number='%d']", i + 1);
@@ -1752,6 +1776,16 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
                 m_slash = (HasAttributeWithValue(measureSlash.node(), "type", "start")) ? true : false;
             }
         }
+    }
+
+    // Every staff of the part has its <staffDef>, of five lines where no <attributes> said how many. (They were
+    // made from the <attributes> the first measure begins with. A part that begins with a note had none: the
+    // octave-line table had no place for its staves, so that its notes read past the table's end, and the engine
+    // read the <staffDef> that was not there. Only a score of one such part, of one staff, was given one, at the
+    // end of the import, and that one without the part's name and instrument)
+    for (int i = 0; i < nbStaves; ++i) {
+        StaffDef *staffDef = staffDefOf(i);
+        if (!staffDef->HasLines()) staffDef->SetLines(5);
     }
 
     return nbStaves;
@@ -3125,7 +3159,8 @@ void MusicXmlInput::ReadMusicXmlNote(
     int duration = node.child("duration").text().as_int();
     // In chords, make sure a note does not extend first note's duration.
     // See https://github.com/rism-digital/verovio/issues/4225
-    if (isChord && duration && m_elementStackMap.at(layer).back()->Is(CHORD)) {
+    // (with a <chord/> on the first note of its layer nothing is before it: the last of nothing was read)
+    if (isChord && duration && !m_elementStackMap.at(layer).empty() && m_elementStackMap.at(layer).back()->Is(CHORD)) {
         Chord *chord = vrv_cast<Chord *>(m_elementStackMap.at(layer).back());
         if (chord) duration = std::min(duration, chord->GetDurPpq());
     }
@@ -3180,7 +3215,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                 element = mRest;
                 if (cue) mRest->SetCue(BOOLEAN_true);
                 if (!stepStr.empty()) mRest->SetPloc(ConvertStepToPitchName(stepStr));
-                if (!octaveStr.empty()) mRest->SetOloc(std::stoi(octaveStr));
+                if (const std::optional<int> octave = ToInt(octaveStr)) mRest->SetOloc(*octave);
                 if (!noteID.empty()) {
                     mRest->SetID(noteID);
                 }
@@ -3207,7 +3242,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                 if (dots > 0) rest->SetDots(dots);
                 if (cue) rest->SetCue(BOOLEAN_true);
                 if (!stepStr.empty()) rest->SetPloc(ConvertStepToPitchName(stepStr));
-                if (!octaveStr.empty()) rest->SetOloc(std::stoi(octaveStr));
+                if (const std::optional<int> octave = ToInt(octaveStr)) rest->SetOloc(*octave);
                 if (!noteID.empty()) {
                     rest->SetID(noteID);
                 }
@@ -5188,7 +5223,7 @@ std::string MusicXmlInput::ConvertDegreeToText(pugi::xml_node harmony)
 
                 if (result != Kind2FirstAddable.end()) {
                     int firstAddable = result->second;
-                    if (std::stoi(degreeValue) >= firstAddable) {
+                    if (ToInt(degreeValue).value_or(0) >= firstAddable) {
                         degreeText += "add";
                     }
                 }
