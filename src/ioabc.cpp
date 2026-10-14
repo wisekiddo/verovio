@@ -162,7 +162,10 @@ bool ABCInput::ParseABC(std::istream &infile)
         else if (abcLine.at(0) == '%')
             // skipping comments and stylesheet directives
             continue;
-        else if ((abcLine.length() >= 3) && (abcLine.at(1) == ':') && (abcLine.at(0) != '|')) {
+        // (a line that begins with "::" is music, a double repeat first, and no field: it was read as one, and its
+        // measures were lost. Any other first character before a colon is still taken for a field's name)
+        else if ((abcLine.length() >= 3) && (abcLine.at(1) == ':') && (abcLine.at(0) != '|')
+            && (abcLine.at(0) != ':')) {
             if (abcLine.at(0) != 'K') {
                 this->ReadInformationField(abcLine.at(0), abcLine.substr(2));
             }
@@ -220,25 +223,47 @@ static bool IsColonPair(const std::string &musicCode, int i)
 // (Left unwritten, the second end went back to the beginning, the rule of the other formats: A A B A B)
 void ABCInput::ImplyRepeatStart(Measure *measure)
 {
+    const auto isEnd = [](data_BARRENDITION sign) {
+        return (sign == BARRENDITION_rptend) || (sign == BARRENDITION_rptboth);
+    };
+    const auto isStart = [](data_BARRENDITION sign) {
+        return (sign == BARRENDITION_rptstart) || (sign == BARRENDITION_rptboth);
+    };
+    const auto isDouble = [](data_BARRENDITION sign) {
+        return (sign == BARRENDITION_dbl) || (sign == BARRENDITION_end);
+    };
+    // The start is written over whatever bar line the measure begins with: a tune whose lines begin with "|" is
+    // the ordinary way to write one, and its measures have a left bar line. (Only a measure with none was given
+    // the start.) An end that stands there, of the repeat before, stays with it
+    const auto endRepeat = [&]() {
+        if (!m_hasRepeatStart && m_repeatsFrom) {
+            m_repeatsFrom->SetLeft(isEnd(m_repeatsFrom->GetLeft()) ? BARRENDITION_rptboth : BARRENDITION_rptstart);
+        }
+        m_hasRepeatStart = false;
+    };
     const data_BARRENDITION left = measure->GetLeft();
     const data_BARRENDITION right = measure->GetRight();
-    if (m_repeatsFromNext) {
+    // A sign met before the measure's first note is on its left, and is the end of what stands before it: an end
+    // there ("C | :| E") ends a repeat, and it or a double bar ("C |" and "|| E" on the next line, or "[|") is a
+    // place to go back to. (Only signs on the right were looked at)
+    if (isEnd(left)) endRepeat();
+    if (m_repeatsFromNext || isEnd(left) || isDouble(left)) {
         m_repeatsFrom = measure;
         m_repeatsFromNext = false;
     }
-    if ((left == BARRENDITION_rptstart) || (left == BARRENDITION_rptboth)) m_hasRepeatStart = true;
-    const bool ends = (right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth);
-    if (ends && !m_hasRepeatStart && m_repeatsFrom && !m_repeatsFrom->HasLeft()) {
-        m_repeatsFrom->SetLeft(BARRENDITION_rptstart);
-    }
-    if (ends) m_hasRepeatStart = false;
-    if ((right == BARRENDITION_rptstart) || (right == BARRENDITION_rptboth)) m_hasRepeatStart = true;
-    if (ends || (right == BARRENDITION_dbl) || (right == BARRENDITION_end)) m_repeatsFromNext = true;
+    if (isStart(left)) m_hasRepeatStart = true;
+    if (isEnd(right)) endRepeat();
+    if (isStart(right)) m_hasRepeatStart = true;
+    if (isEnd(right) || isDouble(right)) m_repeatsFromNext = true;
 }
 
 int ABCInput::SetBarLine(const std::string &musicCode, int i)
 {
     data_BARRENDITION barLine = BARRENDITION_NONE;
+    // A "|" with nothing more to it; after a "[" it is the thick-thin double bar (which was read as a bar line of
+    // one stroke)
+    const data_BARRENDITION alone
+        = ((i >= 1) && (musicCode.at(i - 1) == '[')) ? BARRENDITION_dbl : BARRENDITION_single;
     // "::", which has no "|" of its own, or a "|" with a ":" before it
     if ((musicCode.at(i) == ':') || (i >= 1 && musicCode.at(i - 1) == ':'))
         barLine = BARRENDITION_rptend;
@@ -256,11 +281,11 @@ int ABCInput::SetBarLine(const std::string &musicCode, int i)
                 barLine = BARRENDITION_end;
                 ++i;
                 break;
-            default: barLine = BARRENDITION_single; break;
+            default: barLine = alone; break;
         }
     }
     else {
-        barLine = BARRENDITION_single;
+        barLine = alone;
     }
     // if the measure is still empty, put the bar line on the left
     if (!m_layer->GetChildCount()) {
@@ -1338,10 +1363,13 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
 
         // endings
         else if ((i + 2 < (int)musicCode.length()) && musicCode.at(i) == '[' && isdigit(musicCode.at(i + 1))) {
-            ++i;
             // Ending *ending = new Ending;
             // ending->SetN(musicCode.at(i));
-            ++i;
+            // The sign is "[" and its number, or its numbers with "-" between them ("[1-3"), and no more. (The
+            // character after the first digit went with it: "[1C" lost its note, and '[1"D"d' its quote, after
+            // which the chord symbols of the line were read as its notes and its notes as chord symbols)
+            const size_t after = musicCode.find_first_not_of("0123456789-", i + 1);
+            i = static_cast<int>((after == std::string::npos) ? musicCode.length() : after) - 1;
         }
 
         // inline fields: "[", a letter, ":" (ABC 2.1, 3.3). "[|:" is a bar line; it was read as a field named "|"
