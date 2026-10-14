@@ -102393,11 +102393,29 @@ static vector<string> orderOfPlay(xml_node section, const vector<xml_node>& chil
 		}
 	}
 	ids.erase("");
+	// An order past the engine's limit at its least is not written.  The
+	// engine counts what an order costs, plays a score whose order costs
+	// more than a million as it is written, and its own importers stop
+	// writing an order once its least cost (each child by the times it is
+	// named, squared) is past that: what they leave is the beginning of
+	// the order, not the order of the score.  An order within that count
+	// is the whole order the file says, and is written, whether or not
+	// the engine, which also weighs each child by its elements, follows
+	// it.  (The limit is OrderOfPlay::s_maxCost of vrv/expansionmap.h; it
+	// also keeps the list no longer than a reader can take in.)
+	const size_t maxCost = 1000000;
+	map<string, size_t> timesNamed;
+	size_t leastCost = 0;
 	std::istringstream refs(list.attribute("plist").value());
 	string ref;
 	while (refs >> ref) {
 		order.push_back(ref.substr(ref[0] == '#' ? 1 : 0));
 		if (ids.count(order.back()) == 0) {
+			return vector<string>();
+		}
+		const size_t times = ++timesNamed[order.back()];
+		leastCost += 2 * times - 1;
+		if (leastCost > maxCost) {
 			return vector<string>();
 		}
 	}
