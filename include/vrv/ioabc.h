@@ -54,7 +54,8 @@ public:
 private:
     // function declarations:
 
-    void ParseABC(std::istream &infile);
+    // (false for a file with no tune in it)
+    bool ParseABC(std::istream &infile);
 
     // parsing functions
     int SetBarLine(const std::string &musicCode, int index);
@@ -117,7 +118,8 @@ private:
 
     data_DURATION m_durDefault;
     std::string m_ID;
-    int m_unitDur;
+    // (an eighth, ABC's own default: "L:/8" in a first tune read it before anything had set it)
+    int m_unitDur = 8;
     std::pair<data_BARRENDITION, data_BARRENDITION> m_barLines
         = std::make_pair(BARRENDITION_NONE, BARRENDITION_NONE); //
     /*

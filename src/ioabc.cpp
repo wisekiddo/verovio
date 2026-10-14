@@ -9,7 +9,9 @@
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -94,8 +96,7 @@ ABCInput::~ABCInput() {}
 bool ABCInput::Import(const std::string &abc)
 {
     std::istringstream in_stream(abc);
-    this->ParseABC(in_stream);
-    return true;
+    return this->ParseABC(in_stream);
 }
 
 //////////////////////////////
@@ -103,7 +104,7 @@ bool ABCInput::Import(const std::string &abc)
 // parseABC --
 //
 
-void ABCInput::ParseABC(std::istream &infile)
+bool ABCInput::ParseABC(std::istream &infile)
 {
     // initialize doc
     m_doc->Reset();
@@ -116,15 +117,28 @@ void ABCInput::ParseABC(std::istream &infile)
         std::getline(infile, abcLine);
         ++m_lineNum;
         if (!abcLine.empty() && (abcLine.at(0) == 'X')) {
-            while (!infile.eof()) {
-                if (abcLine.length() >= 3) {
-                    this->ReadInformationField(abcLine.at(0), abcLine.substr(2));
-                    if (abcLine.at(0) == 'K') break;
+            // A tune begins at its X, with a number after it or without, and its header runs to its key: that may
+            // be the file's last line, and may say nothing ("K:"). (An X with no number began no tune, a line was
+            // read only while another followed it, and one of two characters was never a field: the header's end
+            // then read the tune that was not there, or the lines of music were taken for the header)
+            // A tune's key is its own. (The steps a key alters are kept outside the reader, and a key with no sharps or
+            // flats did not empty them: a tune in C read after a tune in D, in the same file or by the next load, kept
+            // D's sharps.) They are emptied where a tune begins, not by an X field: one inside a tune ("[X:2]") would
+            // take its key from the notes after it.
+            keyPitchAlter.clear();
+            bool hasKey = false;
+            while (true) {
+                const char field = abcLine.empty() ? '\0' : abcLine.at(0);
+                const bool hasValue = (abcLine.length() >= 3);
+                if (hasValue || (field == 'X')) {
+                    this->ReadInformationField(field, hasValue ? abcLine.substr(2) : "");
                 }
+                hasKey = (field == 'K') && (hasValue || (abcLine == "K:"));
+                if (hasKey || infile.eof()) break;
                 std::getline(infile, abcLine);
                 ++m_lineNum;
             }
-            if (infile.eof()) break;
+            if (!hasKey) break;
             if (m_title.empty()) {
                 LogWarning("ABC import: Title field missing, creating empty title");
                 m_title.push_back(std::make_pair("", 0));
@@ -162,6 +176,8 @@ void ABCInput::ParseABC(std::istream &infile)
             this->ReadMusicCode(abcLine, section);
         }
     }
+    // A file with no tune in it (an X, and no key after it) is refused. (The tune that was not there was read)
+    if (!score || !section) return false;
     this->FlushControlElements(score, section);
 
     if (section && score && !section->GetParent()) {
@@ -173,6 +189,7 @@ void ABCInput::ParseABC(std::istream &infile)
     m_title.clear();
 
     m_doc->ConvertToPageBasedDoc();
+    return true;
 }
 
 /**********************************
@@ -288,12 +305,26 @@ void ABCInput::AddLayerElement()
         return;
     }
     // otherwise we can have beam or tuplet (for now)
-    Beam *beam = new Beam();
-    // add stacked notes to the current element
-    for (LayerElement *element : m_noteStack) {
-        beam->AddChild(element);
+    // Nothing to beam where no note is among them (two changes of clef in a row): they go to the layer as they are.
+    // (They were put into a beam first, and so had two parents.) A tuplet that waits for the rest of its notes is
+    // closed with those it has: it was deleted with them, and the line's lyrics then read a note that was gone
+    const bool hasNote = std::any_of(m_noteStack.begin(), m_noteStack.end(),
+        [](LayerElement *element) { return element->Is(NOTE) || element->FindDescendantByType(NOTE); });
+    if (!hasNote) {
+        if (m_containerElement.m_element && m_containerElement.m_element->GetChildCount()) {
+            m_layer->AddChild(m_containerElement.m_element);
+            m_containerElement.m_element = NULL;
+        }
+        for (LayerElement *element : m_noteStack) {
+            m_layer->AddChild(element);
+        }
     }
-    if (beam->FindDescendantByType(NOTE)) {
+    else {
+        Beam *beam = new Beam();
+        // add stacked notes to the current element
+        for (LayerElement *element : m_noteStack) {
+            beam->AddChild(element);
+        }
         LayerElement *element = NULL;
         if (m_containerElement.m_element && (ElementType::Tuplet == m_containerElement.m_type)) {
             element = m_containerElement.m_element;
@@ -305,15 +336,8 @@ void ABCInput::AddLayerElement()
             element = beam;
         }
         m_layer->AddChild(element);
-        beam = NULL;
-    }
-    else {
-        for (LayerElement *element : m_noteStack) {
-            m_layer->AddChild(element);
-        }
     }
     // clean-up leftover data, if any
-    if (beam) delete beam;
     if (m_containerElement.m_element) delete m_containerElement.m_element;
 
     m_containerElement = {};
@@ -367,7 +391,9 @@ int ABCInput::ParseTuplet(const std::string &musicCode, int index)
     m_containerElement = { ElementType::Tuplet, tuplet, tupletNum };
 
     // return index of the last element in tuplet, so that we point to the actual notes when incrementing 'i'
-    return static_cast<int>(tupletEnd) - 1;
+    // (the end of the line, where the tuplet is the last thing on it: "nowhere" was returned as -2, and the line
+    // was read from before its start)
+    return static_cast<int>((tupletEnd == std::string::npos) ? musicCode.length() : tupletEnd) - 1;
 }
 
 void ABCInput::AddAnnot(const std::string &remark)
@@ -635,7 +661,8 @@ void ABCInput::ParseInstruction(const std::string &instruction)
         }
     }
     else if (!strncmp(instruction.c_str(), "decoration", 10)) {
-        m_decoration = instruction[11];
+        // (with nothing after the word, the character was read past the end of the text)
+        if (instruction.length() > 11) m_decoration = instruction[11];
     }
 }
 
@@ -729,7 +756,9 @@ void ABCInput::ParseKey(std::string &keyString)
 
         std::string keySig;
         unsigned long posStart = 0;
-        auto posEnd = static_cast<unsigned long>(abs(accidNum));
+        // A key of more than seven flats or sharps (F flat, D flat minor) alters all seven steps. (For flats the
+        // steps were read from before the first of the seven, which threw)
+        const size_t posEnd = std::min<size_t>(abs(accidNum), pitch.size());
 
         if (accidNum < 0) {
             keySig = StringFormat("%df", abs(accidNum));
@@ -836,7 +865,9 @@ void ABCInput::ParseMeter(const std::string &meterString)
             meterCount = meterCount.substr(1, meterCount.length() - 1);
         // this is a little "hack", until libMEI is fixed
         m_meter->SetCount({ { atoi(meterCount.c_str()) }, MeterCountSign::None });
-        m_meter->SetUnit(atoi(&meterString[meterString.find('/') + 1]));
+        // (a unit below zero, as a number too long for an int comes out, is none: the MIDI writer never came back
+        // from working out which power of two it is)
+        m_meter->SetUnit(std::max(0, atoi(&meterString[meterString.find('/') + 1])));
     }
 }
 
@@ -844,12 +875,15 @@ void ABCInput::ParseTempo(const std::string &tempoString)
 {
     Tempo *tempo = new Tempo();
     if (tempoString.find('=') != std::string::npos) {
-        const int numStart = int(tempoString.find('=') + 1);
-        tempo->SetMm(std::stof(tempoString.substr(numStart)));
+        // (std::stof threw where no number follows the "=", as in "Q:1/4=fast", or one too large. No number is
+        // read as 0, which is no tempo)
+        const float mm = std::strtof(tempoString.c_str() + tempoString.find('=') + 1, NULL);
+        if (std::isfinite(mm)) tempo->SetMm(mm);
     }
     if (tempoString.find('\"') != std::string::npos) {
         std::string tempoWord = tempoString.substr(tempoString.find('\"') + 1);
-        tempoWord.resize(tempoWord.find('\"'));
+        // to the closing quote, or to the end where there is none (resize threw for "no position")
+        tempoWord = tempoWord.substr(0, tempoWord.find('\"'));
         if (!tempoWord.empty()) {
             Text *text = new Text();
             text->SetText(UTF8to32(tempoWord));
@@ -1046,6 +1080,12 @@ void ABCInput::FlushControlElements(Score *score, Section *section)
         if (!layer) {
             LogWarning("ABC import: Element '%s' could not be assigned to layer '%s'",
                 iter.second->GetClassName().c_str(), iter.first.c_str());
+            // It may still wait for its note or its end (a chord symbol, an open slur or a tie in a last measure
+            // that has no bar line, before the empty line that ends the tune): the next note then read it, or
+            // wrote its end into it, after it was deleted
+            std::erase(m_harmStack, iter.second);
+            std::erase(m_slurStack, iter.second);
+            std::erase(m_tieStack, iter.second);
             delete iter.second;
             iter.second = NULL;
             continue;
@@ -1183,7 +1223,8 @@ void ABCInput::ParseLyrics()
     // Iterate over notes and syllables simultaneously. Move through note array using counters for each syllable, moving
     // for several notes if syllable needs to be held
     for (int i = 0, j = 0; (i < (int)m_lineNoteArray.size()) && (j < (int)syllables.size()); ++j) {
-        while (m_lineNoteArray.at(i)->IsGraceNote() && (i < (int)m_lineNoteArray.size())) {
+        // (the note was read before the index was looked at: a line that ends in grace notes threw)
+        while ((i < (int)m_lineNoteArray.size()) && m_lineNoteArray.at(i)->IsGraceNote()) {
             ++i;
         }
         if (i >= (int)m_lineNoteArray.size()) break;
@@ -1226,7 +1267,11 @@ void ABCInput::ReadInformationField(const char &dataKey, std::string value)
     }
     // (a value of white space only was read one byte before its start)
     while (!value.empty() && isspace((unsigned char)value.back())) value.pop_back();
-    if (value.empty()) return;
+    if (value.empty()) {
+        // (an X begins a tune with no number after it too)
+        if (dataKey == 'X') this->ParseReferenceNumber(value);
+        return;
+    }
     while (isspace((unsigned char)value.front())) value.erase(0, 1);
 
     if (dataKey == '+') {
@@ -1299,14 +1344,16 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             ++i;
         }
 
-        // inline fields
-        else if ((i + 2 < (int)musicCode.length()) && musicCode.at(i) == '[' && musicCode.at(i + 2) == ':') {
+        // inline fields: "[", a letter, ":" (ABC 2.1, 3.3). "[|:" is a bar line; it was read as a field named "|"
+        else if ((i + 2 < (int)musicCode.length()) && musicCode.at(i) == '[' && musicCode.at(i + 2) == ':'
+            && isalpha((unsigned char)musicCode.at(i + 1))) {
             ++i;
             char dataKey = musicCode.at(i);
             ++i;
             ++i;
             std::string information;
-            while (musicCode.at(i) != ']') {
+            // to its "]", or to the end of the line where it has none (the line was read past its end)
+            while ((i < (int)musicCode.length()) && (musicCode.at(i) != ']')) {
                 information.push_back(musicCode.at(i));
                 ++i;
             }
@@ -1332,14 +1379,16 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             this->ParseDecoration(shorthandDecorationString);
         }
         else if (musicCode.at(i) == m_decoration) {
-            ++i;
-            if (!isspace(musicCode.at(i))) {
-                std::string decorationString;
-                while (musicCode.at(i) != m_decoration) {
-                    decorationString.push_back(musicCode.at(i));
-                    ++i;
-                }
-                this->ParseDecoration(decorationString);
+            // A "!" that no other closes on its line is the line-break sign of older ABC, and is passed over. (The
+            // line was read past its end for the other one, and a "!" that ends a line is how old tune books are
+            // written)
+            const size_t closing = musicCode.find(m_decoration, i + 1);
+            if ((i + 1 < (int)musicCode.length()) && isspace(musicCode.at(i + 1))) {
+                ++i;
+            }
+            else if (closing != std::string::npos) {
+                this->ParseDecoration(musicCode.substr(i + 1, closing - i - 1));
+                i = static_cast<int>(closing);
             }
         }
 
@@ -1389,7 +1438,8 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
                 this->AddRepeatMark(chord);
             }
         }
-        else if (i >= 1 && musicCode.at(i) == ']' && musicCode.at(i - 1) != '|') {
+        // (a "]" that closes no chord is passed over: the chord that was not there was read)
+        else if (chord && (i >= 1) && musicCode.at(i) == ']' && musicCode.at(i - 1) != '|') {
             // end chord
             if (chord->GetDur() < DURATION_8) {
                 // if chord cannot be beamed, write it directly to the layer
@@ -1513,13 +1563,16 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             }
             int num = (numStr.empty()) ? 1 : std::atoi(numStr.c_str());
             numbase = (numbaseStr.empty()) ? numbase : std::atoi(numbaseStr.c_str());
-            while ((num & (num - 1)) != 0) {
+            // (a number too long for an int comes out negative, and this never ended)
+            while ((num > 0) && ((num & (num - 1)) != 0)) {
                 ++dots;
                 // won't work for num > 12
                 num = num - num / 3;
             }
             if ((numbase & (numbase - 1)) != 0) LogError("ABC import: note length divider must be power of 2");
-            int dur = (num == 0) ? 4 : m_unitDur * numbase / num;
+            // (a length of 0, or one too long for an int, which comes out below zero: divided by, it ends the
+            // process on a processor that traps the division)
+            int dur = (num < 1) ? 4 : m_unitDur * numbase / num;
 
             // set grace
             if (grace != GRACE_NONE) {
@@ -1646,13 +1699,15 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             }
             int num = (numStr.empty()) ? 1 : std::atoi(numStr.c_str());
             numbase = (numbaseStr.empty()) ? numbase : std::atoi(numbaseStr.c_str());
-            while ((num & (num - 1)) != 0) {
+            // (a number too long for an int comes out negative, and this never ended)
+            while ((num > 0) && ((num & (num - 1)) != 0)) {
                 ++dots;
                 // won't work for num > 12
                 num = num - num / 3;
             }
             if ((numbase & (numbase - 1)) != 0) LogError("ABC import: note length divider must be power of 2");
-            int dur = m_unitDur * numbase / num;
+            // (a length of 0: the division ends the process on a processor that traps it; elsewhere it gave 0)
+            int dur = (num < 1) ? 0 : m_unitDur * numbase / num;
 
             if (m_broken < 0) {
                 for (int i = 0; i != -m_broken; ++i) dur = dur * 2;
@@ -1728,13 +1783,15 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             }
             int num = (numStr.empty()) ? 1 : std::atoi(numStr.c_str());
             numbase = (numbaseStr.empty()) ? numbase : std::atoi(numbaseStr.c_str());
-            while ((num & (num - 1)) != 0) {
+            // (a number too long for an int comes out negative, and this never ended)
+            while ((num > 0) && ((num & (num - 1)) != 0)) {
                 ++dots;
                 // won't work for num > 12
                 num = num - num / 3;
             }
             if ((numbase & (numbase - 1)) != 0) LogError("ABC import: note length divider must be power of 2");
-            int dur = m_unitDur * numbase / num;
+            // (a length of 0: the division ends the process on a processor that traps it; elsewhere it gave 0)
+            int dur = (num < 1) ? 0 : m_unitDur * numbase / num;
 
             if (m_broken < 0) {
                 for (int i = 0; i != -m_broken; ++i) dur = dur * 2;
@@ -1768,13 +1825,17 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
         // text elements
         else if (musicCode.at(i) == '\"') {
             ++i;
-            if (musicCode.at(i) == '^' || musicCode.at(i) == '_' || musicCode.at(i) == '<' || musicCode.at(i) == '>'
-                || musicCode.at(i) == '@') {
+            // (a quote with nothing after it, or one that is not closed: the line was read past its end. The text
+            // then runs to the end of the line)
+            const int length = (int)musicCode.length();
+            if ((i < length)
+                && (musicCode.at(i) == '^' || musicCode.at(i) == '_' || musicCode.at(i) == '<' || musicCode.at(i) == '>'
+                    || musicCode.at(i) == '@')) {
                 LogWarning("ABC import: Annotations are not fully support yet");
                 ++i;
             }
             std::string chordSymbol;
-            while (musicCode.at(i) != '\"') {
+            while ((i < length) && (musicCode.at(i) != '\"')) {
                 chordSymbol.push_back(musicCode.at(i));
                 ++i;
             }
@@ -1857,7 +1918,9 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
     // by default, line-breaks in the code generate line-breaks in the score
     // Verovio does not support line-breaks within a layer
     // has to be refined later
-    if (sysBreak && (m_linebreak != '\0') && !(section->GetLast())->Is(SB)) {
+    // (a section with nothing in it yet has no last child: line breaks set to "<none>" in the header and set back
+    // after it)
+    if (sysBreak && (m_linebreak != '\0') && !(section->GetLast() && section->GetLast()->Is(SB))) {
         this->AddLayerElement();
         Sb *sb = new Sb();
         sb->SetID(StringFormat("abcLine%02d", m_lineNum + 1));

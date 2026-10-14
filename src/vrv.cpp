@@ -307,6 +307,10 @@ std::u32string UTF8to32(const std::string &in)
     std::u32string out;
     for (size_t i = 0; i < in.size();) {
         uint32_t cp = in[i] & 0xFF;
+        // A character the text ends inside is left out. (Its other bytes were read from past the end of the text: a
+        // lyric, a title or a chord symbol that is cut inside a character of several bytes, in a file of any format)
+        const size_t length = (cp <= 0x7F) ? 1 : (cp <= 0xDF) ? 2 : (cp <= 0xEF) ? 3 : 4;
+        if (i + length > in.size()) break;
         if (cp <= 0x7F) { // One byte
             out.push_back(cp);
             ++i;
