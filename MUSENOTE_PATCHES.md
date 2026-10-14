@@ -26,11 +26,17 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 16 | 2026-10-13 | Do not follow an order of play that costs more than any score's (in 26069d6fa and de66ee4e0) | `src/doc.cpp`, `src/iomusxml.cpp`, +29 / -1 | A score whose order of play would cost more than 1,000,000 by the count below (200 repeat ends in a row with no start) is played as written, once through, where its timemap and MIDI took minutes and a gigabyte; a MusicXML repeat is read as at most 100 times (a measure marked 2,000 times, which never came back, is played 100 times). None for a score within that cost: the dearest of the corpus comes to 30,000 | Not offered upstream; `develop` of 2026-10-08 has both |
 | 17 | 2026-10-13 | A MusicXML clef for a staff the part does not have is passed over (in de66ee4e0) | `src/iomusxml.cpp`, +6 / -1 | A MusicXML part with a `<clef number>` for a staff it does not have, or does not have yet (its `<staves>` comes in a later measure), now loads; it ended the process. The clef is not built. None for a score without one | Not offered upstream; `develop` of 2026-10-08 has it |
 | 18 | 2026-10-13 | Give a MusicXML note with no accidental written the sound its file says (b7b3512c9) | `src/iomusxml.cpp`, +25 / -1 | A MusicXML note with no `<accidental>` gets the sound its `<alter>` says, where the key and the accidentals the importer carries would play another key: its `<accid>` is given that `accid.ges` (a natural too, as `accid.ges="n"`), and a tie whose two notes are then of one pitch gets its end. Of the 2785 scores of the corpus 407 change in MIDI, pitch map and MEI (2968 `<accid>` lines and 507 `<tie>` lines; no line added or removed), 222 of them in drawing (244 of 3376 pages, each by its ties), and their Humdrum export; the timemap changes in none and no id of a document moves. None for a note that has an `<accidental>`, and none for MEI, ABC or Humdrum input | Not offered upstream. `develop` of 2026-10-08 reads `<alter>` too (PR #4383), but builds other objects and writes nothing for a natural |
-| 19 | 2026-10-13 | Humdrum export: write the order a score is played in, as a label where each section and ending starts and one expansion list (09542e944) | `src/hum/humlib.cpp`, +171 / -1 | `Toolkit::ConvertMEIToHumdrum` only. A score whose one `<section>` holds an `<expansion>` that names its `<section>` and `<ending>` children (every score that came as MusicXML: 2785 of the 2785 of the corpus) gains one line `*>[A,A1,A,A2,B]`, one line `*>A` for each of them that holds a note or a rest, and a line `!LO:TX:t=` right above the label of an ending whose bracket says something else than its number. Read back, it is played in that order, and its endings are endings. A measure the converter finds nothing in is no longer written; before, it took the barline of the measure before it. A carriage return in the words of a `<dir>` is a space. None for a score with no `<expansion>`, or with one the labels cannot say. The notes and the syllables of every export are as they were (2785 of 2785); three exports gain a barline that was lost. **Not to be shipped without patch 21.** No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 writes neither |
+| 19 | 2026-10-13 | Humdrum export: write the order a score is played in, as a label where each section and ending starts and one expansion list (09542e944); amended 2026-10-14 by: Humdrum export: an order of play past the limit at its least is not written (4c6f77118) | `src/hum/humlib.cpp`, +171 / -1, then +18 / -0 | `Toolkit::ConvertMEIToHumdrum` only. A score whose one `<section>` holds an `<expansion>` that names its `<section>` and `<ending>` children (every score that came as MusicXML: 2785 of the 2785 of the corpus) gains one line `*>[A,A1,A,A2,B]`, one line `*>A` for each of them that holds a note or a rest, and a line `!LO:TX:t=` right above the label of an ending whose bracket says something else than its number. Read back, it is played in that order, and its endings are endings. A measure the converter finds nothing in is no longer written; before, it took the barline of the measure before it. A carriage return in the words of a `<dir>` is a space. None for a score with no `<expansion>`, or with one the labels cannot say. The notes and the syllables of every export are as they were (2785 of 2785); three exports gain a barline that was lost. **Not to be shipped without patch 21.** No SVG, timemap, MIDI, MEI or id changes. With the amendment, an order past the limit of patch 27 at its least is not written | Not offered upstream; `develop` of 2026-10-08 writes neither |
 | 20 | 2026-10-13 | Humdrum export: write the chord symbols, as text in a spine beside their staff (c92e8fa32) | `src/hum/humlib.cpp`, +115 / -67 | `Toolkit::ConvertMEIToHumdrum` only. A score with `<harm>` elements (2565 of the 2785) gains a `**cdata` spine after each staff that has one, a second line that says `*above` in it, and a line with nothing in the staves for each chord symbol that stands between two notes. Two symbols at one place are one token; the same text twice at one place is written once. A score with none is written as before. `HumGrid::setHarmonyCount` no longer writes one past the end of its counts for the hundred-and-first staff. **Declared limit: the chord symbols of a re-opened export do not follow a transposition.** No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 has the stub and the bound |
 | 21 | 2026-10-13 | Humdrum reader: do not fold a whole-measure rest into the rest before it across a section label, nor one that stands under a chord symbol (c3a3eedb4) | `src/iohumdrum.cpp`, +30 / -2 | **Changes what a seeded load builds, for two kinds of Humdrum file.** A file in which the reader made one `<multiRest>` of a run of whole-measure rests that has (1) a non-null token of a `**cdata` spine on the line of a rest after the run's first, or (2) a section label (`*>A`) in its first spine between two of its rests, now keeps a measure of its own from each such rest on: it has more `<measure>` elements, every measure after that place has another ordinal, and the seeded ids of what is built after it move. Its chord symbols and its sections are no longer dropped. The patch makes no rest of several measures that was not made before. None for a file with neither: all 189 Humdrum files of the parity gate and all 2785 exports of tb.11 give the same MEI, byte for byte | Not offered upstream; `develop` of 2026-10-08 has both |
 | 22 | 2026-10-13 | Humdrum export: a double barline, a dynamic at its beat and beside its hairpin, words where no note starts, the segno and coda signs, a mark given by the note it starts on, and a staff, a beat or a text the file says wrongly (22ebddf9e) | `src/hum/humlib.cpp`, +299 / -68 | `Toolkit::ConvertMEIToHumdrum` only. `right="dbl"` is written `=\|\|` (850 exports of the corpus hold one); a `<dynam>` is on the note of its beat where it was on the first note of its measure, and stays when a hairpin starts or ends on its note (17 exports of the corpus gain dynamics or hairpin signs that tb.11 lost, 38 dynamics and 19 signs; none loses one that tb.11 wrote); the words of a `<dir>` at a time no note starts (every "D.C. al Fine" and "To Coda") are written on the note before, where they were left out; `<repeatMark func="segno">` and `"coda"` are written `[segno]` and `[coda]`; a `<dir>` or a `<repeatMark>` with no `@tstamp` is written on the note, rest or chord its `@startid` names (MuseNote's own navigation marks). A `<dir>`, `<repeatMark>`, `<dynam>`, `<hairpin>` or `<staff>` for a staff the score does not have, and one whose beat is no number, is left out with a warning where it read past the end of a vector or lost the whole export; a measure that holds nothing but a change of clef keeps the barline before it. No SVG, timemap, MIDI, MEI or id changes | Not offered upstream; `develop` of 2026-10-08 has none of it |
 | 23 | 2026-10-14 | What the engine says of a file is text, not the format of a message (57188f37b) | `include/vrv/vrv.h`, `src/toolkit.cpp`, `src/iohumdrum.cpp`, `src/iopae.cpp`, `src/convertfunctor.cpp`, +60 / -45 | None for any score. Forty-one log calls pass their text as the argument of `"%s"` where they passed it as the format: a percent sign in a score's words no longer ends the process when the score is exported to Humdrum, nor one in a Humdrum header line when the file is opened. The four log functions are marked as printf-like | Not offered upstream; `develop` not looked at for it |
+| 24 | 2026-10-14 | ABC: no input ends the process, a tune's key is its own, and a text is not read past its end (31b351462) | `src/ioabc.cpp`, `include/vrv/ioabc.h`, `src/vrv.cpp`, +122 / -53 | An ABC file that ended the process, or never came back, now loads, or is refused where it holds no tune: a field, a decoration, a text or a tuplet that its line does not close, a `]` with no chord, lyrics under a line that ends in grace notes, a key of more than seven flats, a tempo that is no number, an `X` with no number or with no key after it, a key that is the file's last line or says nothing, a length too long for an int, a length of 0 divided by, and what an empty line left behind in the reader's lists. Two changes that are no crash: a tune with no sharps or flats in its key no longer takes over those of the tune read before it, in the same file or by the load before; and a text of any format that ends inside a character of several bytes ends before that character (bytes past the end of the text were read for it). None of the 194 ABC files of the parity set changes, and no output of the corpus | Not offered upstream |
+| 25 | 2026-10-14 | ABC repeats: the implied start on a measure that begins with a bar line, an end or a double bar at the left of a measure, `[|`, a line that begins with `::`, and what stands against an ending sign (d322ed7c0) | `src/ioabc.cpp`, +42 / -14 | An ABC tune with a repeat end that has no start, where the measure to go back to begins with a bar line (lines that begin with `|`), or follows a double bar met at the left of a measure or a `[|`; a tune with a repeat end written after a bar line (`C | :| E`); a line of music that begins with `::` (it was read as an information field and lost); a note, a chord or a chord symbol written directly after `[1` (it was passed over with the sign). The MEI of such a tune changes: a `left="rptstart"` or `left="rptboth"` where there was `left="single"`, `"dbl"`, `"end"` or `"rptend"`, a `right="dbl"` for `[|`, the measures of a line that begins with `::`, the note after `[1`. None of the 194 ABC files of the parity set is written in one of these ways: none changes | Not offered upstream |
+| 26 | 2026-10-14 | ABC: `Z` with no number is one measure of rest (3376852a7) | `src/ioabc.cpp`, +14 / -3 | `Z`, `Z0` and a `Z` with a number too long for an int are an `<mRest>` (they were a `<multiRest>` of 0, 0 and -1 measures: no time at all, or the notes after it not played after it). 14 of the 194 ABC files of the parity set change, 42 rests in them, each line `<multiRest xml:id="…" num="0" />` now `<mRest xml:id="…" />` with the same id and nothing else. `Z1`, `Z2` … are read as before | Not offered upstream |
+| 27 | 2026-10-14 | The cost of an order of play is counted while the order is written (23ad9693e) | `src/doc.cpp`, `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, +74 / -21 | None for an order that is followed: timemap, MIDI, pitch map, MEI and pages of all 2785 scores of the corpus are byte-identical. A score whose order is not followed (more than 1,000,000 by the count of patch 16) loads and plays as before, as written, in a fraction of a second where it took minutes or never came back; the `<expansion>` MusicXML's importer leaves in such a document now holds the beginning of the order only (2,253 references for twenty bars each marked ×100, where it held 20,810) | Not offered upstream |
+| 28 | 2026-10-14 | MusicXML: files that ended the process: a `<chord/>` with no note before it, numbers that are none, and a part whose first measure does not begin with its `<attributes>` (2a99a405f) | `src/iomusxml.cpp`, +60 / -25 | A MusicXML file with a `<chord/>` on the first note of a layer, a rest whose `<display-octave>` is no number an int holds, a metronome mark whose `<per-minute>` is too large or too small for a double, a chord symbol whose `<degree-value>` is no number, a `<staves>` that is no number of staves, or a part whose first measure begins with a note now loads; each ended the process, the last for a second or later part and for a part of two staves, and read past the end of `m_octDis` in any part. One kind of file that loaded before changes: a score of one part of one staff whose first measure does not begin with its `<attributes>` has that part's id, name and instrument on its `<staffDef>` (it was a bare one, made at the end of the import), and an octave line in it is read (it was passed over). No score of the corpus is such: no output of the corpus changes | Not offered upstream |
+| 29 | 2026-10-14 | The MIDI writer comes back from a meter whose unit is below one (35a5f9173) | `src/midi/MidiMessage.cpp`, +6 / -1 | A score whose meter has a unit below zero (a MusicXML `<beat-type>` of -1, or one too long for an int, which comes out below zero) loaded, was drawn and had a timemap, and its MIDI never came back: in the apps it opened and could not be played. It is written, with 0 for the power of two of that unit. None for a unit of 0 or more: the same power of two for each | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -1779,6 +1785,646 @@ arguments are of another type than their format says (a `size_t` for
 `ioabc.cpp`; and in `editortoolkit_neume.cpp`, which the applications
 do not use, a number given for `%s`). Upstream's, not changed here.
 
+### tb.13: patches 24 to 29, and the amendment of patch 19
+
+From the two reviews of tb.10 and their second readers, the attack on
+tb.11, and a reading of the whole ABC reader. tb.10 and tb.11 added none
+of these faults: each is the same on tb.9. The stage for every
+comparison below is tb.11: the five patches were built and measured on
+it before tb.12 was tagged, and "with the patches" is tb.11 with them.
+tb.13 is tb.12 with them, with what the review of tb.13 found mended
+(patch 29 among it) and with the amendment of patch 19; its gates were
+run again on it. Both are at the end of this section.
+
+**24. ABC: no input ends the process.** `ABCInput` read on for the
+character that closes a thing without asking where its line ends, kept
+objects it had deleted, and took a number of the file as it came.
+Thrown out of the library, and so the end of the process:
+
+- an inline field with no `]` on its line (`[K:D …`), and `[|:`, a bar
+  line, which was read as a field named `|` up to the next `]`;
+- a `!` that ends a line (the line-break sign of ABC before 2.1, in old
+  tune books), and a `!` that no other closes;
+- a `"` with nothing after it, and a text that is not closed;
+- a tuplet that is the last thing on its line (its place came back as
+  -2, and the line was read from before its start);
+- lyrics under a line of music that ends in grace notes (the note was
+  read before its index was looked at);
+- a key of more than seven flats (`K:Fb`, `K:Db min`: the steps to
+  alter were read from before the first of the seven);
+- a tempo with no number after its `=` (`Q:1/4=fast`), or one too large
+  (`std::stof`), and a tempo text with no closing quote (cut at "no
+  position").
+
+An object that was not there, or was gone:
+
+- a `]` with no chord open;
+- a file with an `X` and no key after it: the tune was never begun, and
+  the end of the reader read it. A key that is the file's last line,
+  with no line end, was not read at all (a line was read only while
+  another followed it), and a key with nothing in it (`K:`) was no
+  field: the lines of music after it were taken for the header, to the
+  end of the file or into the next tune;
+- an `X` with no number (`X:`, `X: `, `X`) began no tune: the header's
+  end read the tune that was not there, or, for a second tune, put its
+  score into the tune before, whose export the engine could not read
+  back;
+- line breaks set to `<none>` in the header and set back after it: the
+  first line of music ended in a section with nothing in it, whose last
+  child was asked what it is;
+- a chord symbol, a slur or a tie open in a last measure that has no bar
+  line, at the empty line that ends the tune: deleted with the measure
+  that was never closed, and left in the list its next note looks in.
+  The note after the empty line read it, or wrote its id into it. This
+  is a tune as it is written every day (a tie or a slur left open at
+  the end, an empty line, the next tune); only the slur ends a process
+  that has no sanitizer, and not every time;
+- two changes of clef in a row with no note between them (`[K:…][K:…]`)
+  while a tuplet waits for the rest of its notes: the tuplet was deleted
+  with the notes it had, and the line's lyrics read a note that was
+  gone. (Without a tuplet the two clefs were put into a beam and then
+  into the layer, an object with two parents: an assertion where
+  assertions are on.)
+
+Never back:
+
+- a length too long for an int (`C4294967295`, and so for a rest and a
+  space): it comes out below zero, and the loop that counts its dots
+  never ended;
+- a meter whose unit is too long for an int (`M:4/99999999999999999999`):
+  below zero, and the MIDI writer never came back from working out which
+  power of two it is.
+
+And three reads that end nothing on the machines these were run on:
+
+- `UTF8to32` (`src/vrv.cpp`), the converter every reader gives its texts
+  to, took the second, third and fourth byte of a character without
+  asking where the text ends. A lyric, a title or a chord symbol that
+  ends inside a character of three or four bytes was read one or two
+  bytes past its end. Found by the hostile ABC set under
+  AddressSanitizer (2 of its 5,107 files); it is no fault of ABC's: 7 of
+  56 MusicXML files with such a text in `<words>`, a lyric, a part name
+  and a title report it on tb.11 too. A character the text ends inside
+  is now left out;
+- an `I:decoration` with nothing after it read the sign from past the
+  end of the instruction's text (the tune's `!fermata!` was then four
+  notes);
+- a rest or a space of length 0 (`z0`) was divided by it, which ends the
+  process on a processor that traps the division (x86-64, which the
+  Android build has; not the arm64 these were run on, where the division
+  gives 0, the number the patch gives).
+
+What the patch does, in the same order: each of those loops is bounded
+by its line, and what is open at the end of a line ends there; an inline
+field is `[`, a letter, `:` (ABC 2.1, 3.3); a `!` that no other closes
+on its line is passed over; a `]` with no chord open is passed over; the
+lyrics' index is looked at first; a key of more than seven signs alters
+all seven steps; a tempo with no number is given none, and its text runs
+to the end where it is not closed; a tune begins at its `X` with a
+number or without, its header ends at its key, be that the last line or
+an empty `K:`, and a file with no tune in it is refused
+(`ABCInput::Import` returns false, as `Toolkit::LoadData` expects of an
+importer; each of the nine such files of the sets below ended the
+process on tb.11 or was refused there too); the last child of a section
+is asked for only where there is one; what `FlushControlElements`
+deletes is taken out of the three lists first; a stack of elements with
+no note among them goes to the layer as it is, and a tuplet that waits
+is closed with the notes it has; a length below zero has no dots
+counted; a meter unit below zero is none; a character is converted only
+where the text holds all of it; the decoration sign is taken only where
+the instruction has one; a length of 0 is not divided by.
+
+**Also in patch 24, and no crash: a tune's key is its own.** The steps a
+key alters are kept in two variables outside the reader, and a key with
+no sharps or flats did not empty them. A tune in C or A minor read after
+a tune in D was played with F sharp and C sharp: the next tune of the
+same file, and the next file loaded by the same process, which in the
+apps is every file after the first. The reader empties them where a tune
+begins, at the `X` line that opens it. (As first built, any X field
+emptied them, and one written inside a tune, `[X:2]`, took the key from
+the notes after it: found by the review of tb.13.) It is here because
+the case for a key of eight flats cannot stand beside the other ABC
+cases without it (every tune in C after it was read in seven flats), and
+because it is a fault a user meets. The parity gate could not see it: it
+reads each ABC file in a process of its own.
+
+Declared change of patch 24, for a file that loaded before: a tune with
+no sharps or flats in its key, read after one that has some, is read in
+its own key. `[`, a character that is no letter, `:` is no inline field
+(`[|:` is a repeat's start; `[::` opens a chord, as `[:` did). Two
+changes of clef in a row are no longer put into a beam that is then
+thrown away: the ids of the objects built after them are those of one
+object less, and a tuplet that waits for notes at that point is kept
+with the notes it has, where it was deleted with them. A tempo of `inf`
+or `nan` is none (it was kept, and no note of the tune was played). A
+second tune that begins with an `X` with no number is a tune of its own.
+A text, in any format, whose last bytes are the beginning of a character
+of several bytes ends before them: it ended in a character made of
+those bytes and of what lay after the text (for the first byte of a
+two-byte character that was the text's own closing zero, so `caf` and
+the byte C3 was read as "cafÀ" and is now "caf"). None of these is in
+the 194 ABC files of the parity set, and no output of the 2785 scores
+of the corpus changes.
+
+**25. ABC repeats, the rest of what ABC 2.1 says.** tb.10 wrote the
+start that a repeat end with no start means on the measure it stands
+before, where that measure had no bar line on its left, and looked for
+the place to go back to at the right of measures only.
+
+- A tune whose lines begin with `|` is the ordinary way to write one,
+  and gives the first measure of each line a left bar line: the start
+  was not written, and the end went back to the beginning
+  (`|: C | E :|`, `| G | A :|`, `| B |]` was C E C E G A C E G A B).
+  The start is now written over whatever bar line the measure begins
+  with; an end that stands there stays, as `rptboth`.
+- A double bar met while the measure is still empty stands on the left
+  of that measure (`C | E |`, then `|| G | A :|` on the next line), and
+  was not a place to go back to. It is one, and so is the thick-thin
+  `[|`, which was read as a bar line of one stroke.
+- An end met while the measure is still empty (`C | :| E | G :|`) is
+  the end of the repeat before it: it has the start that is meant
+  written for it, uses up a start that was written, and the measure it
+  stands on is the place the next end goes back to. Small and plainly
+  right: the engine's own order already repeats at an end on the left.
+- A line of music that begins with `::` was taken for an information
+  field (its second character is a colon) and its measures were lost: a
+  field begins with a letter.
+- An ending sign took the character after its first digit with it.
+  `[1C` lost its note; `[1"D"d` lost its quote, so that the letters of
+  the chord symbol were read as notes, the notes after it as a chord
+  symbol, and the last quote of the line opened a text that nothing
+  closed (one of the exceptions of patch 24: `|[1"D"d4:|[2"G"g4|]`, a
+  line as tune books have it); `[1[EG]` lost its bracket. ABC 2.1 (4.9)
+  asks for no space after the sign. The sign is now `[`, its number, and
+  further numbers with `-` between them (`[1-3`), and no more. This is
+  about what stands after the sign only: first and second endings are
+  still not read as such (known, below).
+
+Of the two reviewers' 102 tunes with an answer in ABC 2.1, 76 play as it
+says on tb.11 and 94 with the patches (first reviewer 62 and 70 of 75,
+second 14 and 24 of 27); none that was right is wrong. The eight that
+are left are the known ones below: five with endings, two with `|::`,
+one whose last measure has no bar line.
+
+Declared change of patch 25: the tunes described in its row. Of the 194
+ABC files of the parity set 13 have a line that begins with a bar line;
+in each the line begins `|:`, a written start, and none has a double bar
+or an end at the left of a measure, a `[|`, or a line that begins with
+`::`. 41 have an ending sign, each followed by a space, after a bar line
+or first on its line. None changes, to the byte.
+
+**26. A bare `Z`.** `Z` with no number is one measure of rest (ABC 2.1,
+4.5). The digits after it were read with `atoi`, which gives 0 for none,
+and given to a `<multiRest>`: a measure with no time, so that every note
+after it started a measure early, and the tune came back a measure short
+for each. MuseNote's own ABC export writes `Z` for an empty bar. It is
+now an `<mRest>`. A `<multiRest num="1">` plays the same in every meter
+tried (4/4, 3/4, 6/8, none) but is drawn with a "1" over the bar, as a
+multi-measure rest is; an `<mRest>` is drawn as an empty bar is, is what
+MuseNote's own notation rule says an empty bar is, and is what the
+export was written from. `Z0`, and a number too long for an int (which
+comes out as -1, and after which the notes of the tune were not played
+where they stand), are read the same way. `Z1` stays a `<multiRest>` of
+one, as it is written; `Z2` and up are as before.
+
+Declared change of patch 26: 14 of the 194 ABC files of the parity set,
+42 rests: `rests_ties_slurs.abc` (1) and thirteen of MuseNote's exports:
+All You Need Is Love (5), Baby Blue (2), Beauty and the Beast (5),
+Cavatina (6), Circle Of Life (4), Daniel (4), Fly away (2), Matchmaker
+(1), My Sweet Lady (2), Princess Leia's Theme (3), The Song Is You (3),
+Wonderful Land (2), Yellow Submarine (2). In each MEI the lines
+`<multiRest xml:id="…" num="0" />` are `<mRest xml:id="…" />`, with the
+ids they had, and no other line differs. The timemap of each changes
+(and the MIDI of eleven), the number of notes of none. One before and
+after: Wonderful Land, whose MusicXML original is 66 measures and 264
+quarter notes long. Its ABC export read back on tb.11: 64 measures,
+255.5 quarters. With the patches: 66 measures, 263.5 quarters.
+
+**27. The cost of an order of play, counted while it is written.**
+Patch 16 counts what following an order costs and does not follow one
+over 1,000,000. It counted when the whole order stood in the document,
+and both writers (`ExpansionMap::GenerateExpansionFor` for a score with
+no order of its own, `MusicXmlInput::CreateExpansion` for MusicXML) had
+added each reference with `PlistInterface::AddRefAllowDuplicate`, which
+copies the whole list twice for every one. The ceiling bounded memory
+and not time: a MusicXML file of 15 KB, sixty bars each marked ×100,
+took 140 seconds in `loadData`, and the time grew with the fourth power
+of the number of bars; 400 plain backward repeats took half a minute.
+
+Each writer now gathers the references in an `OrderOfPlay` and gives the
+list to the `<expansion>` once. `OrderOfPlay::Add` keeps the least that
+following the order can cost: each section, by the times it is named,
+squared (a section holds one element at the least, so this is never
+more than the count of patch 16), and adds nothing once that is past the
+limit. The limit is one constant, `OrderOfPlay::s_maxCost`, which
+`Doc::ExpandExpansions` uses too. So no order that was followed is cut
+short: where the least cost passes the limit, the cost does. The writer
+stops when the least cost is past the limit and not when it has reached
+it, so that what it leaves always costs more than is followed: a
+hundred bars each a repeat of its own marked ×100 come to 1,000,000 to
+the unit, and the bar after them is written too (a case holds it).
+
+*What becomes of the order that is cut short.* It stays in the
+document, the beginning of the order as far as it was written: an
+`<expansion>` with 2,253 references for twenty bars each marked ×100
+(20,810 by the signs), 10,365 for two hundred repeat ends in a row with
+no start (20,300). `Doc::ExpandExpansions` counts it as it counts any
+order, finds it over the limit (it was written until it was), and does
+not follow it: the score is played as written, once through, with the
+warning it had. An exported MEI holds the same short list; read back, it
+is counted again and not followed again. It must not be taken for the
+score's order by anything else, and a tag that raises the limit must
+have such exports made again: a list cut at 1,000,000 could be within a
+higher limit. (The engine writes the order of a score with none of its
+own into the copy it plays from, not into the document it exports; in an
+export the short list is there for MusicXML only, and with
+`expandAlways`.)
+
+The comment above the count in `src/doc.cpp` said 23,000 for the dearest
+score and that a measure marked 2,000 times "is played as it is
+written". It now says 30,000, that a marked repeat is read as at most
+100 and then followed or not by its cost (a measure marked 2,000 times
+is played 100 times), and that past the limit all repeats of the score
+are dropped, not only the dear one.
+
+Declared change of patch 27: none for an order that is followed. For
+one that is not: the short `<expansion>` above, in the document
+MusicXML's importer builds and in its MEI.
+
+**28. MusicXML files that ended the process.** Older than tb.10, in
+`MusicXmlInput`:
+
+- a `<chord/>` on the first note of its layer: there is no note before
+  it, and the last of an empty list was read. The note is now left out
+  with the error the importer has for a chord whose start is not found;
+- `std::stoi` and `std::stod` on a text of the file, which throw out of
+  the library for a text that is no number or one too large: a rest's
+  `<display-octave>` (`x`, 99999999999999999999; a rest with a type and
+  one that is the whole bar), a metronome mark's `<per-minute>` (1e999,
+  1e-999, four hundred digits), and a chord symbol's `<degree-value>`
+  (`x`, nothing, too large). Such a number is now passed over: the rest
+  gets no `oloc`, the mark no `mm`, the symbol no "add";
+- a `<staves>` that is no number of staves (`x`, nothing, 0, -1, 32768,
+  99999): the part was left with no staff at all, and its first note was
+  put on the staff that was not there. A part has one staff at the
+  least. (Found by the memory review of tb.10; reproduced before it was
+  mended.)
+- a part whose first measure does not begin with its `<attributes>` (a
+  note, a rest, a `<harmony>` or a `<backup>` stands before them). A
+  part's `<staffDef>`s, and the places of its staves in the table of
+  octave lines (`m_octDis`), were made from the `<attributes>` the first
+  measure begins with, and such a part got neither. Its pitched notes
+  read the table one past its end (the read the attack on tb.11 found: a
+  stale number there moved the note by octaves), and an octave line
+  written in it was passed over. With no `<staffDef>` for a staff that
+  holds notes, the engine's score-definition pass read the one that was
+  not there: the process ended for a second or later part, and for a
+  part of two staves. Only a score of one such part of one staff loaded,
+  by the `<staffDef>` the importer gives a score that has none at all,
+  which carries neither the part's name nor its instrument. Every staff
+  of a part now has its `<staffDef>`, of five lines where no
+  `<attributes>` said how many, and its place in the table, made by the
+  lines that made them before (moved into one place and called from
+  two). This is the cause, so the read of the table needs no check of
+  its own: a staff's number is never past it.
+
+Declared change of patch 28: such a file loads. For a file that loaded
+before: a score of one part of one staff whose first measure does not
+begin with its `<attributes>` has the part's id, name and instrument on
+its `<staffDef>` (`<staffDef xml:id="P1" n="1" lines="5">` with its
+`<label>`, where it was a `<staffDef>` with an id of its own and no
+name), an octave line in it is read, and the seeded ids of what the
+importer builds after the `<staffDef>` are other ids, since it is now
+built first. No score of the corpus is such: no output of the corpus
+changes.
+
+**29. A meter whose unit is below one, in the MIDI writer (35a5f9173).**
+`MidiMessage::makeTimeSignature`, in the midifile library inside the
+engine, works out which power of two a meter's unit is by shifting the
+unit to the right until it is 0: `while (bottom >>= 1) base2++;`. A
+number below zero stays below zero when shifted, and the loop never
+ended. Patch 24 keeps ABC's own unit from coming out below zero; the
+review of tb.13 reached the same loop from MusicXML, by a `<beat-type>`
+of -1 or one too long for an int, and the builder had declared it from
+MEI. Such a score loads, is drawn and has a timemap, and its MIDI never
+came back: in the apps it opens and cannot be played. The loop now
+shifts while the unit is above 1, which gives the same power for every
+unit of 0 or more, and 0 for one below. No output of the corpus changes,
+nor of any score whose meter's unit is 0 or more. Regression test:
+`test_midi_document_engine.cpp`, one case: the units `-1` and
+`-99999999999999999999` from MusicXML, and the power of two the MIDI
+gives the units 1, 3, 4 and 8, which no case read before (a loop that
+counted one power too many passed every case). Three deliberate breaks
+of the loop, each caught: the old loop (the case does not come back),
+one power too many, and the unit less one. Carried because the loop is
+in the engine's own copy of that library, as upstream Verovio has it.
+
+**Amendment of patch 19 (4c6f77118).** Patch 27 makes the two writers of
+an order stop once its least cost (each child by the times it is named,
+squared) is past the limit: what they leave is the beginning of the
+order, which the engine does not follow. Patch 19's export wrote that
+beginning as the score's order, the list and a label for each child. It
+now counts the same least cost and writes no order at all once it is
+past the limit (`orderOfPlay` in `src/hum/humlib.cpp`, +18 / -0; the
+number is written there again, as humlib is built without the engine's
+classes). An order within that count is the whole order the file says,
+and is written, whether or not the engine follows it: the engine also
+weighs each child by its elements. No order of the corpus is near the
+limit: the export of no score changes. One case (a section named 1,000
+times is written with its list and its labels; one name more, and no
+order is written); four deliberate breaks of the new lines, each caught.
+
+**Known, not changed.**
+
+- *ABC, first and second endings* (`[1`, `[2`, `|1`, `:|2`) are passed
+  over: both are played each time. 40 of MuseNote's 183 exports in the
+  parity set hold `[1`. Five of the reviewers' tunes.
+- *ABC, `|::` and `::|`* mean three times in ABC 2.1 and are read as
+  twice. Two of the reviewers' tunes; a case says so.
+- *ABC, the last measure of a tune with no bar line after it* is not
+  read: `C D E F | G A B c` plays four notes. One of the reviewers'
+  tunes (`C :: E`).
+- *ABC, a line that begins with a letter and a colon* is an information
+  field, as ABC 2.1 has it: `c:| …` loses its measures.
+- *ABC, a tie* is written with a start that names no note (the `#` is
+  missing): the tied note is struck again.
+- *ABC, `K:C bass`*, a key followed by a clef named without `clef=`, is
+  read as C flat major: the `b` of "bass" is taken for a flat. `K:G bass`
+  is G flat, `K:bass` seven flats. `K:C clef=bass` is read right.
+- *ABC, a second tune's default note length* is worked out from the
+  first tune's meter.
+- *ABC, `[::`* opens a chord (a `[` before the dots of a bar line is not
+  known as part of the bar line).
+- *ABC, a rest of more measures than the engine's clock holds*
+  (`Z2147483647`): the notes after it are not played after it.
+- *ABC, a file whose lines end in a carriage return alone* has no line
+  the reader knows, and is refused (it ended the process).
+- *The cost of an order*: past the limit all repeats of a score are
+  dropped, not only the dear one, and a repeat marked more than 100
+  times is read as 100. An order within the limit can still be slow:
+  3,000 double repeats in a row (33 KB of ABC, cost under the limit) take
+  28 seconds for the timemap, on tb.11 and with the patches. The
+  Humdrum reader adds a file's own expansion list as the two writers
+  did (20,000 labels in one list: 1.7 seconds).
+- *An order of play that an MEI file writes itself* is counted as it
+  was: patch 27 is about the two writers of the engine. What the memory
+  review of tb.10 found there stands, and is the same on tb.9 (its
+  runs; five of its files run again here end the process with the patches as
+  on tb.11): an
+  `<expansion>` that names itself, or two that name each other, end the
+  process at the timemap (the stack runs out); a chain of them, each
+  naming the next twice, is counted as cheap and takes gigabytes; an
+  order that names a section and then the section that holds it, or
+  something that is no section, ends the process; the count walks the
+  document once for every different reference (5,000 sections each
+  named once: 5 seconds more than tb.9); it is kept in a `size_t`,
+  which is 32 bits on armeabi-v7a, where 4,096 times a section of 256
+  elements counts as nothing; and ids of thousands of characters are
+  counted as short ones (14 KB: 1.2 GB).
+- *A staff of very many lines, a part of very many staves*: the
+  engine's time grows with the square of them (40,000 lines: 10
+  seconds; 4,000 staves: 200 seconds), from any format; in ABC one
+  header line is enough (`K:stafflines=99999999999`, found by the review
+  of tb.13). A meter unit below zero, which stood here, never came back
+  from the MIDI writer from any format: patch 29.
+
+**The gates.**
+
+Parity gate (`tool/parity/run.sh`, then `compare.sh` against the dump
+of tb.11): 19930 outputs compared, 14 differ, the 14 ABC locator exports
+of patch 26 named above, each by its `<mRest>` lines and nothing else;
+seeded ids on a fresh thread deterministic for 2785 of 2785. So the
+SVG, timemap, pitch map, MIDI and MEI of every score of the corpus are
+as on tb.11 to the byte, and with them the order every score is played
+in. The gate does not play its locator inputs: the timemap and MIDI of
+its 194 ABC, 189 Humdrum, 8 PAE and 3 GABC inputs were set beside
+tb.11's one by one: 380 the same, the 14 not.
+
+Native tests (`verovio_engine_tests`, 115 cases and 3214 assertions; 90
+cases on tb.11): all pass, in one process and each in a process of its
+own, Release and under AddressSanitizer with no report; and so on a
+fresh copy of tb.11 with the five patches applied in order (each patch
+builds on the ones before it). Of the 25 new cases 22 fail, end the
+process or do not come back on tb.11 (the stage sources built with the
+new test files, in a third directory): 21 without a sanitizer (13 fail,
+7 end the process, 1 does not come back), and one more under
+AddressSanitizer (what an empty line leaves in the reader's lists: a use
+after free). The other three hold lines of tb.10 that no case held: the
+white-space field with a value long enough for the sanitizer to see,
+the limit to the note, and a stop whose number no open line has.
+
+Deliberate breaks (`mut12.py`: every line and condition of the five
+patches, and the ten breaks of tb.10's lines that its reviews found
+passing every case; in a second copy of the tree with build directories
+of its own, one of them with AddressSanitizer for the breaks that bring
+back a read out of bounds): 112 tried, 106 caught, 6 not. Of the ten of
+the reviews, nine are caught: seven by the ABC cases with two bars
+between ends, lines that begin with a bar line, `::` last and first on
+a line and a second tune, the limit by the cases at 1,000,000 and
+1,000,004, the white-space field under the sanitizer, the number of
+another staff's line by a case of its own. The tenth is the same
+program (the octave stop's line, under Corrections). The other five
+that are not caught:
+
+- a rest and a space of length 0 divided by it (two): on arm64 the
+  division gives 0, the number the patch gives, so the two are one
+  program on the machine these ran on. The lines are for x86-64, where
+  the division traps; no x86-64 build was run;
+- the ending sign's numbers looked for from its second character: the
+  same program, since the sign is taken only where its first character
+  is a digit;
+- two stops that save time and nothing else: the engine's own writer
+  going on through what was repeated on the way once the order is full,
+  and MusicXML's importer going on through its loops. The output is the
+  same to the byte. The time is not: 20,000 repeat ends in a row, 3.0
+  seconds for the timemap against 5.5; 3,000 bars each marked ×100, 1.4
+  seconds to load against 9.9; both grow with the square of the bars. A
+  case that held them would be a case with a clock.
+
+ABC inputs, one process each, with the first page, the timemap, the
+pitch map, the MIDI and the MEI asked for and the MEI read back. The
+count is of the inputs that end the process, are reported by the
+sanitizer or an assertion, or do not come back:
+
+| ABC inputs | files | tb.11 | tb.11, sanitizer | patches | patches, sanitizer |
+|---|---|---|---|---|---|
+| The second reviewer's spellings of colon, bar, the two brackets, space and a note in three places of a tune (`fuzzabc.py`) | 4662 | 1529 | 1529 | 0 | 0 |
+| First hostile set: one fault each by hand, one hostile token in five places of a tune, header fields with hostile values, 2,500 lines of tokens drawn at random | 5107 | 2711 | 2724 | 0 | 0 |
+| Second hostile set: ending signs with all that can stand against them, texts that end inside a character | 1983 | 888 | 936 | 0 | 0 |
+| The memory review's own set | 6059 | 622 | not run | 0 | 0 |
+
+With the patches nine of these files are refused by the importer (no tune in
+them: an `X` and no key, nothing at all, a file with no line end the
+reader knows); six of the nine ended the process on tb.11 and three
+were refused there. Every other file loads, and the MEI of every one
+that loads is read back by the engine (on tb.11 the export of 135 was
+not).
+
+MusicXML inputs for patch 28, the same way:
+
+| MusicXML inputs | files | tb.11 | tb.11, sanitizer | patches | patches, sanitizer |
+|---|---|---|---|---|---|
+| The files named by the attack on tb.11 and by the memory review | 8 | 7 | 8 | 0 | 0 |
+| First set of variants: `<chord/>` with no note before it, numbers that are none, notes before `<attributes>`, `<staves>` | 90 | 36 | 38 | 0 | 0 |
+| Second set: parts that do not begin with their `<attributes>` in every place and with every thing first, octave lines in them, texts that end inside a character | 108 | 32 | 51 | 0 | 0 |
+
+The slow files of the reviews, and orders near the limit on both sides
+(seconds for `loadData` and for the timemap, peak memory; the machine
+was shared, and under load while these ran):
+
+| File | Size | tb.11: load / timemap / MB | patches: load / timemap / MB | Played, patches |
+|---|---|---|---|---|
+| MusicXML, 60 bars each a backward repeat marked ×100 | 15 KB | 115 / 17 / 270 | 0.04 / 0.01 / 12 | 60 notes, as written |
+| the same, 100 bars | 25 KB | not back in 200 s | 0.04 / 0.02 / 14 | 100, as written |
+| the same, 3,000 bars | 785 KB | not back in 200 s | 0.97 / 0.26 / 137 | 3,000, as written |
+| MusicXML, 400 plain backward repeats | 93 KB | 31.7 / 5.1 / 153 | 0.18 / 0.10 / 27 | 400, as written |
+| the same, 2,000 | 497 KB | not back in 200 s | 0.68 / 0.25 / 99 | 2,000, as written |
+| Humdrum, 400 repeat ends with no start | 4.3 KB | 0.13 / 28.8 / 157 | 0.12 / 0.10 / 27 | 400, as written |
+| MEI, 20,000 repeat ends with no start | 2.4 MB | not back in 200 s | 6.2 / 2.1 / 728 | 20,000, as written |
+| MEI, 82 ends, cost 1,000,000 | 10 KB | 0.12 / 5.1 / 101 | 0.03 / 0.87 / 103 | 3,878, followed |
+| the same with one note more, cost 1,000,004 | 10 KB | 0.04 / 0.15 / 13 | 0.03 / 0.02 / 12 | 92, as written |
+| MusicXML, one bar of 48 notes ×100, cost 1,000,000 | 6 KB | 0.01 / 1.05 / 99 | 0.02 / 0.34 / 98 | 4,800, followed |
+| the same with 49 notes, cost 1,020,000 | 6 KB | 0.01 / 0.06 / 10 | 0.01 / 0.01 / 9 | 49, as written |
+| 17 parts, a 32-bar chorus ×8 (the first reviewer's) | 665 KB | 0.69 / 3.8 / 337 | 0.80 / 4.3 / 353 | 35,904, followed |
+
+103 files in all (the two reviewers' 85, 18 of mine). For the 90 that
+came back on tb.11 the timemap and the MIDI are the same with the patches to
+the byte, followed or not; the 13 that did not come back in 200 seconds
+are each played as written with the patches, a note for a bar.
+
+**Corrections to earlier entries.**
+
+- **tb.10, patch 11 (octave lines)**: "in a part of one staff a line ends
+  where it did" is not true in three cases. With two numbered lines open
+  at once on one staff, each now ends at its own stop (tb.9 ended both
+  at the first), and the staff's notes are set back at the first stop,
+  so the note between the stops lies under a line without being moved;
+  its sound was wrong on tb.9 too. A `continue` with no line open no
+  longer starts a line (tb.9 drew one from there, always "above"). And a
+  stop with a number takes a line of that number that still waits for
+  its first note on another staff: tb.9 kept that line. No code is
+  changed for these: the second is tb.9's guess taken away, the third is
+  the rule doing what it says for the file whose stop is that line's
+  (left alone, the line would run to the end of its part, the fault
+  patch 11 was written against), and two octave lines at once on one
+  staff is no notation.
+- **tb.10, patch 15**: "ABC's repeats read as ABC says" was true of an
+  end with no start in a tune of one line with no bar line before its
+  measures, and of the double repeat inside a line. With patch 25 it is
+  true of the tunes above as well, and still not of first and second
+  endings, of `|::` as three times, or of a last measure with no bar
+  line.
+- **tb.10, patch 16**: a marked repeat is read as at most 100 and then
+  followed or not by its cost; "a measure marked 2,000 times … is played
+  as written, once through" is true only where 100 times is over the
+  limit. Past the limit every repeat of the score is dropped. The
+  ceiling bounded memory and not time until patch 27, and for an order
+  an MEI file writes itself it bounds neither (above).
+- **tb.10, patch 13 (Humdrum export)**, known and not changed here: a
+  staff that transposes by more than an octave (tenor and baritone
+  saxophone, bass and contrabass clarinet) is exported by whole octaves
+  only, its notes and its key (`Convert::transToBase40` has no entry
+  past an octave; the engine's own reader makes the same omission, so
+  the file reads back as written, and any other Humdrum program gets
+  notes a tone or more off). A key held by the `<scoreDef>` of a score
+  whose `<staffDef>` transposes is not moved. A concert key past seven
+  signs is not written.
+- **tb.10, the comment above the count in `src/doc.cpp`**: corrected by
+  patch 27 (23,000 was 30,000; "played as it is written" was 100 times).
+- **tb.10, one line of patch 11 that no case holds, and none can**: the
+  octave stop's `if (!named) m_octDis[staffNum] = 0;`. Taken out, every
+  case passes, and 3,063 MusicXML files with octave lines (3,000 drawn
+  at random for this, with numbers, staves, stops with no line and two
+  lines at once; the reviewers' 63) give the same MEI and the same
+  pitches. It is the same program without it: a staff's notes are moved
+  only while a line is open on it, a stop that no number names closes
+  every line open on its own staff, and the loop that closes a line sets
+  its staff back. The line is left as it is.
+
+**The review of tb.13.** A second engineer, who had not written the
+patches, reviewed tb.13 as it was first put together: its code, then
+18,233 ABC files made for it (every token alone, in pairs and in threes;
+rich lines cut at every place; 28 fields by 41 hostile values, in the
+header, the body and inline; 1,440 ways one tune follows another; 324
+shapes of lyrics), 390 MusicXML files, 85 orders of play at and around
+the limit, and eleven deliberate breaks of its own. Of the ABC files,
+2,165 end the process on tb.12 and load on tb.13, 81 do not come back on
+tb.12 and load on tb.13, and 400 end it on tb.12 and are refused on
+tb.13 (they hold no tune); of the MusicXML files, 55 end the process on
+tb.12 (32 by a segmentation fault, 23 by an exception out of the
+library) and load on tb.13. Every order of play is followed, or played
+as written, at the same point on both, with the same timemap and MIDI to
+the byte; the slow ones come back at once (60 bars each marked ×100: 67
+seconds to load and 11 for the timemap on tb.12, 0.04 and 0.02 on
+tb.13). What it found:
+
+- *An X field inside a tune emptied the tune's key* (patch 24 as first
+  put together): `[X:2]` or `[X:]` in a tune in D, and the notes after
+  it were played in C (327 of its files). ABC has no X there, and the
+  reader takes it as any other field. Mended (patch 24, above), and held
+  by a case.
+- *The MIDI writer's loop*: mended for every format (patch 29), where
+  patch 24 had kept ABC from reaching it.
+- *Four deliberate breaks that no case caught.* One takes the
+  instrument away from every MusicXML part of one staff (it is put on
+  the staff where patch 28 makes the staff's definition): a case holds
+  it now. The other three are the same program for every file that is
+  not malformed in one way each: a header line that is a `K` alone, or a
+  `K` and one character other than `:` (the break takes it for the key,
+  the patch reads on to the key); `[`, a character that is neither a
+  letter nor `|`, and `:` (the break takes `[::` for a field, the patch
+  opens a chord: both wrong, and declared above); and a text whose last
+  character is cut (the break reads the bytes the cut character leaves
+  as a character of their own: none, or U+0000, which no output of the
+  case shows; only where one of them is no byte of a character's
+  middle is it a letter the patch leaves out).
+- *The comment of the amendment of patch 19* said more than the code
+  does (that no order the engine does not follow is written); it says
+  what the code does now.
+- Two changes it measured, declared here: a `<staves>` of 65,538 or
+  -65,534, which tb.12 read as two staves (the number cut to 16 bits),
+  is no number of staves now, and the part has one; a note written for
+  its staff 2 stands on staff 1, with `staff="2"`, at the same pitch. A
+  second `X` with no number inside a header begins a tune of its own
+  (the rule of patch 24), with no title: the title read before it is
+  the first, empty tune's.
+
+Known, from the review, and not changed (each the same on tb.12; for a
+later tag):
+
+- an ABC tuplet whose numbers are too long for an int
+  (`(3:99999999999`): its notes are hundreds of millions of quarter
+  notes long, and a load of the tune's MEI or of its Humdrum export
+  does not come back;
+- the Humdrum reader's table of the accidentals of a bar holds ten
+  octaves (`analyzeKernAccidentals`, `src/hum/humlib.cpp`), and a note
+  above them is read past the table's end: a `**kern` note of the tenth
+  octave or above (`4cccccccccccccc`), and so the Humdrum export of a
+  MusicXML note of `<octave>10</octave>`, read back. The hardened build
+  stops there; a sanitizer build reports a read of the heap;
+- a MusicXML part whose first measure begins with a note loses the
+  `<transpose>` of its later `<attributes>`: it plays as written (C and
+  E, where the same part that begins with its attributes sounds B flat
+  and D);
+- an ABC order of play just within the limit can still be large to
+  follow: 2,000 bars of 120 quarter notes, each repeated, are 480,000
+  notes, 130 seconds and 3.8 GB, on tb.12 as on tb.13.
+
+**On tb.13.** The same toolchain; Release, and AddressSanitizer with the
+standard library's checks on (`_LIBCPP_HARDENING_MODE_DEBUG`). Native
+tests (`verovio_engine_tests`, 174 cases and 5544 assertions; 146 on
+tb.12): all pass, in one process and each in a process of its own, and
+under the sanitizer with no report. Deliberate breaks of what was added
+in integration and after the review: ten, each caught (two of the key,
+three of the MIDI writer's loop, one that takes the instrument away,
+four of the export's amendment). Parity gate, tb.12 against tb.13: 19930
+outputs compared, 14 differ, the ABC locator exports of patch 26, by
+their `<mRest>` lines and nothing else; seeded ids on a fresh thread
+deterministic for 2785 of 2785. Measured apart over the 2785 scores, as
+for tb.12: the export read back the way an application opens a file, and
+the text as it is written, are as on tb.12 score for score. The audit of
+log formats (`tool/log_format_audit.py`): 299 engine sources, 0 calls.
+
 ## Rules for this branch
 
 - A patch is carried only when the change cannot be made outside the
@@ -1845,6 +2491,20 @@ do not use, a number given for `%s`). Upstream's, not changed here.
   was the format of a log message), of the kind this queue has carried
   since patch 7. It marks four functions in a header and changes the
   output of no score.
+  Twenty-nine since 2026-10-14, by the owner's standing decision that
+  the findings of a review are mended in the fork when the gates are
+  clean, files that end the app first: patches 24 and 28 are crash fixes
+  in two importers (24 also bounds one read of the text converter in
+  `src/vrv.cpp`, which every format uses) and patch 29 is one in the
+  MIDI writer (a meter whose unit is below one), patch 27 bounds the
+  time of patch 16's ceiling, and patches 25 and 26 finish what patch 15
+  began. Patches 24 to 26 are in an importer; patch 26 changes what it
+  builds for an ABC `Z` with no number (an `<mRest>` for a
+  `<multiRest>`, with the same id): 14 of the 194 ABC files of the
+  parity set, declared above, and no file of another format. Patch 27
+  adds a small class to `expansionmap.h`. tb.13 also amends patch 19:
+  its export writes no order of play past the limit of patch 27 at its
+  least (such an order may be cut short).
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
