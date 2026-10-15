@@ -4981,8 +4981,10 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
         }
     }
 
+    // A tempo within a direction is already handled by ReadMusicXmlDirection
+    const bool inDirection = IsElement(node.parent(), "direction");
     const float bpm = node.attribute("tempo").as_float();
-    if (bpm > 0) {
+    if (bpm > 0 && !inDirection) {
         const short int offset = node.child("offset").text().as_int();
         const double timeStamp = (double)(m_durTotal + offset) * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0;
         Tempo *tempo = new Tempo();
