@@ -3824,7 +3824,10 @@ void MusicXmlInput::ReadMusicXmlNote(
             const std::string stepStr = pitch.child("step").text().as_string();
             const int octaveNum = pitch.child("octave").text().as_int();
             if (!stepStr.empty()) note->SetPname(ConvertStepToPitchName(stepStr));
-            if (m_octDis[notationStaffN] != 0) {
+            // The written octave follows the octave shift of the staff the note is drawn on. The sounding octave
+            // is also made explicit when the staff of the layer is shifted, since a cross-staff note is not
+            // affected by it.
+            if ((m_octDis[notationStaffN] != 0) || (m_octDis[staff->GetN()] != 0)) {
                 note->SetOct(octaveNum - m_octDis[notationStaffN]);
                 note->SetOctGes(octaveNum);
             }
