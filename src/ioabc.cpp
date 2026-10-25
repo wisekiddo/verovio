@@ -11,7 +11,9 @@
 
 #include <algorithm>
 #include <cassert>
+#include <climits>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -370,23 +372,30 @@ void ABCInput::AddLayerElement()
     m_noteStack.clear();
 }
 
+// The number of a tuplet [text] begins with, 0 where it has none, or -1 where it is too long for an int. (atoi kept
+// what 32 bits hold of such a number: "(99999999999" was a tuplet of 1215752191 notes)
+static int TupletNumber(const std::string &text)
+{
+    const long long number = std::strtoll(text.c_str(), NULL, 10);
+    return (number > INT_MAX) ? -1 : static_cast<int>(number);
+}
+
 int ABCInput::ParseTuplet(const std::string &musicCode, int index)
 {
     constexpr std::string_view tupletElements = "(:0123456789 ";
     const size_t tupletEnd = musicCode.find_first_not_of(tupletElements, ++index);
     const std::string tupletStr = musicCode.substr(index, tupletEnd - index);
 
-    Tuplet *tuplet = new Tuplet();
     size_t separator = tupletStr.find_first_of(":");
     // Get tuplet number first 9:_:_
     int tupletNum = 0;
     if (separator != std::string::npos) {
         const std::string tupletNumStr = tupletStr.substr(0, separator);
-        tupletNum = atoi(tupletNumStr.data());
+        tupletNum = TupletNumber(tupletNumStr);
         ++separator;
     }
     else {
-        tupletNum = atoi(tupletStr.c_str());
+        tupletNum = TupletNumber(tupletStr);
     }
     // Get tuplet number base _:3:_
     int tupletNumbase = 0;
@@ -395,16 +404,29 @@ int ABCInput::ParseTuplet(const std::string &musicCode, int index)
         if (secondSeparator != std::string::npos) {
             if (secondSeparator != separator) {
                 std::string tupletNumbaseStr = tupletStr.substr(separator, secondSeparator - separator);
-                tupletNumbase = atoi(tupletNumbaseStr.data());
+                tupletNumbase = TupletNumber(tupletNumbaseStr);
                 separator = secondSeparator + 1;
             }
         }
         else {
             std::string tupletNumbaseStr = tupletStr.substr(separator);
-            tupletNumbase = atoi(tupletNumbaseStr.data());
+            tupletNumbase = TupletNumber(tupletNumbaseStr);
             separator = secondSeparator + 1;
         }
     }
+    // return index of the last element in tuplet, so that we point to the actual notes when incrementing 'i'
+    // (the end of the line, where the tuplet is the last thing on it: "nowhere" was returned as -2, and the line
+    // was read from before its start)
+    const int last = static_cast<int>((tupletEnd == std::string::npos) ? musicCode.length() : tupletEnd) - 1;
+    // A tuplet ABC cannot mean is none, and its notes are read as they are written: one of no notes, and one with a
+    // number too long for an int. (Their durations ran past what the engine's fractions hold: the MIDI writer refused
+    // them, the Humdrum export wrote negative durations, and a load of the tune's MEI or Humdrum did not always come
+    // back.) A second number of 0 is read as none written, as before
+    if ((tupletNum < 1) || (tupletNumbase < 0)) {
+        LogWarning("ABC import: '(%s' is no tuplet, its notes are read as written", tupletStr.c_str());
+        return last;
+    }
+    Tuplet *tuplet = new Tuplet();
     // List of tuplets with default base of 3
     const std::unordered_set<int> threeBase = { 2, 4, 8, 9 };
     if (!tupletNumbase) {
@@ -416,10 +438,7 @@ int ABCInput::ParseTuplet(const std::string &musicCode, int index)
     tuplet->SetNumbase(tupletNumbase);
     m_containerElement = { ElementType::Tuplet, tuplet, tupletNum };
 
-    // return index of the last element in tuplet, so that we point to the actual notes when incrementing 'i'
-    // (the end of the line, where the tuplet is the last thing on it: "nowhere" was returned as -2, and the line
-    // was read from before its start)
-    return static_cast<int>((tupletEnd == std::string::npos) ? musicCode.length() : tupletEnd) - 1;
+    return last;
 }
 
 void ABCInput::AddAnnot(const std::string &remark)
