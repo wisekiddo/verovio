@@ -4638,6 +4638,14 @@ bool MEIInput::ReadScore(Object *parent, pugi::xml_node score)
     vrvScore->SetScoreDefSubtree(subtree, scoreScoreDef);
     m_hasScoreDef = true;
 
+    // A <staffDef> of the score's own <scoreDef> with no @lines has five, as every importer gives a staff whose file
+    // says none: its count was the unset value, and the staff was drawn with no line and laid out with overflows. A
+    // <staffDef> of a later <scoreDef> says what changes, and no count of lines is read from it
+    for (Object *object : scoreScoreDef->FindAllDescendantsByType(STAFFDEF)) {
+        StaffDef *staffDef = vrv_cast<StaffDef *>(object);
+        if (!staffDef->HasLines()) staffDef->SetLines(5);
+    }
+
     if (!success) return false;
 
     // We start from the second child here (first one is supposed to be the scoreDef or scoreDef within editorial markup
