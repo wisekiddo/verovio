@@ -33931,7 +33931,10 @@ char HumdrumLine::getChar(int index) const {
 	if (index >= (int)size()) {
 		return '\0';
 	}
-	return (((string)(*this))[index]);
+	// (The line was cast to a string by value, a copy of the whole line
+	// for each character read: createTokensFromLine was quadratic in the
+	// length of a line, 11 s for a line of 400 KB.)
+	return static_cast<const string&>(*this)[index];
 }
 
 
