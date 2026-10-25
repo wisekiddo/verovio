@@ -201,6 +201,10 @@ FunctorCode InitOnsetOffsetFunctor::VisitMeasure(Measure *measure)
 
 FunctorCode InitOnsetOffsetFunctor::VisitStaff(Staff *staff)
 {
+    // A hidden staff is not timed, as it is not aligned (AlignHorizontallyFunctor): its content is passed over, and
+    // a hidden ossia staff has no staffDef (ScoreDefSetOssiaFunctor sets none), which ended the process here
+    if (staff->IsHidden()) return FUNCTOR_SIBLINGS;
+
     StaffDef *drawingStaffDef = staff->m_drawingStaffDef;
     assert(drawingStaffDef);
 
