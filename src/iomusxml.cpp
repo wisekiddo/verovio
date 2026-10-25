@@ -1390,13 +1390,33 @@ void MusicXmlInput::CreateExpansion(Section *section)
         }
         // ending
         else {
-            // gather all endings, by creating a map from ending number to ending iterator
-            std::map<int, decltype(iter)> endings;
+            // gather the endings: each pass, and the endings played in it in score order. An ending is played in
+            // the passes its number names that no ending before it has. One that names none goes on from the ending
+            // just before it when it has that one's number and no repeat ends that one (one ending written as two
+            // brackets); otherwise one whose number is blank (MusicXML: there is an ending, the writer could not
+            // tell which) is the pass after the last
+            std::map<int, std::vector<decltype(iter)>> endings;
             auto begIter = iter;
             std::optional<decltype(iter)> rptNestedIter;
             while (iter != m_sections.end() && iter->first.m_classId == ENDING) {
-                for (auto i : parseInts(iter->first.m_endingInfo.m_number)) {
-                    endings.insert({ i, iter });
+                const std::list<int> numbers = parseInts(iter->first.m_endingInfo.m_number);
+                bool hasPass = false;
+                for (int i : numbers) {
+                    if (endings.contains(i)) continue;
+                    endings[i].push_back(iter);
+                    hasPass = true;
+                }
+                const bool goesOn = !hasPass && (iter != begIter)
+                    && (parseInts(std::prev(iter)->first.m_endingInfo.m_number) == numbers)
+                    && (std::prev(iter)->second.back()->GetRight() != BARRENDITION_rptend);
+                if (goesOn) {
+                    for (auto &pass : endings) {
+                        if (pass.second.back() == std::prev(iter)) pass.second.push_back(iter);
+                    }
+                }
+                else if (!hasPass && numbers.empty()) {
+                    const int last = endings.empty() ? 0 : endings.rbegin()->first;
+                    endings[(last < INT_MAX) ? last + 1 : last].push_back(iter);
                 }
                 endIter = iter++;
 
@@ -1410,7 +1430,7 @@ void MusicXmlInput::CreateExpansion(Section *section)
             // when jumping back, keep only last ending
             if (jumpBack && endings.size() > 0) {
                 endings.erase(endings.begin(), std::prev(endings.end()));
-                endIter = endings.begin()->second;
+                endIter = endings.begin()->second.back();
             }
 
             // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
@@ -1422,8 +1442,10 @@ void MusicXmlInput::CreateExpansion(Section *section)
                         isFollowed = order.Add(ref);
                     }
                 }
-                std::string endref = "#" + ending->second->first.m_target->GetID();
-                isFollowed = order.Add(endref);
+                for (auto it = ending->second.begin(); isFollowed && (it != ending->second.end()); ++it) {
+                    std::string endref = "#" + (*it)->first.m_target->GetID();
+                    isFollowed = order.Add(endref);
+                }
             }
 
             // set the repetition to the (latest) nested one
