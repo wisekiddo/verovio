@@ -1357,11 +1357,10 @@ void MusicXmlInput::CreateExpansion(Section *section)
     auto rptIter = iter;
     auto secIter = iter;
     auto endIter = iter;
-    std::map<std::string, decltype(iter)> labels;
+    std::map<std::string, decltype(iter)> segnos, codas;
     for (auto it = m_sections.begin(); it != m_sections.end(); ++it) {
-        if (!it->first.m_label.empty()) {
-            labels.insert({ it->first.m_label, it });
-        }
+        if (!it->first.m_segnoLabel.empty()) segnos.insert({ it->first.m_segnoLabel, it });
+        if (!it->first.m_codaLabel.empty()) codas.insert({ it->first.m_codaLabel, it });
     }
     while (isFollowed && (iter != m_sections.end())) {
         // increment visited count
@@ -1472,6 +1471,7 @@ void MusicXmlInput::CreateExpansion(Section *section)
             && endIter->first.m_jumpInfo.m_times.end()
                 != std::find(endIter->first.m_jumpInfo.m_times.begin(), endIter->first.m_jumpInfo.m_times.end(),
                     endIter->first.m_visited)) {
+            const auto &labels = (endIter->first.m_jumpInfo.m_jump == musicxml::JumpInfo::DALSEGNO) ? segnos : codas;
             if (!labels.contains(endIter->first.m_jumpInfo.m_label)) {
                 LogWarning(
                     "MusicXML import: Segno/Coda label '%s' not found", endIter->first.m_jumpInfo.m_label.c_str());
@@ -4319,15 +4319,15 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
     // segno
     if (node.attribute("segno")) {
         if (!m_sectionStart) m_sectionStart = musicxml::SectionInfo();
-        m_sectionStart->m_label = node.attribute("segno").as_string();
-        if (m_sectionStart->m_label.empty()) m_sectionStart->m_label = "segno";
+        m_sectionStart->m_segnoLabel = node.attribute("segno").as_string();
+        if (m_sectionStart->m_segnoLabel.empty()) m_sectionStart->m_segnoLabel = "segno";
     }
 
     // coda
     if (node.attribute("coda")) {
         if (!m_sectionStart) m_sectionStart = musicxml::SectionInfo();
-        m_sectionStart->m_label = node.attribute("coda").as_string();
-        if (m_sectionStart->m_label.empty()) m_sectionStart->m_label = "coda";
+        m_sectionStart->m_codaLabel = node.attribute("coda").as_string();
+        if (m_sectionStart->m_codaLabel.empty()) m_sectionStart->m_codaLabel = "coda";
     }
 
     // forward-repeat

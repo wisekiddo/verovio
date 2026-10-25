@@ -208,7 +208,10 @@ namespace musicxml {
 
         ClassId m_classId;
         Object *m_target;
-        std::string m_label;
+        // what a dalsegno and a tocoda name: a segno's label and a coda's are two kinds (MusicXML pairs dalsegno
+        // with segno, tocoda with coda)
+        std::string m_segnoLabel;
+        std::string m_codaLabel;
         EndingInfo m_endingInfo;
         RepeatInfo m_repeatInfo;
         bool m_repeatStart;
