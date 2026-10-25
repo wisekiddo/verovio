@@ -244,6 +244,7 @@ void ScoreDef::Reset()
     m_drawLabels = false;
     m_drawingWidth = 0;
     m_drawingLabelsWidth = 0;
+    m_insertScoreDef = false;
     m_setAsDrawing = false;
 }
 
