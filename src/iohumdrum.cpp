@@ -27505,6 +27505,12 @@ std::vector<hum::HTp> HumdrumInput::getVerseAbbrLabels(hum::HTp token, int staff
 // HumdrumInput::convertVerses --
 //
 
+// The most words a single **vvdata token is split into verses of their own.
+// Each verse number is one pass of vrv::Doc::PrepareData over the document;
+// a token of thousands drew no usable lyric and took the layout into minutes.
+// A token of more words than this is kept as one verse (see below).
+static constexpr int kMaxVvdataVerses = 64;
+
 template <class ELEMENT> void HumdrumInput::convertVerses(ELEMENT element, hum::HTp token)
 {
     // Ignore verse when token is suppressed with yy signifier
@@ -27651,7 +27657,26 @@ template <class ELEMENT> void HumdrumInput::convertVerses(ELEMENT element, hum::
             }
         }
         if (vvdataQ) {
-            splitSyllableBySpaces(vtexts);
+            // A **vvdata token is split into one verse per word, and
+            // vrv::Doc::PrepareData makes a pass over the whole document for
+            // every verse number. A token of thousands of words (3,000 took
+            // 13 s, 10,000 never came back) drew no lyric a reader could use.
+            // Only a token of at most kMaxVvdataVerses words is split, as
+            // tb.10 splits one; a longer token is kept as one verse, its
+            // whole text on a single lyric line. A word is what stands
+            // between spaces: two spaces in a row make no verse of the
+            // nothing between them.
+            int words = 0;
+            if (vtexts.size() == 1) {
+                const std::string &text = vtexts[0];
+                for (size_t i = 0; i < text.size(); ++i) {
+                    if ((text[i] != ' ') && ((i == 0) || (text[i - 1] == ' '))) ++words;
+                }
+            }
+            const bool overBound = (words > kMaxVvdataVerses);
+            if (!overBound) {
+                splitSyllableBySpaces(vtexts);
+            }
             // Every piece of the one token is that token's. (Only the first piece had one: the second read past
             // the end of vtoks)
             vtoks.resize(vtexts.size(), token);
