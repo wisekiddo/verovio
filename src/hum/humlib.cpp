@@ -13709,6 +13709,11 @@ string HumGrid::getBarStyle(GridMeasure* measure) {
 void HumGrid::addLastMeasure(void) {
    // add the last measure, which will be only one voice
 	// for each part/staff.
+	// (A grid with no measure, or whose last measure holds no slice, has
+	// no last slice: back() was called on it before it was asked.)
+	if (this->empty() || this->back()->empty()) {
+		return;
+	}
 	GridSlice* model = this->back()->back();
 	if (model == NULL) {
 		return;
@@ -13718,9 +13723,6 @@ void HumGrid::addLastMeasure(void) {
 	// to get correct:
 	HumNum timestamp = model->getTimestamp();
 
-	if (this->empty()) {
-		return;
-	}
 	GridMeasure* measure = this->back();
 
 	string barstyle = getBarStyle(measure);
