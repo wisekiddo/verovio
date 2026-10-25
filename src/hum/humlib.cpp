@@ -101085,6 +101085,14 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 		return false;
 	}
 
+	// Nothing of neume notation is read here (<syllable>, <neume>, <nc>:
+	// a chant, as Verovio's GABC reader builds it): its Humdrum would hold
+	// a clef and no note.  It is refused.
+	if (score.select_node(".//staffDef[@notationtype='neume']")) {
+		cerr << "Error: neume notation cannot be converted to Humdrum" << endl;
+		return false;
+	}
+
 	m_staffcount = extractStaffCountByFirstMeasure(score);
 	if (m_staffcount == 0) {
 		// probably mensural music
@@ -102538,6 +102546,13 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 			if (((number < 1) ? m_currentStaff + 1 : number) > m_staffcount) {
 				cerr << "Warning: a staff the score does not have is left out" << endl;
 				continue;
+			}
+			// Such a staff is written into the last measure, which only a
+			// <staffDef> with something to write had made: with its clef in
+			// the layer, the clef or the first note was written into a grid
+			// with no measure, and the process ended.
+			if (m_outdata.empty()) {
+				m_outdata.addMeasureToBack();
 			}
 			parseStaff_mensural(children[i], starttime);
 		} else {
