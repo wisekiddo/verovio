@@ -1393,8 +1393,8 @@ void MusicXmlInput::CreateExpansion(Section *section)
             // gather the endings: each pass, and the endings played in it in score order. An ending is played in
             // the passes its number names that no ending before it has. One that names none goes on from the ending
             // just before it when it has that one's number and no repeat ends that one (one ending written as two
-            // brackets); otherwise one whose number is blank (MusicXML: there is an ending, the writer could not
-            // tell which) is the pass after the last
+            // brackets); otherwise it is the pass after the last: a blank number (MusicXML: there is an ending, the
+            // writer could not tell which), or a pass the repeat before it has left
             std::map<int, std::vector<decltype(iter)>> endings;
             auto begIter = iter;
             std::optional<decltype(iter)> rptNestedIter;
@@ -1414,7 +1414,7 @@ void MusicXmlInput::CreateExpansion(Section *section)
                         if (pass.second.back() == std::prev(iter)) pass.second.push_back(iter);
                     }
                 }
-                else if (!hasPass && numbers.empty()) {
+                else if (!hasPass) {
                     const int last = endings.empty() ? 0 : endings.rbegin()->first;
                     endings[(last < INT_MAX) ? last + 1 : last].push_back(iter);
                 }
