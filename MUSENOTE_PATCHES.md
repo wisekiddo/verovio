@@ -37,6 +37,26 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 27 | 2026-10-14 | The cost of an order of play is counted while the order is written (23ad9693e) | `src/doc.cpp`, `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, +74 / -21 | None for an order that is followed: timemap, MIDI, pitch map, MEI and pages of all 2785 scores of the corpus are byte-identical. A score whose order is not followed (more than 1,000,000 by the count of patch 16) loads and plays as before, as written, in a fraction of a second where it took minutes or never came back; the `<expansion>` MusicXML's importer leaves in such a document now holds the beginning of the order only (2,253 references for twenty bars each marked ×100, where it held 20,810) | Not offered upstream |
 | 28 | 2026-10-14 | MusicXML: files that ended the process: a `<chord/>` with no note before it, numbers that are none, and a part whose first measure does not begin with its `<attributes>` (2a99a405f) | `src/iomusxml.cpp`, +60 / -25 | A MusicXML file with a `<chord/>` on the first note of a layer, a rest whose `<display-octave>` is no number an int holds, a metronome mark whose `<per-minute>` is too large or too small for a double, a chord symbol whose `<degree-value>` is no number, a `<staves>` that is no number of staves, or a part whose first measure begins with a note now loads; each ended the process, the last for a second or later part and for a part of two staves, and read past the end of `m_octDis` in any part. One kind of file that loaded before changes: a score of one part of one staff whose first measure does not begin with its `<attributes>` has that part's id, name and instrument on its `<staffDef>` (it was a bare one, made at the end of the import), and an octave line in it is read (it was passed over). No score of the corpus is such: no output of the corpus changes | Not offered upstream |
 | 29 | 2026-10-14 | The MIDI writer comes back from a meter whose unit is below one (35a5f9173) | `src/midi/MidiMessage.cpp`, +6 / -1 | A score whose meter has a unit below zero (a MusicXML `<beat-type>` of -1, or one too long for an int, which comes out below zero) loaded, was drawn and had a timemap, and its MIDI never came back: in the apps it opened and could not be played. It is written, with 0 for the power of two of that unit. None for a unit of 0 or more: the same power of two for each | Not offered upstream |
+| 30 | 2026-10-20 | An MEI file's own order of play: no expansion within itself, nothing inside a measure, a copy of a copy (ca2190993) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, +25 / -2 | An MEI file whose own `<expansion>` names itself, or two that name each other, or names a layer, staff or note (then a section, then it again), or a section and the section that holds it, now loads and plays; each ended the process (932 of 7,254 hand-made orders) or never came back (334). An expansion within itself, and an element that is no section, ending or measure nor an editorial element at their level (a reading, a choice and what it chooses between...), or that stands inside a measure, is passed over with a warning, as an element that is not there is. None for an order that names only sections, endings, editorial elements, measures and expansions, none inside a measure and no expansion within itself: no output of the corpus changes. Of the hand-made orders that came back on tb.13, 61 that name a staff, layer, note or a reading inside a layer, and 16 that name a section-level scoreDef, staffGrp, staffDef, sb or dir, play otherwise | Not offered upstream |
+| 31 | 2026-10-20 | The cost of an order of play: one walk of the document, long ids weighed, nested expansions counted, nothing wraps (5abee1928) | `src/doc.cpp`, +71 / -13 | None for an order whose ids are under 64 bytes, that names no expansion, and whose references all carry their `#` or none does: the cost of every score of the corpus is the same (the dearest 29,977). An expansion the order names is counted as what it plays (sixteen expansions each naming the next twice played a section 65,536 times at a cost of 4, and the load did not come back, on tb.13 too): past the limit, the order is played as written. A section named with and without its `#` is one section, as `Expand` reads it. The count walks the document once (5,000 one-bar sections named once: 27.9 s, now 15.8 s for the whole load and exports); an id weighs 1 more for every 64 bytes, so an order of very long ids past the limit by it is played as written; a reference named more than 1,000,000 times is past the limit even if it names nothing; nothing wraps on 32 or 64 bits | Not offered upstream |
+| 32 | 2026-10-20 | MEI: a staff the score has no staffDef for is refused (af3544ffe) | `src/iomei.cpp`, +13 / -1 | An MEI file with a shown `<staff>` whose `@n` the score's `<scoreDef>` has no `<staffDef>` for is refused with an error in the log, as one with a `<staffGrp>` without a `<staffDef>` is; it ended the process at load. None for a file that loaded | Not offered upstream |
+| 33 | 2026-10-20 | Humdrum reader: a note outside ten octaves is not looked up in the tables of its accidentals and its linked ties (068def0c6) | `src/hum/humlib.cpp`, +30 / -13 | None for `**kern` notes and ornament notes in octaves 0 to 9. A note of octave 10 or more keeps its pitch and its accidental is played, not shown (`accid.ges`), as upstream already does for a note below the table; an ornament reaching outside the table gets no accidental; a linked tie on such a note is not linked (the two notes still tie). Each read or wrote outside a table of 70 or 400 entries; a file with such a linked tie, refused on tb.13, now loads | Not offered upstream |
+| 34 | 2026-10-20 | Humdrum export: the terminal barline comes back from a grid whose last measure holds no slice (65919b6a2) | `src/hum/humlib.cpp`, +5 / -3 | None: `HumGrid::addLastMeasure` checks that its grid and its last measure hold something before it reads them (it called `back()` on an empty list). No converter reaches it through the functions the apps call on tb.13 | Not offered upstream |
+| 35 | 2026-10-20 | Humdrum reader: an order of play is read up to what the engine follows (5e327725b) | `src/iohumdrum.cpp`, +9 / -2 | None for an order that is followed. A Humdrum file's own order of play is gathered as the engine's other writers gather one (`OrderOfPlay`) and stops past the limit: 100,000 labels never came back (stored in quadratic time, every later pass quadratic too) and load in 0.9 s; the order is played as written, as before, and its MEI holds the beginning of the list | Not offered upstream |
+| 36 | 2026-10-20 | Humdrum reader: a **vvdata token of more than 64 words is one verse (632dd0376) | `src/iohumdrum.cpp`, +26 / -1 | None for a token of at most 64 words (a word is what stands between spaces), split as tb.10 splits it. A longer token is one `<verse>` holding its whole text: 3,000 words never came back (a pass over the document for every verse number) | Not offered upstream |
+| 37 | 2026-10-20 | Humdrum reader: a line is read in time linear in its length (9033a960e) | `src/hum/humlib.cpp`, +4 / -1 | None: `HumdrumLine::getChar` reads the line in place, where it copied the whole line for every character (a line of 2 MB never came back) | Not offered upstream |
+| 38 | 2026-10-20 | ABC: a tuplet with a number too long for an int, or of no notes, is none (25b554594) | `src/ioabc.cpp`, +28 / -9 | An ABC tuplet whose first number is 0, or whose first or second number does not fit an int, is no tuplet (with a warning), its notes read as written: `atoi` made `(99999999999` a tuplet of 1,215,752,191 notes, and the MIDI and the Humdrum export failed. None for a number that fits; none of the 194 ABC files of the parity set changes | Not offered upstream |
+| 39 | 2026-10-20 | A staff's count of lines past what any staff has is five, from any format (6becedd2b) | `libmei/dist/atts_shared.h`, +8 / -1 | A staff of fewer than 0 or more than 32 lines, from any format, has five (a staff of two billion never came back); a count of 0 to 32 is kept, an unset one passes. Generated code: a regeneration of libmei or a base move carries it again. No output of the corpus or the parity set changes | Not offered upstream |
+| 40 | 2026-10-20 | MusicXML: a part that begins with a note has the transposition its first attributes give (e0dd4d0a6) | `src/iomusxml.cpp`, +27 / -16 | A MusicXML part that begins with a note and has a `<transpose>` in its first `<attributes>` is transposed (it played as written). Nothing is built, no id moves. **Declared:** the `trans.diat` of a part with an `<octave-change>` is its `<diatonic>` and the octave (upstream took the `<chromatic>`'s semitones: a bass clarinet said a tenth for a ninth; MuseNote spells sounding notes from it), by that attribute alone: none of the corpus, whose seven parts with one transpose by whole octaves, where the two readings agree. A transposition given later in a part is still not read. No score of the corpus begins with a note | Not offered upstream |
+| 41 | 2026-10-20 | MusicXML: an ending with a blank number, and one ending in two brackets, are played (495eb5f16) | `src/iomusxml.cpp`, +29 / -7 | **Changes the order of play of 19 scores of the corpus, by design.** An ending with a blank number (MusicXML 4.0: there is an ending, the writer could not tell which) is the pass after the last, and one ending written as two brackets is played whole; both were never played (15 scores, 99 notes). Only the `<expansion plist>` of their MEI changes, and their timemap and MIDI; no object is built that was not, no id moves, no pitch changes, the page is the same. Three of the 19 lost no note: a second bracket of a first ending is heard on the first pass too (2), a "1st time only" bracket on pass 1 as well (1) | Not offered upstream; `develop` of 2026-10-20 has the same code |
+| 42 | 2026-10-20 | MusicXML: an ending whose pass a repeat has already left is the next pass (01d1beae7) | `src/iomusxml.cpp`, +3 / -3 | **Changes the order of play of 7 more scores, by design**: an ending numbered like one before it after that one's repeat (a file that contradicts itself; in three of the six the bracket's text says the right number) is the next pass, where it was never played (46 notes). Only the order of play, timemap and MIDI | Not offered upstream |
+| 43 | 2026-10-20 | MusicXML: a D.S. looks for its segno, and a To Coda for its coda (2abe20548) | `include/vrv/iomusxml.h`, `src/iomusxml.cpp`, +12 / -9 | **Changes the order of play of 2 more scores, by design**: a `<sound dalsegno>` naming a coda's label is passed over with the warning it always had, where it jumped forward to the coda (194 notes never played); a segno and a coda in one measure both count. Only the order of play, timemap and MIDI | Not offered upstream; `develop` of 2026-10-20 has the same code |
+| 44 | 2026-10-20 | The engine's fractions are exact while a result fits an int, and the nearest one toward zero that fits when it does not (010630a20) | `include/vrv/fraction.h`, `src/fraction.cpp`, `src/durationinterface.cpp`, +78 / -42 | **Changes the timemap of one score of the corpus, by design**: Wave, whose 488 entries are in time order (four were out of it; its MEI, MIDI and the notes it starts do not change). Each term of `vrv::Fraction` is taken in 64 bits and reduced before it is stored; a result that does not fit an int is the fraction nearest to it toward zero that does. A tuplet or a time whose terms passed an int no longer wraps (a bar's first tuplet of 32768 notes put a time before one it follows; 1000 bars of partial tuplets of 251 gave times below zero). An MEI note with dots below 0 lasts as one with none, and dots that add less than an int's fraction holds add nothing; an element of `@num="0"` in a tuplet (no valid MEI) lasts as its tuplet says, where the 0 took the tuplet's ratio away too. A time past what the terms hold is the largest they hold (2,147,483,647 quarter notes in the timemap). The mensural durations still multiply `@num` in an int | Not offered upstream |
+| 45 | 2026-10-20 | Humdrum export: a score of staves with no measure has one to be written into, and neume notation is refused (3681b2a75) | `src/hum/humlib.cpp`, +15 | `Toolkit::ConvertMEIToHumdrum` and `getHumdrum` only. A chant read from GABC (all three of the parity set's) and a mensural MEI with its clef in the layer ended the process; the mensural score is written with its notes, and a score of neume notation is refused with an error in the log (its export held a clef and no note, when it came back at all). None for any other score that converted | Not offered upstream |
+| 46 | 2026-10-20 | MEI: a staffDef of the score with no @lines is a staff of five lines (426a49816) | `src/iomei.cpp`, +8 | An MEI `<staffDef>` of the score's `<scoreDef>` with no `@lines` (MEI allows it) kept the unset value: its staff was drawn with no line, and layout and drawing overflowed in six files. It has five, and the MEI the engine writes says `lines="5"` on it. None for a file whose staffDefs say their count | Not offered upstream |
+| 47 | 2026-10-20 | The timemap passes over a hidden staff, as the alignment does: a hidden ossia staff has no staffDef (a83138c05) | `src/midifunctor.cpp`, +4 | An MEI file with a hidden ossia staff (an `<oStaff>` with no layer the engine reads, or any ossia under `ossiaHidden`) loaded and drew, and its timemap, MIDI and pitch map ended the process. None for a file whose timemap came back | Not offered upstream |
+| 48 | 2026-10-25 | A score definition's insert flag starts false (1aadb2e1b) | `src/scoredef.cpp`, +1 | `ScoreDef::Reset` left `m_insertScoreDef` unset, and `ScoreDefSetCurrentFunctor` read it for a first measure no score definition with a clef, key, meter or mensuration came before (a GABC chant, a mensural score; UBSan: a load of a value that is no bool). None where the flag was set before it was read | Not offered upstream |
+| 49 | 2026-10-25 | MusicXML: a tuplet's numbers are read as the int they are (22792787b) | `src/iomusxml.cpp`, +2 / -2 | A MusicXML tuplet whose `<actual-notes>`, `<normal-notes>` or `<tuplet-number>` passed 32,767 wrapped in a `short int` and was timed as one the file does not write (3 in the time of 40000 as 3 in the time of 1). None for numbers up to 32,767: none of the corpus is larger | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2425,6 +2445,220 @@ for tb.12: the export read back the way an application opens a file, and
 the text as it is written, are as on tb.12 score for score. The audit of
 log formats (`tool/log_format_audit.py`): 299 engine sources, 0 calls.
 
+### tb.14: patches 30 to 49
+
+Two sources. Patches 30 to 40 and 44 to 49 are faults a file a user can
+open meets: the list the review of tb.13 left (above, "Known, from the
+review"), the faults three builders found while they mended it, and what
+the integration of their work found. Patches 41 to 43 are MuseNote's
+plan V3_2_0_13 ("Every bar of a song is played"): the order of play the
+MusicXML importer builds left out bars of 35 of the 2,759 scores of the
+corpus, 484 notes drawn and never heard, and three of its causes are the
+importer's. Each patch was built and measured on tb.13 with the patches
+before it; each commit's message holds what it found, what it does and
+what it changes, and the cases named below hold it.
+
+**30 to 32. MEI.** An `<expansion>` that names itself, or two that name
+each other, or names a layer, staff or note and then a section, ended the
+process (932 of 7,254 orders made for it) or never came back (334); a
+copy of a copy was written while it was read (30; an order may name a
+section, an ending, a measure, another expansion, or an editorial
+element at their level, and nothing inside a measure). The cost of an
+order of play walked the document once for each section it named (5,000
+sections: 27.9 s), counted an id of 14,000 bytes as 1 (280 MB more for
+the timemap), counted an expansion it names as one element whatever it
+plays (sixteen nested ones played a section 65,536 times at a cost of 4,
+and never came back, on tb.13 too), and its products could wrap (31). A `<staff>` whose `@n`
+has no `<staffDef>` ended the process at load (32). Cases:
+`test_tb14_M_engine.cpp`.
+
+**33 to 37. Humdrum.** The reader's tables of accidentals and linked ties
+were read and written past their ends for a note of octave 10 or more,
+or an ornament outside them (33); `HumGrid::addLastMeasure` read an
+empty list (34); an order of play of 100,000 labels was stored in
+quadratic time and never came back (35); a `**vvdata` token of 3,000
+words made a pass over the document for each word (36: a token of more
+than 64 words, a word being what stands between spaces, is one verse);
+and each line
+was copied once for every character read from it (37: a line of 2 MB
+never came back). Cases: `test_tb14_H_engine.cpp`.
+
+**38 to 40. ABC, any format, MusicXML.** An ABC tuplet whose number does
+not fit an int, or of no notes, is none (38). A staff of fewer than 0 or
+more than 32 lines has five, from any format (39: two billion lines
+never came back; generated code, carried again at a regeneration of
+libmei). A MusicXML part that begins with a note has the transposition
+its first `<attributes>` give (40: it played as written), and the steps
+of a transposition with an `<octave-change>` are its `<diatonic>`'s and
+the octave, where upstream took the `<chromatic>`'s semitones (a bass
+clarinet said a tenth for a ninth; MuseNote spells sounding notes from
+`trans.diat`): declared, by that attribute alone, and for none of the
+corpus, whose seven parts with an octave change transpose by whole
+octaves, where the two readings agree. Cases:
+`test_tb14_X_engine.cpp`.
+
+**41 to 43. The order of play of a MusicXML score.** All three are in
+`MusicXmlInput::CreateExpansion`, and each changes the order of play of
+scores of the corpus by design; only their `<expansion plist>`, timemap
+and MIDI change, no id moves, no pitch changes, and the page is the
+same.
+
+- 41: an ending with a blank number (MusicXML 4.0: there is an ending,
+  the writer could not tell which) is the pass after the last, and one
+  ending drawn as two brackets with one number is played whole. Both
+  were never played: 15 scores, 99 notes. 19 scores change, three of
+  them with no note lost before (a first ending's second bracket is
+  heard on the first pass too, in two; a "1st time only" bracket on
+  pass 1 as well, in one).
+- 42: an ending numbered like one before it, after that one's repeat
+  (the file contradicts itself; in three of the six the bracket's text
+  says the right number), is the next pass, where it was never played:
+  7 more scores, 46 notes.
+- 43: a `<sound dalsegno>` looks only among segnos and a `tocoda` only
+  among codas, as MusicXML pairs them, and a segno and a coda in one
+  measure both count: 2 more scores (Ma Que Nada, Oblivion), whose
+  D.S. named a coda's label and jumped forward over 194 notes.
+
+With the three, 145 notes in 12 scores are still not played, each the
+file's: a coda reached with no To Coda (4 scores), and bars no reading
+of the file reaches or that follow its Fine (8). Jumps written only as
+words ("D.S. al Coda", 67 spellings in 113 scores) are not followed:
+words are presentation in MusicXML, `<sound>` is playback. A coda's
+repeat after a jump back is not taken, as MusicXML's `after-jump`
+default and upstream say (measured, not built: 4 scores would play 15
+more notes, and 6 that lose none would play a coda's repeat twice).
+Cases: `test_tb14_order_engine.cpp` (eleven orders, each pinned).
+
+**44. The engine's fractions.** `vrv::Fraction` multiplied its int terms
+before it reduced, and a time or a duration whose terms passed an int
+wrapped: a bar's first tuplet of 32,768 notes put a time before one it
+follows, 1,000 bars of partial tuplets of 251 gave times below zero and
+a MIDI of 268,946,750 ticks. Each term is taken in 64 bits and reduced
+before it is stored; a result that still does not fit is the fraction
+nearest to it toward zero that does, so nothing wraps and the order of
+exact results is kept. A note's dots and its own ratio are taken in
+fractions too. Declared: the timemap of Wave, whose 488 entries are in
+time order now (four were out of it); an element of `@num="0"` in a
+tuplet (no valid MEI) lasts as its tuplet says, where the 0 took the
+tuplet's ratio away too; a time past what the terms hold is the largest
+they hold, 2,147,483,647 quarter notes in the timemap, where a note that
+starts and ends past it has no length. Cases: `test_tb14_F_engine.cpp`.
+
+**45 to 47. Found while the export and the readers were measured.** The
+Humdrum export of a chant read from GABC (all three of the parity set's)
+and of a mensural MEI with its clef in the layer ended the process; a
+score of neume notation, which the converter cannot read, is refused
+(45). An MEI `<staffDef>` with no `@lines` kept the unset value, and
+layout and drawing overflowed with it in six files (46). The timemap of
+an MEI file with a hidden ossia staff read a null staff definition (47).
+Cases: `test_tb14_N_engine.cpp`.
+
+**48 and 49. Found in the integration of tb.14.** `ScoreDef::Reset` left
+the flag `m_insertScoreDef` unset, and the first measure of a chant or a
+mensural score read it (48; the sanitizer run of the chant cases of
+`test_tb14_N_engine.cpp` holds it). The MusicXML importer kept a tuplet's
+numbers in a `short int`: 3 in the time of 40,000 was timed as 3 in the
+time of 1 (49; a case in `test_tb14_X_engine.cpp`).
+
+Known, and not changed (each the same on tb.13; for a later tag):
+
+- humlib's own fraction, `HumNum` (`src/hum/humlib.cpp`, about 70
+  operators), multiplies its int terms before it reduces, as `Fraction`
+  did before patch 44: the Humdrum export of an ABC `(3:999999999:3abc`
+  or of an MEI tuplet of `numbase="999999999"`, read back, does not come
+  back (the engine's own times of both are exact);
+- the MIDI writer makes a tick an int from a double
+  (`src/midifunctor.cpp`, the note on and off of `GenerateMIDIFunctor`):
+  a time past 17,895,697 quarter notes does not fit (UBSan:
+  float-cast-overflow);
+- the mensural duration functions multiply ints before they make a
+  fraction of them, and the mensural-to-CMN conversion takes a remainder
+  in an int: mending them means carrying a `Fraction` through those
+  functions, a patch of its own;
+- a MusicXML transposition given after the first `<attributes>` of a part
+  is read nowhere (patch 40 reads the first);
+- the rules of patches 41 and 42 play a pass that no number of a file
+  names where the file contradicts itself: Home Among The Gum Trees
+  (endings 1, 2, 3 and then a second 1, with no repeat after the 2 or the
+  3) plays bars 2 to 16 a fourth time to reach the last bracket, and The
+  Corner Grocery Store (endings "1, 2, 4" and "3", then a blank "Fine"
+  bracket that repeats) a fifth verse; tb.13 played neither bracket. Two
+  shapes no score of the corpus has go the same way: an ending numbered
+  like one before it with other endings between, and a group whose first
+  ending opens a repeat of its own right after another group (tb.13 left
+  out that group, tb.14 plays the group before it again);
+- older faults of the same importer that tb.14 leaves as they were: an
+  ending `1-8` is read as 1 and -8 (Chan Chan plays two passes, not
+  eight), and a first ending whose repeat sign stands outside its
+  bracket is played on the second pass too (Chicken Dance, I Can't Make
+  You Love Me);
+- what the native cases can see: patch 48 only under UBSan (a chant or
+  mensural case run with it), patch 37 only as a case that does not come
+  back, and patch 31's walk only as a time bound (1.5 s) that a loaded
+  machine can miss with the patch in.
+
+**The review of tb.14.** A second engineer, who had not written the
+patches, reviewed the twenty as first put together: their code, the
+claims of each commit against runs on tb.13 and tb.14 in Release and
+under the sanitizers, the 28 scores whose order changes bar by bar, and
+inputs of its own. It found no crash, hang or sanitizer report that
+tb.14 brought, and the 28 lose no bar tb.13 played (their pages are the
+same to the byte). What it found, and what became of it:
+
+- *Nested expansions past the cost* (tb.13 too): sixteen expansions each
+  naming the next twice, a file of 1.5 KB, never came back. Mended in
+  patch 31, and held by a case.
+- *An order that names a `<choice>`* was passed over by patch 30, where
+  tb.13 played it: an edition's choice and what it chooses between stand
+  where a reading does. Mended in patch 30, and held by a case.
+- *Words counted as spaces* by patch 36: forty words two spaces apart
+  were one verse, where tb.13 split them into forty. Mended, and held.
+- *The steps of a transposition with an octave change* (upstream, older):
+  patch 40 moved the line that writes them, and now wrote them for parts
+  that begin with a note too. Mended in patch 40, and declared above.
+- *Three claims of the commits* that runs contradicted, now said as the
+  code does: an order that names a section with and without its `#` (31),
+  an element of `@num="0"` in a tuplet and the largest time (44).
+- *What the rules of patches 41 and 42 make of two files that contradict
+  themselves*, declared above, and left as they are.
+
+Each mend was broken on purpose and its case caught it; the gates below
+were run again on the series with the mends.
+
+**On tb.14.** The same toolchain; Release, and AddressSanitizer with
+UBSan and the standard library's checks on
+(`_LIBCPP_HARDENING_MODE_DEBUG`). Native tests (`verovio_engine_tests`,
+220 cases and 6,685 assertions; 174 on tb.13): all pass, in one process
+and each in a process of its own, and under the sanitizers with no
+AddressSanitizer report. UBSan reports two lines, both in
+`include/vrv/boundingbox.h` (102 and 103: `Stem::CompareToElementPosition`
+adds an unset bounding box, in layout), from three cases of tb.13 of a
+staff in two voices: the same on tb.13, in code no patch touches; left.
+Deliberate breaks: each builder's, patch 49's in integration and the
+four of the review's mends, caught,
+except seven of the 27 of patch 44 that no case can hold, because no
+timing path reaches them: a quotient's numerator and a remainder in an
+int (only layout and the mensural conversion divide by a fraction or
+take a remainder), an equality in an int (both sides wrap alike), a
+negative denominator kept (only a negative `@num` divides by one), the
+early exit at the bound (equivalent by design), the sign of a negative
+result that does not fit (none is made), and the constructor without
+`Fit` (its inputs are small, and every result after it is fitted).
+Parity gate, tb.13 against tb.14: 20,320 outputs compared, 169 differ:
+the 28 scores of patches 41 to 43 (their MEI by its `<expansion plist>`
+and nothing else, their timemap, MIDI and pitch map, and their two
+locator exports; the pitch maps gain the 1,338 notes now played and no
+pitch changes), and the timemap of Wave (patch 44, in time order);
+seeded ids on a fresh thread deterministic for 2785 of 2785. Measured
+apart, one process for each of 3,171 inputs (the 2,785 scores and the
+parity set's ABC, Humdrum and GABC): the Humdrum export, read back with
+the default options, plays exactly as the score for 2,834 on both; the
+export differs for the 28 scores alone (each reads back exactly on
+both) and for the three chants, whose export ended the process on tb.13
+and is refused on tb.14. MuseSync's 24 bundled songs: the same on both.
+The audit of log formats (`tool/log_format_audit.py`): 299 engine
+sources, 0 calls.
+
 ## Rules for this branch
 
 - A patch is carried only when the change cannot be made outside the
@@ -2505,6 +2739,19 @@ log formats (`tool/log_format_audit.py`): 299 engine sources, 0 calls.
   adds a small class to `expansionmap.h`. tb.13 also amends patch 19:
   its export writes no order of play past the limit of patch 27 at its
   least (such an order may be cut short).
+  Forty-nine since 2026-10-26, by the owner's decision of 2026-10-20
+  ("go for all"; MuseNote's plan V3_2_0_13, its point 6: the count
+  passes its budget again for faults a user's file meets): patches 30
+  to 40 and 44 to 49 are crash, hang and overflow fixes for files a
+  user can open, in the MEI, Humdrum, ABC and MusicXML readers, the
+  Humdrum export, the timemap and the engine's fractions, and patches
+  41 to 43 give a MusicXML score the order of play its file says. Patch
+  39 is in generated code (libmei) and is carried again at a
+  regeneration or a base move. Patches 41 to 43 are in an importer and
+  change the order of play of 28 scores of the corpus by design, and
+  patch 44 the timemap of one (Wave, put in time order): no object is
+  built that was not, and no id moves. Patch 45 refuses the Humdrum
+  export of neume notation, which held a clef and no note.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
