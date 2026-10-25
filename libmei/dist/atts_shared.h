@@ -6264,7 +6264,14 @@ public:
      * to the default value)
      **/
     ///@{
-    void SetLines(int lines_) { m_lines = lines_; }
+    // (MuseNote) Every format gives a staff its count of lines here, the MEI reader too. A count no staff has, below
+    // 0 or past the 32 the Humdrum reader allows, is read as five, the count a staff is given where none is said: the
+    // engine draws and lays out each line (below 0, each ledger line), and a billion never came back. A copy passes
+    // on a count that is not set (MEI_UNSET) as it is
+    void SetLines(int lines_)
+    {
+        m_lines = ((lines_ == MEI_UNSET) || ((lines_ >= 0) && (lines_ <= 32))) ? lines_ : 5;
+    }
     int GetLines() const { return m_lines; }
     bool HasLines() const;
     ///@}
