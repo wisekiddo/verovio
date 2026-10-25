@@ -1650,11 +1650,51 @@ void Doc::TransposeDoc()
     }
 }
 
-static size_t CountDescendants(const Object *object)
+// What an object and all it holds weigh in ExpansionMap, which keeps every copy's id with every other copy's: each
+// element 1, and 1 more for every 64 bytes of its id. Each object whose id is a key of weights gets its weight there,
+// the heaviest of those an id has. (One walk of the document for the whole order: it was a walk for every reference)
+static uint64_t WeighForOrder(const Object *object, std::map<std::string, uint64_t> &weights)
 {
-    size_t count = 0;
-    for (const Object *child : object->GetChildren()) count += 1 + CountDescendants(child);
-    return count;
+    uint64_t weight = 1 + object->GetID().size() / 64;
+    for (const Object *child : object->GetChildren()) weight += WeighForOrder(child, weights);
+    if (auto named = weights.find(object->GetID()); named != weights.end()) {
+        named->second = std::max(named->second, weight);
+    }
+    return weight;
+}
+
+// How many times each reference of [expansion] is played, [times] over, through the expansions it names, added to
+// timesPlayed: an expansion named in an order is played where it is named, as its own order (ExpansionMap::Expand),
+// and one named within itself is passed over, as Expand passes it over. visits counts the expansions so played.
+// False, and the count left as it is, once a reference or the expansions are played more times than the limit.
+// (An expansion named in an order was counted as one element: sixteen expansions each naming the next twice played
+// a section 65,536 times at a cost of 4, and the load did not come back)
+static bool CountForOrder(const Expansion *expansion, uint64_t times,
+    const std::map<std::string, const Expansion *> &expansions, std::set<const Expansion *> &inProgress,
+    std::map<std::string, uint64_t> &timesPlayed, uint64_t &visits)
+{
+    std::map<std::string, uint64_t> named;
+    for (const std::string &ref : expansion->GetPlist()) {
+        ++named[(ref.rfind("#", 0) == 0) ? ref.substr(1) : ref];
+    }
+    inProgress.insert(expansion);
+    for (const auto &[id, count] : named) {
+        // (times and count are each at most the limit: their product, in 64 bits, is checked before it is used)
+        if (count > OrderOfPlay::s_maxCost / times) return false;
+        const uint64_t played = times * count;
+        const auto nested = expansions.find(id);
+        if (nested == expansions.end()) {
+            timesPlayed[id] += played;
+            if (timesPlayed[id] > OrderOfPlay::s_maxCost) return false;
+            continue;
+        }
+        if (inProgress.contains(nested->second)) continue;
+        visits += played;
+        if (visits > OrderOfPlay::s_maxCost) return false;
+        if (!CountForOrder(nested->second, played, expansions, inProgress, timesPlayed, visits)) return false;
+    }
+    inProgress.erase(expansion);
+    return true;
 }
 
 void Doc::ExpandExpansions()
@@ -1716,14 +1756,32 @@ void Doc::ExpandExpansions()
     // 2,000 times is played 100 times, if the order that makes is within the cost.) The writers of an order
     // (ExpansionMap::GenerateExpansionFor, MusicXmlInput::CreateExpansion) stop at the same limit by a count that
     // is never more than this one; what they leave is the beginning of an order, and is refused here.
-    std::map<std::string, size_t> timesPlayed;
-    for (const std::string &ref : startExpansion->GetPlist()) ++timesPlayed[ref];
-    // (Counted in 64 bits: a size_t is 32 on some of the processors the engine runs on, where a section named
-    // 65,536 times came to nothing, and was followed.)
-    uint64_t orderCost = 0;
-    for (const auto &[ref, times] : timesPlayed) {
-        const Object *played = this->FindDescendantByID((ref.rfind("#", 0) == 0) ? ref.substr(1) : ref);
-        if (played) orderCost += uint64_t(times) * times * (1 + CountDescendants(played));
+    // Each element weighs 1 and 1 more for every 64 bytes of its id: ids of thousands of bytes, counted as short ones,
+    // took a gigabyte within the limit. Ids under 64 bytes count as they did.
+    // An expansion named in the order is counted as what it plays.
+    std::map<std::string, const Expansion *> expansions;
+    for (const Object *object : this->FindAllDescendantsByType(EXPANSION)) {
+        expansions.emplace(object->GetID(), vrv_cast<const Expansion *>(object));
+    }
+    std::map<std::string, uint64_t> timesPlayed, weights;
+    std::set<const Expansion *> inProgress;
+    uint64_t visits = 0;
+    const bool counted = CountForOrder(startExpansion, 1, expansions, inProgress, timesPlayed, visits);
+    for (const auto &[id, times] : timesPlayed) weights[id] = 0;
+    WeighForOrder(this, weights);
+    // (In 64 bits. A reference named more times than the limit, or a section heavier than it, is past it already;
+    // else each factor is at most the limit, a product at most its cube, 10^18, and nothing wraps, on 32 bits or 64.
+    // A reference that names nothing weighs 0, and is counted as nothing below that.)
+    uint64_t orderCost = counted ? 0 : OrderOfPlay::s_maxCost + 1;
+    for (const auto &[id, times] : timesPlayed) {
+        if (!counted) break;
+        const uint64_t weight = weights[id];
+        if ((times > OrderOfPlay::s_maxCost) || (weight > OrderOfPlay::s_maxCost)) {
+            orderCost = OrderOfPlay::s_maxCost + 1;
+            break;
+        }
+        orderCost += times * times * weight;
+        if (orderCost > OrderOfPlay::s_maxCost) break;
     }
     if (orderCost > OrderOfPlay::s_maxCost) {
         LogWarning("The order of %d sections is not followed (too many repeats): the score is played as written",
