@@ -123,6 +123,8 @@ public:
 private:
     /** A flag indicating that the generation processed has been run even if the expansion map is empty  */
     bool m_isProcessed;
+    /** The expansions that Expand is in, outermost first, but for the one it expands now */
+    std::vector<const Expansion *> m_expanding;
 };
 
 } // namespace vrv

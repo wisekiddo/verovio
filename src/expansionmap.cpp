@@ -132,10 +132,28 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
             LogWarning("ExpansionMap::Expand: Element referenced in @plist not found: %s", id.c_str());
             continue;
         }
+        // An order plays sections, endings, measures and what an edition marks of them (a reading, a choice and
+        // what it chooses between, an addition...), and nothing inside a measure: anything else is passed over as
+        // an element that is not there. (A layer named again after a section was put into the section, where the
+        // timemap ended the process)
+        if (!(currSect->Is({ SECTION, ENDING, MEASURE, EXPANSION }) || currSect->IsEditorialElement())
+            || currSect->GetFirstAncestor(MEASURE)) {
+            LogWarning("ExpansionMap::Expand: Element referenced in @plist is not played: %s", id.c_str());
+            continue;
+        }
         if (currSect->Is(EXPANSION)) { // if id is itself an expansion, resolve it recursively
             Expansion *currExpansion = vrv_cast<Expansion *>(currSect);
             assert(currExpansion);
+            // An expansion that names itself, or one that is being expanded, has no end: it is passed over as an
+            // element that is not there. (It was followed until the stack ran out)
+            if ((currExpansion == expansion)
+                || (std::find(m_expanding.begin(), m_expanding.end(), currExpansion) != m_expanding.end())) {
+                LogWarning("ExpansionMap::Expand: Expansion in @plist named within itself: %s", id.c_str());
+                continue;
+            }
+            m_expanding.push_back(expansion);
             prevSect = this->Expand(currExpansion, existingList, prevSect, deletionList);
+            m_expanding.pop_back();
         }
         else {
             // id already in existingList or currSect is not in expansion parent, clone object, update ids, insert it
@@ -218,7 +236,8 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
             long cnt = std::count(existingList.begin(), existingList.end(), del);
             if (cnt == 0) {
                 Object *currSect = parent->FindDescendantByID(del); // find section pointer for id string
-                assert(currSect);
+                // Removed already, with a section that holds it and was not played either (it was read)
+                if (!currSect) continue;
 
                 int idx = currSect->GetIdx();
                 LogDebug("ExpansionMap::Expand: Removing unused section/ending/rdg/lem with id %s", del.c_str());
@@ -309,7 +328,9 @@ bool ExpansionMap::AddExpandedIDToExpansionMap(const std::string &origXmlId, std
     if (list != m_map.end()) {
         list->second.push_back(newXmlId); // add to existing key
         for (std::string s : list->second) {
-            if (s != list->second.front() && s != list->second.back()) {
+            // (Every key but the one the copy is of: a section that holds a copy is a copy's copy, whose own list
+            // was written to while it was read, and the original's was not written)
+            if (s != origXmlId && s != list->second.back()) {
                 m_map.at(s).push_back(newXmlId); // add to middle keys
             }
         }
