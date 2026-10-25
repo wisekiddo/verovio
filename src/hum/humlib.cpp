@@ -25558,6 +25558,15 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 	int lasttrack = -1;
 	vector<int> concurrentstate(70, 0);
 
+	// The tables hold the diatonic pitches of ten octaves, 0 to 69: those
+	// of MEI's octaves 0 to 9.  A note outside them (a **kern note of
+	// octave 10 or more, as the export of a MusicXML <octave>10</octave>
+	// writes, or of octave -1) is passed over, and so is the other note of
+	// a trill, a mordent or a turn outside them or that base-40 cannot
+	// spell (-1): its accidental is played and not shown.  (Each was read
+	// and written past the end, or before the start, of a table.)
+	auto inTable = [&](int dia) { return (dia >= 0) && (dia < (int)concurrentstate.size()); };
+
 	for (i=0; i<infile.getLineCount(); i++) {
 		if (!infile[i].hasSpines()) {
 			continue;
@@ -25641,8 +25650,8 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 				int diatonic = Convert::kernToBase7(subtok);
 				int octaveadjust = token->getValueInt("auto", "ottava");
 				diatonic -= octaveadjust * 7;
-				if (diatonic < 0) {
-					// Deal with extra-low notes later.
+				if (!inTable(diatonic)) {
+					// Deal with extra-low and extra-high notes later.
 					continue;
 				}
 				int graceQ = token->isGrace();
@@ -25682,13 +25691,16 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 				}
 
 				size_t loc;
+				// a turn's notes are a step on either side of its own
+				int turnnote = Convert::base40ToDiatonic(b40);
+				bool turnInTable = inTable(turnnote - 1) && inTable(turnnote + 1);
 				// check for accidentals on trills, mordents and turns.
 				if (subtok.find("t") != string::npos) {
 					// minor second trill
 					int trillnote     = b40 + 5;
 					int trilldiatonic = Convert::base40ToDiatonic(trillnote);
 					int trillaccid    = Convert::base40ToAccidental(trillnote);
-					if (dstates[rindex][trilldiatonic] != trillaccid) {
+					if (inTable(trilldiatonic) && (dstates[rindex][trilldiatonic] != trillaccid)) {
 						token->setValue("auto", to_string(k),
 								"trillAccidental", to_string(trillaccid));
 						dstates[rindex][trilldiatonic] = -1000 + trillaccid;
@@ -25698,7 +25710,7 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 					int trillnote     = b40 + 6;
 					int trilldiatonic = Convert::base40ToDiatonic(trillnote);
 					int trillaccid    = Convert::base40ToAccidental(trillnote);
-					if (dstates[rindex][trilldiatonic] != trillaccid) {
+					if (inTable(trilldiatonic) && (dstates[rindex][trilldiatonic] != trillaccid)) {
 						token->setValue("auto", to_string(k), "trillAccidental", to_string(trillaccid));
 						dstates[rindex][trilldiatonic] = -1000 + trillaccid;
 					}
@@ -25707,7 +25719,7 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 					int auxnote     = b40 + 6;
 					int auxdiatonic = Convert::base40ToDiatonic(auxnote);
 					int auxaccid    = Convert::base40ToAccidental(auxnote);
-					if (dstates[rindex][auxdiatonic] != auxaccid) {
+					if (inTable(auxdiatonic) && (dstates[rindex][auxdiatonic] != auxaccid)) {
 						token->setValue("auto", to_string(k), "mordentUpperAccidental", to_string(auxaccid));
 						dstates[rindex][auxdiatonic] = -1000 + auxaccid;
 					}
@@ -25716,7 +25728,7 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 					int auxnote     = b40 + 5;
 					int auxdiatonic = Convert::base40ToDiatonic(auxnote);
 					int auxaccid    = Convert::base40ToAccidental(auxnote);
-					if (dstates[rindex][auxdiatonic] != auxaccid) {
+					if (inTable(auxdiatonic) && (dstates[rindex][auxdiatonic] != auxaccid)) {
 						token->setValue("auto", to_string(k), "mordentUpperAccidental", to_string(auxaccid));
 						dstates[rindex][auxdiatonic] = -1000 + auxaccid;
 					}
@@ -25725,7 +25737,7 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 					int auxnote     = b40 - 6;
 					int auxdiatonic = Convert::base40ToDiatonic(auxnote);
 					int auxaccid    = Convert::base40ToAccidental(auxnote);
-					if (dstates[rindex][auxdiatonic] != auxaccid) {
+					if (inTable(auxdiatonic) && (dstates[rindex][auxdiatonic] != auxaccid)) {
 						token->setValue("auto", to_string(k),
 								"mordentLowerAccidental", to_string(auxaccid));
 						dstates[rindex][auxdiatonic] = -1000 + auxaccid;
@@ -25735,13 +25747,13 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 					int auxnote     = b40 - 5;
 					int auxdiatonic = Convert::base40ToDiatonic(auxnote);
 					int auxaccid    = Convert::base40ToAccidental(auxnote);
-					if (dstates[rindex][auxdiatonic] != auxaccid) {
+					if (inTable(auxdiatonic) && (dstates[rindex][auxdiatonic] != auxaccid)) {
 						token->setValue("auto", to_string(k),
 								"mordentLowerAccidental", to_string(auxaccid));
 						dstates[rindex][auxdiatonic] = -1000 + auxaccid;
 					}
 
-				} else if ((loc = subtok.find("$")) != string::npos) {
+				} else if (turnInTable && ((loc = subtok.find("$")) != string::npos)) {
 					int turndiatonic = Convert::base40ToDiatonic(b40);
 					// int turnaccid = Convert::base40ToAccidental(b40);
 					// inverted turn
@@ -25795,7 +25807,7 @@ bool HumdrumFileContent::analyzeKernAccidentals(const string& dataType) {
 								"turnLowerAccidental", to_string(bacc));
 						dstates[rindex][lowerdiatonic] = -1000 + bacc;
 					}
-				} else if ((loc = subtok.find("S")) != string::npos) {
+				} else if (turnInTable && ((loc = subtok.find("S")) != string::npos)) {
 					int turndiatonic = Convert::base40ToDiatonic(b40);
 					// int turnaccid = Convert::base40ToAccidental(b40);
 					// regular turn
@@ -29169,14 +29181,20 @@ bool HumdrumFileContent::analyzeKernTies(
 					index = -1;
 				}
 				std::string tstring = tok->getSubtoken(k);
+				// The starts are kept by base-40 pitch, of ten octaves (0 to
+				// 399): a linked tie on a note outside them, or on a token
+				// with no pitch (-1000, -2000), is passed over.  (It was
+				// written before the start or past the end of the table.)
+				b40 = Convert::kernToBase40(tstring);
+				if ((b40 < 0) || (b40 >= (int)startdatabase.size())) {
+					continue;
+				}
 				if (tstring.find(lstart) != std::string::npos) {
-					b40 = Convert::kernToBase40(tstring);
 					startdatabase[b40].first  = tok;
 					startdatabase[b40].second = index;
 					// linkedtiestarts.push_back(std::make_pair(tok, index));
 				}
 				if (tstring.find(lend) != std::string::npos) {
-					b40 = Convert::kernToBase40(tstring);
 					if (startdatabase.at(b40).first) {
 						linkedtiestarts.push_back(startdatabase[b40]);
 						linkedtieends.push_back(std::make_pair(tok, index));
@@ -29185,7 +29203,6 @@ bool HumdrumFileContent::analyzeKernTies(
 					}
 				}
 				if (tstring.find(lmiddle) != std::string::npos) {
-					b40 = Convert::kernToBase40(tstring);
 					if (startdatabase[b40].first) {
 						linkedtiestarts.push_back(startdatabase[b40]);
 						linkedtieends.push_back(std::make_pair(tok, index));
