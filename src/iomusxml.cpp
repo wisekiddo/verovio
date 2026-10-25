@@ -1600,6 +1600,27 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
         return staffDef;
     };
 
+    // The transposition <attributes> [child] gives the part's staff [i]
+    const auto readTranspose = [](pugi::xml_node child, int i, StaffDef *staffDef) {
+        pugi::xpath_node transpose;
+        const std::string xpath = StringFormat("transpose[@number='%d']", i + 1);
+        transpose = child.select_node(xpath.c_str());
+        if (!transpose) {
+            transpose = child.select_node("transpose");
+        }
+        if (transpose) {
+            staffDef->SetTransDiat(transpose.node().child("diatonic").text().as_int());
+            staffDef->SetTransSemi(transpose.node().child("chromatic").text().as_int());
+            if (transpose.node().child("octave-change")) {
+                // (the steps are the diatonic's: upstream took the chromatic's semitones for them)
+                staffDef->SetTransDiat(transpose.node().child("diatonic").text().as_int()
+                    + 7 * transpose.node().child("octave-change").text().as_int());
+                staffDef->SetTransSemi(transpose.node().child("chromatic").text().as_int()
+                    + 12 * transpose.node().child("octave-change").text().as_int());
+            }
+        }
+    };
+
     for (pugi::xml_node child : node) {
 
         // We read all attribute elements until we reach something else
@@ -1748,22 +1769,7 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
             // add it if necessary
 
             // transpose
-            pugi::xpath_node transpose;
-            xpath = StringFormat("transpose[@number='%d']", i + 1);
-            transpose = child.select_node(xpath.c_str());
-            if (!transpose) {
-                transpose = child.select_node("transpose");
-            }
-            if (transpose) {
-                staffDef->SetTransDiat(transpose.node().child("diatonic").text().as_int());
-                staffDef->SetTransSemi(transpose.node().child("chromatic").text().as_int());
-                if (transpose.node().child("octave-change")) {
-                    staffDef->SetTransDiat(transpose.node().child("chromatic").text().as_int()
-                        + 7 * transpose.node().child("octave-change").text().as_int());
-                    staffDef->SetTransSemi(transpose.node().child("chromatic").text().as_int()
-                        + 12 * transpose.node().child("octave-change").text().as_int());
-                }
-            }
+            readTranspose(child, i, staffDef);
             // ppq
             pugi::xpath_node divisions = child.select_node("divisions");
             if (divisions) {
@@ -1783,9 +1789,14 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
     // octave-line table had no place for its staves, so that its notes read past the table's end, and the engine
     // read the <staffDef> that was not there. Only a score of one such part, of one staff, was given one, at the
     // end of the import, and that one without the part's name and instrument)
+    // Such a part has the transposition of the first <attributes> of its first measure, as the part that begins with
+    // them has. (Those are read as changes where they stand, and a change of transposition is read nowhere: the part
+    // was played as written)
+    const pugi::xml_node firstAttributes = node.child("mei-read") ? pugi::xml_node() : node.child("attributes");
     for (int i = 0; i < nbStaves; ++i) {
         StaffDef *staffDef = staffDefOf(i);
         if (!staffDef->HasLines()) staffDef->SetLines(5);
+        if (firstAttributes) readTranspose(firstAttributes, i, staffDef);
     }
 
     return nbStaves;
