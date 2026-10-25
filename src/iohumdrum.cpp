@@ -65,6 +65,7 @@ using namespace std;
 #include "editorial.h"
 #include "ending.h"
 #include "expansion.h"
+#include "expansionmap.h"
 #include "f.h"
 #include "fb.h"
 #include "fermata.h"
@@ -32440,10 +32441,16 @@ template <class ELEMENT> void HumdrumInput::storeExpansionList(ELEMENT *parent, 
         exp->SetType(variant);
     }
 
+    // The order is gathered here and given to the expansion once, and no more of it is read than can be followed,
+    // as the engine's other writers of an order do (OrderOfPlay, patch 27). (Each label was added with
+    // AddRefAllowDuplicate, which copies the whole list for every one, and every later pass over the list is
+    // quadratic too: 20,000 labels took seconds, 100,000 did not come back. An order that costs more than
+    // OrderOfPlay::s_maxCost is not followed, and its beginning costs more than that as well.)
+    OrderOfPlay order;
     for (int i = 0; i < (int)labels.size(); ++i) {
-        std::string ref = "#label-" + labels[i];
-        exp->AddRefAllowDuplicate(ref);
+        if (!order.Add("#label-" + labels[i])) break;
     }
+    exp->GetPlistInterface()->SetPlist(order.GetRefs());
 }
 
 //////////////////////////////
