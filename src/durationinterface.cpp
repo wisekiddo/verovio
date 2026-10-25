@@ -77,15 +77,18 @@ Fraction DurationInterface::GetInterfaceAlignmentDuration(int num, int numBase) 
     data_DURATION noteDur = (this->GetDurGes() != DURATION_NONE) ? this->GetActualDurGes() : this->GetActualDur();
     if (noteDur == DURATION_NONE) noteDur = DURATION_4;
 
-    if (this->HasNum()) num *= this->GetNum();
-    if (this->HasNumbase()) numBase *= this->GetNumbase();
-
     Fraction duration(noteDur);
     duration = duration * numBase / num;
+    // The element's own ratio is applied in fractions (it was multiplied into the tuplet's in an int)
+    if (this->HasNumbase()) duration = duration * this->GetNumbase();
+    if (this->HasNum()) duration = duration / this->GetNum();
 
     int noteDots = (this->HasDotsGes()) ? this->GetDotsGes() : this->GetDots();
     if (noteDots != VRV_UNSET) {
-        Fraction durationReduction(duration.GetNumerator(), duration.GetDenominator() * pow(2, noteDots));
+        // The dots add the duration less itself halved once per dot (its denominator times 2^dots was made an int,
+        // which it did not always fit). Halved past 1 / INT_MAX it is 0
+        Fraction durationReduction = duration;
+        for (int dot = 0; (dot < noteDots) && (durationReduction != 0); ++dot) durationReduction = durationReduction / 2;
         duration = duration * 2 - durationReduction;
     }
     // LogDebug("Duration %d; Dot %d; Alignment %f", noteDur, this->GetDots(), duration);

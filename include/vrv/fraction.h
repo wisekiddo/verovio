@@ -67,8 +67,11 @@ public:
     static void Reduce(int &numerator, int &denominator);
 
 private:
-    /** Reduce the fraction */
-    void Reduce();
+    /**
+     * The fraction num/denom, reduced. When its terms do not fit an int, the fraction nearest to it toward zero
+     * whose terms do: past INT_MAX whole notes, INT_MAX
+     */
+    static Fraction Fit(int64_t num, int64_t denom);
 
 public:
     //
