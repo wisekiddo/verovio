@@ -4673,7 +4673,19 @@ bool MEIInput::ReadScore(Object *parent, pugi::xml_node score)
     }
 
     this->ReadUnsupportedAttr(score, vrvScore);
-    return success;
+
+    // A staff that the score's <scoreDef> has no <staffDef> for has no lines, clef or key: it ended the process
+    // when they were set (ScoreDefSetCurrentFunctor). The file is refused, as one with a <staffGrp> without a
+    // <staffDef> is. Its readings are chosen by now: a staff of a reading that is not shown is not looked at.
+    if (!success) return false;
+    for (Object *object : vrvScore->FindAllDescendantsByType(STAFF)) {
+        const Staff *staff = vrv_cast<Staff *>(object);
+        if (!staff->IsOssia() && !vrvScore->GetScoreDef()->GetStaffDef(staff->GetN())) {
+            LogError("The <staff n=\"%d\"> of the score has no <staffDef>", staff->GetN());
+            return false;
+        }
+    }
+    return true;
 }
 
 bool MEIInput::ReadScoreScoreDef(Object *parent, pugi::xml_node parentNode)
