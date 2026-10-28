@@ -339,7 +339,7 @@ void MusicXmlInput::InsertClefToLayer(Staff *staff, Layer *layer, Clef *clef, in
                 const int actualScoreOnSet = start->first;
                 auto end = m_layerTimes.at(otherLayer).upper_bound(actualScoreOnSet);
                 LayerElement *layerElement = (--end)->second;
-                this->InsertClefIntoObject(layerElement, clefToAdd, otherLayer, scoreOnset, true);
+                this->InsertClefIntoObject(layerElement, clefToAdd, otherLayer, actualScoreOnSet, true);
             }
         }
     }
@@ -350,7 +350,6 @@ void MusicXmlInput::InsertClefIntoObject(
 {
     if (layerElement->GetParent()->Is(LAYER)) {
         this->InsertClefIntoObject(layer, clef, layerElement, insertAfter);
-        m_layerTimes.at(layer).emplace(scoreOnset, clef);
     }
     else {
         Object *parent = layerElement->GetParent();
@@ -361,6 +360,7 @@ void MusicXmlInput::InsertClefIntoObject(
             this->InsertClefIntoObject(parent, clef, layerElement, insertAfter);
         }
     }
+    if (insertAfter) m_layerTimes.at(layer).emplace(scoreOnset, clef);
 }
 
 void MusicXmlInput::InsertClefIntoObject(Object *parent, Clef *clef, Object *layerElement, bool insertAfter)
