@@ -290,6 +290,12 @@ private:
     void DrawSvgBoundingBox(Object *object, View *view);
 
     /**
+     * Internal method for starting the group of an SVG bounding box.
+     * The group is never added within a text element and does not include the <title> of the object.
+     */
+    void StartBoundingBoxGraphic(Object *object, const std::string &gClass, const std::string &gId);
+
+    /**
      * Internal method for drawing debug SVG bounding box
      */
     void DrawSvgBoundingBoxRectangle(int x, int y, int width, int height);
@@ -398,6 +404,8 @@ private:
     bool m_svgBoundingBoxes;
     // add content bounding boxes in svg output
     bool m_svgContentBoundingBoxes;
+    // bounding box groups of text graphics, added next to the <text> element and skipped by AddChild
+    std::set<pugi::xml_node> m_textBoundingBoxNodes;
     // use viewbox on svg root element
     bool m_svgViewBox;
     // output HTML5 data-* attributes
