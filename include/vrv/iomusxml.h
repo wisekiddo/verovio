@@ -17,6 +17,7 @@
 //----------------------------------------------------------------------------
 
 #include "attdef.h"
+#include "fraction.h"
 #include "iobase.h"
 #include "metersig.h"
 #include "vrvdef.h"
@@ -277,6 +278,29 @@ namespace musicxml {
         int m_layerNum = 0;
     };
 
+    /**
+     * A gap the import wrote as spaces that do not play its time: its length is no sum of written values (a third of
+     * a quarter, say), or it went into an open tuplet, which plays its spaces at the tuplet's ratio. m_scale is the
+     * open tuplets' num / numbase: what is written there for a time. MusicXmlInput::WriteExactTime writes the gap
+     * again, exactly, after the import.
+     */
+    struct InexactGap {
+        std::vector<LayerElement *> m_spaces;
+        int m_ticks;
+        int m_ppq;
+        Fraction m_scale;
+    };
+
+    /**
+     * A note, chord or rest timed by a ratio no <tuplet> bracket shows: its <time-modification> (actual notes in the
+     * time of normal notes).
+     */
+    struct UnbracketedRatio {
+        LayerElement *m_element;
+        int m_num;
+        int m_numbase;
+    };
+
     struct Accidental {
         Accidental()
         {
@@ -513,6 +537,16 @@ private:
      */
     void WriteSignsOfSound();
 
+    /**
+     * Writes exactly, after the import, the time it could not: a gap whose length is no sum of written values, and a
+     * note, chord or rest timed by a ratio no bracket shows, each in a tuplet that shows neither bracket nor number.
+     * Every object the import built keeps its place in the build order (its id); what this makes comes after them.
+     */
+    void WriteExactTime();
+
+    /** Keeps [element] for WriteExactTime when [node] is timed by a ratio no open tuplet bracket gives it */
+    void KeepUnbracketedRatio(const pugi::xml_node &node, Layer *layer, LayerElement *element);
+
     /*
      * @name Helper methods for rendering text elements
      */
@@ -669,6 +703,9 @@ private:
     /* A maps of time stamps (score time) to indicate write pointer of a given layer */
     std::map<Layer *, int> m_layerEndTimes;
     std::map<Layer *, std::multimap<int, LayerElement *>> m_layerTimes;
+    /** The gaps and the ratios the import could not write exactly, for WriteExactTime */
+    std::vector<musicxml::InexactGap> m_inexactGaps;
+    std::vector<musicxml::UnbracketedRatio> m_unbracketedRatios;
     /* To remember layer of last element (note) to handle chords */
     Layer *m_prevLayer = NULL;
     /* To remember current layer to properly handle layers/staves/cross-staff elements */

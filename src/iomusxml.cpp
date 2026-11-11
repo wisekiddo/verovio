@@ -665,6 +665,8 @@ void MusicXmlInput::FillSpace(Layer *layer, int dur, bool withClefs, int offset)
         }
     }
 
+    const int ticks = dur;
+    std::vector<LayerElement *> spaces;
     std::string durStr;
     while (dur > 0) {
         double quarters = (double)dur / (double)m_ppq;
@@ -674,6 +676,7 @@ void MusicXmlInput::FillSpace(Layer *layer, int dur, bool withClefs, int offset)
         durStr = std::to_string(int(4 / quarters));
 
         Space *space = new Space();
+        spaces.push_back(space);
         space->SetDur(space->AttDurationLog::StrToDuration(durStr));
         space->SetDurPpq(m_ppq * quarters);
         if (m_elementStackMap.at(layer).empty()) {
@@ -685,6 +688,23 @@ void MusicXmlInput::FillSpace(Layer *layer, int dur, bool withClefs, int offset)
         dur -= m_ppq * quarters;
         offset += m_ppq * quarters;
         m_layerTimes[layer].emplace(offset, space);
+    }
+    // A length that is no sum of written values (its quarters' denominator is not a power of two): the spaces above
+    // fall short of it, each step cut to whole ticks. And spaces that went into an open tuplet play at its ratio. Such
+    // a gap is written again, exactly, after the import.
+    if ((ticks > 0) && (m_ppq > 0)) {
+        Fraction scale(1);
+        for (LayerElement *open : m_elementStackMap.at(layer)) {
+            if (!open->Is(TUPLET)) continue;
+            const Tuplet *tuplet = vrv_cast<Tuplet *>(open);
+            if ((tuplet->GetNum() > 0) && (tuplet->GetNumbase() > 0)) {
+                scale = scale * Fraction(tuplet->GetNum(), tuplet->GetNumbase());
+            }
+        }
+        const int denominator = Fraction(ticks, m_ppq).GetDenominator();
+        if (((denominator & (denominator - 1)) != 0) || (scale != Fraction(1))) {
+            m_inexactGaps.push_back({ spaces, ticks, m_ppq, scale });
+        }
     }
 }
 
@@ -1346,6 +1366,9 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
         staffDef->SetLines(5);
         staffGrp->AddChild(staffDef);
     }
+
+    // The time the import could not write exactly, written: before the signs and before the repeats are written out
+    this->WriteExactTime();
 
     // The signs of the sounds the page would not show, on the score as it is written: before its repeats are
     // written out (a copy of a bar carries its signs) and before it is paged
@@ -3301,6 +3324,24 @@ void MusicXmlInput::ReadMusicXmlNote(
                     space->SetStaff(
                         space->AttStaffIdent::StrToXsdPositiveIntegerList(std::to_string(noteStaffNum + staffOffset)));
                 this->AddLayerElement(layer, space, duration);
+                this->KeepUnbracketedRatio(node, layer, space);
+                // A hidden rest is time the page does not show, as a gap is: when what is written for it, in the
+                // tuplets open around it, does not play its ticks, it is written again after the import
+                if (!node.child("time-modification") && (duration > 0) && (m_ppq > 0)) {
+                    Fraction scale(1);
+                    for (LayerElement *open : m_elementStackMap.at(layer)) {
+                        if (!open->Is(TUPLET)) continue;
+                        const Tuplet *tuplet = vrv_cast<Tuplet *>(open);
+                        if ((tuplet->GetNum() > 0) && (tuplet->GetNumbase() > 0)) {
+                            scale = scale * Fraction(tuplet->GetNum(), tuplet->GetNumbase());
+                        }
+                    }
+                    const Fraction written = Fraction(ConvertTypeToDur(typeStr))
+                        * Fraction((1 << (dots + 1)) - 1, 1 << dots);
+                    if (written != Fraction(duration, 4 * m_ppq) * scale) {
+                        m_inexactGaps.push_back({ { space }, duration, m_ppq, scale });
+                    }
+                }
             }
             else {
                 MSpace *mSpace = new MSpace();
@@ -3363,6 +3404,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                     rest->SetStaff(
                         rest->AttStaffIdent::StrToXsdPositiveIntegerList(std::to_string(noteStaffNum + staffOffset)));
                 this->AddLayerElement(layer, rest, duration);
+                this->KeepUnbracketedRatio(node, layer, rest);
             }
         }
     }
@@ -3543,6 +3585,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                     chord->SetStemMod(STEMMODIFIER_z);
                 }
                 this->AddLayerElement(layer, chord, duration);
+                this->KeepUnbracketedRatio(node, layer, chord);
                 m_elementStackMap.at(layer).push_back(chord);
                 element = chord;
                 if (cue) chord->SetCue(BOOLEAN_true);
@@ -3874,6 +3917,8 @@ void MusicXmlInput::ReadMusicXmlNote(
 
         // add the note to the layer or to the current container
         this->AddLayerElement(layer, note, duration);
+        // a note of a chord is timed by its chord, kept when it was made
+        if (!note->GetFirstAncestor(CHORD)) this->KeepUnbracketedRatio(node, layer, note);
 
         // if we are ending a chord or tabGrp remove it from the stack
         if (!nextIsChord) {
@@ -5691,6 +5736,123 @@ struct PageNote {
 using Row = std::vector<PageNote *>;
 
 } // namespace
+
+void MusicXmlInput::KeepUnbracketedRatio(const pugi::xml_node &node, Layer *layer, LayerElement *element)
+{
+    if (!element || node.child("grace")) return;
+    const pugi::xml_node timeModification = node.child("time-modification");
+    if (!timeModification) return;
+    const int num = timeModification.child("actual-notes").text().as_int();
+    const int numbase = timeModification.child("normal-notes").text().as_int();
+    if ((num <= 0) || (numbase <= 0) || (num == numbase)) return;
+    // An open tuplet bracket gives its notes their ratio
+    if (this->IsInStack(TUPLET, layer)) return;
+    m_unbracketedRatios.push_back({ element, num, numbase });
+}
+
+namespace {
+
+    // A tuplet that shows neither bracket nor number, [num] in the time of [numbase]
+    Tuplet *UnseenTuplet(int num, int numbase)
+    {
+        Tuplet *tuplet = new Tuplet();
+        tuplet->SetNum(num);
+        tuplet->SetNumbase(numbase);
+        tuplet->SetBracketVisible(BOOLEAN_false);
+        tuplet->SetNumVisible(BOOLEAN_false);
+        return tuplet;
+    }
+
+} // namespace
+
+void MusicXmlInput::WriteExactTime()
+{
+    for (const musicxml::InexactGap &gap : m_inexactGaps) {
+        if (gap.m_spaces.empty()) continue;
+        // The import's spaces, side by side in one parent; when something after them changed that, the gap is left
+        Object *parent = gap.m_spaces.front()->GetParent();
+        const int first = parent ? parent->GetChildIndex(gap.m_spaces.front()) : -1;
+        bool together = (first >= 0);
+        for (size_t i = 1; together && (i < gap.m_spaces.size()); ++i) {
+            together = (gap.m_spaces.at(i)->GetParent() == parent)
+                && (parent->GetChildIndex(gap.m_spaces.at(i)) == first + static_cast<int>(i));
+        }
+        if (!together) {
+            LogWarning("MusicXML import: a gap of %d ticks (%d a quarter) is left as the import wrote it", gap.m_ticks,
+                gap.m_ppq);
+            continue;
+        }
+        // What is written for it where it stands, in whole notes (the engine's measure of a written value): its time
+        // times the open tuplets' num / numbase. That is p / (2^k r), r odd. When r is 1 it is a sum of written values;
+        // else r in the time of the largest power of two below r, and what is written inside is that times r over it.
+        const Fraction length = Fraction(gap.m_ticks, 4 * gap.m_ppq) * gap.m_scale;
+        int num = length.GetDenominator();
+        while ((num % 2) == 0) num /= 2;
+        int numbase = 1;
+        while (numbase * 2 < num) numbase *= 2;
+        Fraction left = length * Fraction(num) / Fraction(numbase);
+        std::vector<data_DURATION> pieces;
+        while (left > Fraction(0)) {
+            // the longest written value that fits, a half at most, as the import writes spaces
+            int duration = DURATION_2;
+            while ((duration < DURATION_2048) && (Fraction(static_cast<data_DURATION>(duration)) > left)) ++duration;
+            const Fraction piece(static_cast<data_DURATION>(duration));
+            if (piece > left) break; // past what the engine writes: what is left is lost, and said below
+            pieces.push_back(static_cast<data_DURATION>(duration));
+            left = left - piece;
+        }
+        if (left != Fraction(0)) {
+            LogWarning("MusicXML import: a gap of %d ticks (%d a quarter) cannot be written exactly", gap.m_ticks,
+                gap.m_ppq);
+        }
+
+        // The pieces go into a tuplet that shows nothing (r in the time of that power), or, when r is 1, where the
+        // import's spaces stood
+        Object *holder = parent;
+        int at = first;
+        for (int i = static_cast<int>(gap.m_spaces.size()) - 1; i >= 0; --i) parent->DetachChild(first + i);
+        if (num > 1) {
+            Tuplet *tuplet = UnseenTuplet(num, numbase);
+            parent->InsertChild(tuplet, first);
+            holder = tuplet;
+            at = 0;
+        }
+        int ticksLeft = gap.m_ticks;
+        for (size_t i = 0; i < pieces.size(); ++i) {
+            // the import's own spaces first (their ids), new ones past them
+            Space *space = (i < gap.m_spaces.size()) ? vrv_cast<Space *>(gap.m_spaces.at(i)) : new Space();
+            space->SetDur(pieces.at(i));
+            const Fraction sounding = Fraction(pieces.at(i)) * Fraction(numbase) / Fraction(num) / gap.m_scale
+                * Fraction(4 * gap.m_ppq);
+            const int ticks = (i + 1 == pieces.size()) ? ticksLeft : sounding.GetNumerator() / sounding.GetDenominator();
+            space->SetDurPpq(ticks);
+            ticksLeft -= ticks;
+            holder->InsertChild(space, at + static_cast<int>(i));
+        }
+        for (size_t i = pieces.size(); i < gap.m_spaces.size(); ++i) delete gap.m_spaces.at(i);
+    }
+
+    // Each note, chord or rest timed by a ratio no bracket shows goes into a tuplet that shows none; neighbours of one
+    // ratio share one
+    Tuplet *previous = nullptr;
+    for (const musicxml::UnbracketedRatio &ratio : m_unbracketedRatios) {
+        Object *parent = ratio.m_element->GetParent();
+        const int index = parent ? parent->GetChildIndex(ratio.m_element) : -1;
+        if (index < 0) continue;
+        const Object *before = (index > 0) ? parent->GetChild(index - 1) : nullptr;
+        if (previous && (before == previous) && (previous->GetNum() == ratio.m_num)
+            && (previous->GetNumbase() == ratio.m_numbase)) {
+            parent->DetachChild(index);
+            previous->AddChild(ratio.m_element);
+            continue;
+        }
+        Tuplet *tuplet = UnseenTuplet(ratio.m_num, ratio.m_numbase);
+        parent->DetachChild(index);
+        parent->InsertChild(tuplet, index);
+        tuplet->AddChild(ratio.m_element);
+        previous = tuplet;
+    }
+}
 
 void MusicXmlInput::WriteSignsOfSound()
 {
