@@ -57,6 +57,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 47 | 2026-10-20 | The timemap passes over a hidden staff, as the alignment does: a hidden ossia staff has no staffDef (a83138c05) | `src/midifunctor.cpp`, +4 | An MEI file with a hidden ossia staff (an `<oStaff>` with no layer the engine reads, or any ossia under `ossiaHidden`) loaded and drew, and its timemap, MIDI and pitch map ended the process. None for a file whose timemap came back | Not offered upstream |
 | 48 | 2026-10-25 | A score definition's insert flag starts false (1aadb2e1b) | `src/scoredef.cpp`, +1 | `ScoreDef::Reset` left `m_insertScoreDef` unset, and `ScoreDefSetCurrentFunctor` read it for a first measure no score definition with a clef, key, meter or mensuration came before (a GABC chant, a mensural score; UBSan: a load of a value that is no bool). None where the flag was set before it was read | Not offered upstream |
 | 49 | 2026-10-25 | MusicXML: a tuplet's numbers are read as the int they are (22792787b) | `src/iomusxml.cpp`, +2 / -2 | A MusicXML tuplet whose `<actual-notes>`, `<normal-notes>` or `<tuplet-number>` passed 32,767 wrapped in a `short int` and was timed as one the file does not write (3 in the time of 40000 as 3 in the time of 1). None for numbers up to 32,767: none of the corpus is larger | Not offered upstream |
+| 50 | 2026-11-11 | MusicXML: write the sign of a note whose page would not show its sound (ca114f5) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +379 | A MusicXML note with no `<accidental>` whose page would read another sound than it plays gets the sign of that sound, on the `<accid>` the importer built: 1,336 signs in 160 of the 2,765 MusicXML scores of the corpus, whose MEI export and drawing change (640 outputs: each one's page, MEI and two locator exports). The MEI is byte for byte what MuseNote's Dart pass wrote (V3_2_0_09). No id of a document moves, and no MIDI, pitch map or timemap changes. None for a score with no such note, and none for MEI, ABC or Humdrum input | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2659,6 +2660,92 @@ and is refused on tb.14. MuseSync's 24 bundled songs: the same on both.
 The audit of log formats (`tool/log_format_audit.py`): 299 engine
 sources, 0 calls.
 
+### 50. The signs of the sounds a MusicXML page would not show (tb.15)
+
+Patch 18 gives a MusicXML note with no `<accidental>` the sound its
+`<alter>` says, and draws nothing new: from tb.11 on, 1,336 notes in 160
+of the 2,765 MusicXML scores of the corpus (and 482 in 30 of MuseNote's
+scales, whose files have written their signs since) sounded otherwise
+than their page reads. MuseNote mended the page in its own code: a pass
+over the engine's MEI wrote the signs, and its reader loaded the score a
+second time from that text (MuseNote's plan V3_2_0_09; on a phone 250 to
+360 ms more per open, where the signs were the only reason for it).
+MuseSync, which uses this engine too, had no such pass. The importer is
+where a reader decides what a MusicXML file shows: it writes the signs
+now, and MuseNote's pass is gone (MuseNote's V3_2_0_22).
+
+**The rule** is MuseNote's (V3_2_0_09, R1 to R12, with its owner's
+decisions of 2026-10-15 and 2026-10-20), ported from its Dart reading of
+the page and its pass, which were its specification:
+
+- Bar by bar; in a bar staff by staff; on a staff voice by voice, each
+  from left to right; the notes of a chord in their order; a grace note
+  where it stands.
+- A line (a staff, a voice, a pitch name, an octave) reads as its staff's
+  own key at the start of a bar (a key change in the score's definition
+  is every staff's; one in a staff's definition, or in a layer, is that
+  staff's), then as the last sign written on it.
+- A note sounds as its sounding accidental says, else as its written
+  sign, else natural. One whose line reads otherwise gets the sign of its
+  sound, which then counts as written: the first note gets it, later ones
+  are covered, one that goes back gets its own.
+- A note that sounds as its own voice reads it gets its sign when another
+  voice of its staff shows a sign of another sound on its line in the bar
+  (signs a musician may not strictly need, but no note read wrong in any
+  order of the voices).
+- A note a drawn tie holds (from a note of its pitch name, octave and
+  sound, not itself) reads as that note, unless a sign before it on its
+  line in its bar says another sound; it gets no sign for another voice.
+- Two sounds on one line of a chord (of its printed notes): each note
+  without a sign gets one, unless a note of the chord on the line shows
+  that sound.
+- Left alone, and counted in a warning: a note that is not printed, that
+  has not exactly one accidental object, or that sounds as no sign says
+  (a quarter tone).
+
+**What it writes**, on the `<accid>` the importer built for the note: the
+written sign (`n`, `s`, `f`, `x` for a double sharp, `ff`), the sound left
+as it is (a natural, which has none, gets `accid.ges="n"`), and the
+`glyph.auth` and `glyph.name` the importer carried taken off (kept, the
+glyph would be drawn in place of the sign, the wrong one once the score is
+transposed). No object is built or removed. The walk runs at the end of
+`MusicXmlInput::ReadMusicXml`, before the repeats are written out (a copy
+of a bar carries its signs) and before the document is paged; a
+transposition at load moves each sign with its note.
+
+**Measured** (tool/parity, tb.14 against tb.15, and MuseNote's Dart pass
+of tb.14's exports as the reference):
+
+- The MEI export of every MusicXML score of the corpus, in all three
+  forms (the editor's, the canonical, the canonical with an id on every
+  note: 3 × 2,765), is byte for byte the text MuseNote's pass made of
+  tb.14's (the export's date aside).
+- 640 outputs differ, exactly those of the 160 scores: the page, the MEI
+  and the two locator exports of each. Every other output of the parity
+  set is the same, the MIDI, pitch map and timemap of all 2,785 scores
+  among them; seeded ids are the same on a fresh thread (2,785 of 2,785).
+- Each of the 1,336 signs is drawn, with its glyph, and none of them was
+  before; the number of accidentals drawn grows by exactly the signs; the
+  notes, accidentals, rests, chords and measures drawn keep their ids and
+  their order.
+- Against MuseNote's second load of the passed text the pages differ: a
+  load from MEI draws otherwise than a load from MusicXML anyway (38 of 40
+  scores with no sign), and the objects the engine makes while laying out
+  (a system, a clef, a key or time signature at the start of a line, an
+  expansion's end) take other generated ids. Nothing stored by the apps
+  is keyed to those (V3_2_0_09, step 3).
+- The import of the corpus's ten largest files takes 1.04 to 1.08 s
+  against 1.01 to 1.07 s.
+- `tool/log_format_audit.py`: 0 calls.
+
+**Cases**: `test/native/test_tb15_signs_engine.cpp` in MuseNote's
+`corelib/verovio` (15, a small MusicXML score each); 11 deliberate breaks
+of the walk, each caught. Two cases of patch 18 that pinned "nothing more
+is drawn than the file writes" now say the sign is drawn. MuseNote's own
+cut bars of the songs stay in its monorepo; the corpus check holds them.
+
+**Upstream status**: not offered.
+
 ## Rules for this branch
 
 - A patch is carried only when the change cannot be made outside the
@@ -2752,6 +2839,14 @@ sources, 0 calls.
   patch 44 the timemap of one (Wave, put in time order): no object is
   built that was not, and no id moves. Patch 45 refuses the Humdrum
   export of neume notation, which held a clef and no note.
+  Fifty since 2026-11-11, by the owner's decision of that day
+  (MuseNote's plan V3_2_0_22: "choose the best that is not workaround
+  that fix the root cause"): patch 50 is a feature, 379 lines where a
+  patch is to be about 30, and it is in an importer. It finishes what
+  patch 18 began: the page shows the sound the file gives. It sets
+  attributes on objects the importer built, and builds and removes none:
+  no id of the corpus moved. MuseSync's pages of MusicXML gain the signs
+  too.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
