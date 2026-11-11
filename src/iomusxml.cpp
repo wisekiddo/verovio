@@ -9,16 +9,22 @@
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
 #include <cassert>
 #include <climits>
 #include <cmath>
+#include <functional>
+#include <memory>
 #include <numeric>
 #include <optional>
 #include <regex>
+#include <set>
 #include <sstream>
+#include <tuple>
 
 //----------------------------------------------------------------------------
 
+#include "accid.h"
 #include "arpeg.h"
 #include "beam.h"
 #include "beamspan.h"
@@ -47,6 +53,7 @@
 #include "harm.h"
 #include "instrdef.h"
 #include "keyaccid.h"
+#include "keysig.h"
 #include "label.h"
 #include "labelabbr.h"
 #include "layer.h"
@@ -73,6 +80,7 @@
 #include "rest.h"
 #include "sb.h"
 #include "score.h"
+#include "scoredef.h"
 #include "section.h"
 #include "slur.h"
 #include "space.h"
@@ -1271,6 +1279,10 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
         staffDef->SetLines(5);
         staffGrp->AddChild(staffDef);
     }
+
+    // The signs of the sounds the page would not show, on the score as it is written: before its repeats are
+    // written out (a copy of a bar carries its signs) and before it is paged
+    this->WriteSignsOfSound();
 
     // finalize document
     m_doc->ExpandExpansions();
@@ -5485,6 +5497,367 @@ void MusicXmlInput::MidiToPitch(int midi, std::string &step, int &alter, int &oc
     octave = semitones / 12;
     step = octaveNotes[semitones % 12].first;
     alter = octaveNotes[semitones % 12].second;
+}
+
+//----------------------------------------------------------------------------
+// The signs of the sounds a page would not show
+//----------------------------------------------------------------------------
+
+// A note with no <accidental> is given the sound its <alter> says (ReadMusicXmlNote), and nothing is drawn for it:
+// its page reads another note than the one that is heard. WriteSignsOfSound writes, on the accidental object every
+// pitched note already has, the sign a reader of the page expects. Bar by bar; in a bar staff by staff; on a staff
+// voice by voice, each from left to right, the notes of a chord in their order. A line (a staff, a voice, a pitch name,
+// an octave) reads as its staff's own key at the start of a bar, and as the last sign written on it after that. A note
+// whose line reads otherwise than it sounds gets the sign of its sound, and the sign then holds for the rest of the
+// bar: the first note gets it, later ones are covered, one that goes back gets its own. Besides:
+//  - a note a drawn tie holds (from a note of its line and its sound) reads as that note, unless a sign before it on
+//    its line in its bar says another sound;
+//  - a note that sounds as its own voice reads it gets its sign when another voice of its staff shows a sign of
+//    another sound on its line in the bar, unless a tie holds it;
+//  - two notes of a chord that sound otherwise on one line each get their sign, unless a note of the chord on the
+//    line shows that sound already;
+//  - a note that is not printed, has not exactly one accidental object, or sounds as no sign says (a quarter tone),
+//    is left as it is.
+// No object is built or removed: no id moves, and no sound changes.
+
+namespace {
+
+// A written sign the engine reads no sound from (a quarter tone): a sign all the same, which says no sound a note can
+// have.
+constexpr int kUnknownSign = 1 << 20;
+
+std::optional<int> AlterOfWritten(data_ACCIDENTAL_WRITTEN accid)
+{
+    switch (accid) {
+        case ACCIDENTAL_WRITTEN_n: return 0;
+        case ACCIDENTAL_WRITTEN_s: return 1;
+        case ACCIDENTAL_WRITTEN_f: return -1;
+        case ACCIDENTAL_WRITTEN_ss:
+        case ACCIDENTAL_WRITTEN_x: return 2;
+        case ACCIDENTAL_WRITTEN_ff: return -2;
+        default: return std::nullopt;
+    }
+}
+
+std::optional<int> AlterOfGestural(data_ACCIDENTAL_GESTURAL accid)
+{
+    switch (accid) {
+        case ACCIDENTAL_GESTURAL_n: return 0;
+        case ACCIDENTAL_GESTURAL_s: return 1;
+        case ACCIDENTAL_GESTURAL_f: return -1;
+        case ACCIDENTAL_GESTURAL_ss: return 2;
+        case ACCIDENTAL_GESTURAL_ff: return -2;
+        default: return std::nullopt;
+    }
+}
+
+// The sign of a sound: a double sharp is written x (ss written is drawn as two sharps)
+data_ACCIDENTAL_WRITTEN SignOf(int alter)
+{
+    switch (alter) {
+        case 0: return ACCIDENTAL_WRITTEN_n;
+        case 1: return ACCIDENTAL_WRITTEN_s;
+        case -1: return ACCIDENTAL_WRITTEN_f;
+        case 2: return ACCIDENTAL_WRITTEN_x;
+        case -2: return ACCIDENTAL_WRITTEN_ff;
+        default: return ACCIDENTAL_WRITTEN_NONE;
+    }
+}
+
+using KeyAlters = std::map<data_PITCHNAME, int>;
+
+// What a key signature does to each pitch name: its own key accidentals, or its count of sharps or flats, where every
+// one after the seventh alters a step a second time. A count the engine cannot draw is no key.
+KeyAlters KeyOf(const KeySig *keySig)
+{
+    KeyAlters alters;
+    bool own = false;
+    for (const Object *child : keySig->GetChildren()) {
+        if (!child->Is(KEYACCID)) continue;
+        const KeyAccid *keyAccid = vrv_cast<const KeyAccid *>(child);
+        if (!keyAccid->HasPname()) continue;
+        own = true;
+        // (one with no sign, or a sign that says no sound, alters nothing)
+        alters[keyAccid->GetPname()] = AlterOfWritten(keyAccid->GetAccid()).value_or(0);
+    }
+    if (own || !keySig->HasSig()) return alters;
+    const int count = keySig->GetSig().first;
+    const data_ACCIDENTAL_WRITTEN type = keySig->GetSig().second;
+    if (count <= 0 || count > 12 || (type != ACCIDENTAL_WRITTEN_s && type != ACCIDENTAL_WRITTEN_f)) return alters;
+    for (int i = 0; i < 7; ++i) {
+        const int times = count / 7 + ((i < count % 7) ? 1 : 0);
+        if (times > 0) alters[KeySig::GetAccidPnameAt(type, i)] = (type == ACCIDENTAL_WRITTEN_s) ? times : -times;
+    }
+    return alters;
+}
+
+// The key a score or staff definition says by itself (a key signature of its own), or none
+std::optional<KeyAlters> OwnKeyOf(const Object *def)
+{
+    for (const Object *child : def->GetChildren()) {
+        if (child->Is(KEYSIG)) return KeyOf(vrv_cast<const KeySig *>(child));
+    }
+    return std::nullopt;
+}
+
+// One note of the page, as a reader of it meets it
+struct PageNote {
+    Note *note;
+    data_PITCHNAME pname;
+    int oct;
+    int staff;
+    std::string voice;
+    const Chord *chord;
+    bool printed;
+    // Its accidental object written as an element, when it has exactly one and none written on the note itself
+    Accid *signable;
+    // The written sign (kUnknownSign for one that says no sound), and the sound: its sounding accidental, or else its
+    // written sign, or else a natural (none for a sound with no sign)
+    std::optional<int> written;
+    std::optional<int> sound;
+    int staffKeyAlter;
+};
+
+using Row = std::vector<PageNote *>;
+
+} // namespace
+
+void MusicXmlInput::WriteSignsOfSound()
+{
+    // The page, read once
+    std::vector<std::unique_ptr<PageNote>> notes;
+    std::vector<Row> rows; // the notes of each staff of each bar, in the order of reading
+    std::map<std::string, PageNote *> noteById;
+    KeyAlters defKey; // the score's own, for each staff
+    std::map<int, KeyAlters> staffKey;
+
+    auto readBar = [&](Measure *measure) {
+        for (Object *staffObject : measure->GetChildren()) {
+            if (!staffObject->Is(STAFF)) continue;
+            Staff *staff = vrv_cast<Staff *>(staffObject);
+            const int staffN = staff->HasN() ? staff->GetN() : 1;
+            std::vector<const Object *> layers;
+            for (const Object *child : staff->GetChildren()) {
+                if (child->Is(LAYER)) layers.push_back(child);
+            }
+            Row &row = rows.emplace_back();
+            ListOfObjects elements;
+            ClassIdsComparison isNoteOrKey({ NOTE, KEYSIG });
+            staff->FindAllDescendantsByComparison(&elements, &isNoteOrKey);
+            for (Object *element : elements) {
+                const Object *layer = NULL;
+                const Chord *chord = NULL;
+                for (const Object *p = element->GetParent(); p && p != staff; p = p->GetParent()) {
+                    if (!layer && p->Is(LAYER)) layer = p;
+                    if (!chord && p->Is(CHORD)) chord = vrv_cast<const Chord *>(p);
+                }
+                if (element->Is(KEYSIG)) {
+                    // (one in a layer holds from where it stands; not one beside the layers)
+                    if (layer) staffKey[staffN] = KeyOf(vrv_cast<const KeySig *>(element));
+                    continue;
+                }
+                Note *note = vrv_cast<Note *>(element);
+                if (!note->HasPname()) continue;
+                std::string voice;
+                if (layer) {
+                    const Layer *l = vrv_cast<const Layer *>(layer);
+                    const auto place = std::find(layers.begin(), layers.end(), layer);
+                    voice = l->HasN() ? std::to_string(l->GetN())
+                        : (place == layers.end()) ? ""
+                                                  : std::to_string(place - layers.begin() + 1);
+                }
+                // The note's accidental objects: one written as the note's own attributes, and those written as
+                // elements
+                const Accid *own = NULL;
+                std::vector<Accid *> elementAccids;
+                for (Object *child : note->GetChildren()) {
+                    if (!child->Is(ACCID)) continue;
+                    Accid *accid = vrv_cast<Accid *>(child);
+                    if (accid->IsAttribute()) {
+                        if (!own) own = accid;
+                    }
+                    else {
+                        elementAccids.push_back(accid);
+                    }
+                }
+                const bool ownSays = own && (own->HasAccid() || own->HasAccidGes());
+                const Accid *first = elementAccids.empty() ? NULL : elementAccids.front();
+                const Accid *writtenBy = (own && own->HasAccid()) ? own : (first && first->HasAccid()) ? first : NULL;
+                const Accid *soundBy
+                    = (own && own->HasAccidGes()) ? own : (first && first->HasAccidGes()) ? first : NULL;
+                std::optional<int> written;
+                if (writtenBy) written = AlterOfWritten(writtenBy->GetAccid()).value_or(kUnknownSign);
+                std::optional<int> sound = soundBy ? AlterOfGestural(soundBy->GetAccidGes())
+                    : writtenBy                    ? AlterOfWritten(writtenBy->GetAccid())
+                                                   : std::optional<int>(0);
+                const bool printed = (note->GetVisible() != BOOLEAN_false)
+                    && !(chord && chord->GetVisible() == BOOLEAN_false);
+                const auto keyIter = staffKey.find(staffN);
+                const KeyAlters &key = (keyIter != staffKey.end()) ? keyIter->second : defKey;
+                const auto alterIter = key.find(note->GetPname());
+                auto pageNote = std::make_unique<PageNote>(PageNote{ note, note->GetPname(),
+                    note->HasOct() ? note->GetOct() : 4, staffN, voice, chord, printed,
+                    (elementAccids.size() == 1 && !ownSays && printed) ? elementAccids.front() : NULL, written,
+                    sound, (alterIter != key.end()) ? alterIter->second : 0 });
+                row.push_back(pageNote.get());
+                noteById[note->GetID()] = pageNote.get();
+                notes.push_back(std::move(pageNote));
+            }
+        }
+    };
+
+    std::function<void(Object *)> visit = [&](Object *object) {
+        if (object->Is(SCOREDEF)) {
+            if (const std::optional<KeyAlters> key = OwnKeyOf(object)) {
+                defKey = *key;
+                staffKey.clear();
+            }
+            for (Object *child : object->GetChildren()) visit(child);
+        }
+        else if (object->Is(STAFFDEF)) {
+            if (const std::optional<KeyAlters> key = OwnKeyOf(object)) {
+                const StaffDef *staffDef = vrv_cast<const StaffDef *>(object);
+                staffKey[staffDef->HasN() ? staffDef->GetN() : 1] = *key;
+            }
+        }
+        else if (object->Is(MEASURE)) {
+            readBar(vrv_cast<Measure *>(object));
+        }
+        else {
+            // (the score's own definition is no child of it, and stands before its sections)
+            if (object->Is(SCORE)) {
+                if (ScoreDef *scoreDef = vrv_cast<Score *>(object)->GetScoreDef()) visit(scoreDef);
+            }
+            for (Object *child : object->GetChildren()) visit(child);
+        }
+    };
+    visit(m_doc);
+
+    // The notes the drawn ties that end on a note come from, in the order the ties are written
+    std::map<const PageNote *, std::vector<const PageNote *>> tiedFrom;
+    for (Object *object : m_doc->FindAllDescendantsByType(TIE)) {
+        const Tie *tie = vrv_cast<const Tie *>(object);
+        auto idOf = [](const std::string &uri) { return (!uri.empty() && uri[0] == '#') ? uri.substr(1) : uri; };
+        const auto start = noteById.find(idOf(tie->GetStartid()));
+        const auto end = noteById.find(idOf(tie->GetEndid()));
+        if (start == noteById.end() || end == noteById.end()) continue;
+        tiedFrom[end->second].push_back(start->second);
+    }
+
+    int signsWritten = 0;
+    int leftAlone = 0;
+    for (const Row &row : rows) {
+        std::map<const PageNote *, std::optional<int>> shown;
+        for (const PageNote *n : row) shown[n] = n->written;
+
+        // The lines of a chord on which two sounds stand, of the notes that are printed (a hidden note shows no
+        // sound)
+        using ChordLine = std::tuple<const Chord *, data_PITCHNAME, int>;
+        std::map<ChordLine, std::vector<const PageNote *>> chordLines;
+        for (const PageNote *n : row) {
+            if (n->chord && n->printed) chordLines[{ n->chord, n->pname, n->oct }].push_back(n);
+        }
+        std::set<ChordLine> twoSounds;
+        for (const auto &[line, lineNotes] : chordLines) {
+            std::set<std::optional<int>> sounds;
+            for (const PageNote *n : lineNotes) sounds.insert(n->sound);
+            if (sounds.size() > 1) twoSounds.insert(line);
+        }
+
+        // A note a tie holds: from a note of its line (not itself) and of its sound
+        auto tied = [&](const PageNote *n) {
+            const auto iter = tiedFrom.find(n);
+            if (iter == tiedFrom.end()) return false;
+            return std::any_of(iter->second.begin(), iter->second.end(), [&](const PageNote *from) {
+                return from != n && from->pname == n->pname && from->oct == n->oct && from->sound == n->sound;
+            });
+        };
+
+        // Signs only get added: the bar is read again until none is. The notes left alone are those of the last
+        // reading.
+        std::set<const PageNote *> leftAloneHere;
+        bool added = true;
+        while (added) {
+            added = false;
+            leftAloneHere.clear();
+            // The signs shown on each line, voice by voice
+            std::map<std::pair<data_PITCHNAME, int>, std::map<std::string, std::set<int>>> onLine;
+            for (const PageNote *n : row) {
+                if (shown[n]) onLine[{ n->pname, n->oct }][n->voice].insert(*shown[n]);
+            }
+            // What each line reads, for each voice
+            std::map<std::tuple<int, std::string, data_PITCHNAME, int>, int> read;
+            for (const PageNote *n : row) {
+                const std::tuple<int, std::string, data_PITCHNAME, int> line{ n->staff, n->voice, n->pname, n->oct };
+                if (shown[n]) {
+                    // A written sign is read first, a tied note's included
+                    read[line] = *shown[n];
+                    continue;
+                }
+                const std::optional<int> heard = n->sound;
+                const auto readIter = read.find(line);
+                const std::optional<int> reading
+                    = (readIter != read.end()) ? std::optional<int>(readIter->second) : std::nullopt;
+                const bool isTied = tied(n);
+                // Its own voice reads it otherwise than it sounds
+                const bool ownVoice = isTied ? (reading && reading != heard) : (reading.value_or(n->staffKeyAlter) != heard);
+                // Another voice shows another sound on its line; not for a tied note, which reads as its tie
+                bool clash = false;
+                if (!isTied) {
+                    const auto lineIter = onLine.find({ n->pname, n->oct });
+                    if (lineIter != onLine.end()) {
+                        for (const auto &[voice, signs] : lineIter->second) {
+                            if (voice == n->voice) continue;
+                            for (int x : signs) {
+                                if (std::optional<int>(x) != heard) clash = true;
+                            }
+                        }
+                    }
+                }
+                // Two sounds on its line in its chord, and no other note of the chord on the line shows its sound
+                bool chordSign = false;
+                if (n->chord) {
+                    const ChordLine key{ n->chord, n->pname, n->oct };
+                    if (twoSounds.count(key)) {
+                        const std::vector<const PageNote *> &others = chordLines[key];
+                        chordSign = std::none_of(others.begin(), others.end(),
+                            [&](const PageNote *x) { return x != n && shown[x] == heard; });
+                    }
+                }
+                if (!(ownVoice || clash || chordSign)) continue;
+                const data_ACCIDENTAL_WRITTEN sign = heard ? SignOf(*heard) : ACCIDENTAL_WRITTEN_NONE;
+                if (sign == ACCIDENTAL_WRITTEN_NONE || !n->signable) {
+                    leftAloneHere.insert(n);
+                    continue;
+                }
+                shown[n] = heard;
+                read[line] = *heard;
+                added = true;
+            }
+        }
+        leftAlone += (int)leftAloneHere.size();
+
+        for (const PageNote *n : row) {
+            if (n->written || !shown[n]) continue;
+            // On the accidental object that is there: the sign, the sound left as it is (a natural, which has
+            // none, is written out), and the glyph the importer carried taken off (kept, it would be drawn in
+            // place of the sign, the wrong one once transposed)
+            Accid *accid = n->signable;
+            accid->SetAccid(SignOf(*shown[n]));
+            if (!accid->HasAccidGes()) accid->SetAccidGes(ACCIDENTAL_GESTURAL_n);
+            accid->SetGlyphAuth("");
+            accid->SetGlyphName("");
+            ++signsWritten;
+        }
+    }
+
+    if (signsWritten > 0) {
+        LogInfo("MusicXML import: %d signs written for notes whose page did not show their sound", signsWritten);
+    }
+    if (leftAlone > 0) {
+        LogWarning("MusicXML import: %d notes that sound otherwise than their page reads are left without a sign",
+            leftAlone);
+    }
 }
 
 #endif // NO_MUSICXML_SUPPORT

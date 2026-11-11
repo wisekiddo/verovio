@@ -494,6 +494,12 @@ private:
     void MatchTies(bool matchLayers);
     ///@}
 
+    /**
+     * Writes the sign of every note whose page would not show its sound: the importer gives a note with no
+     * <accidental> the sound its <alter> says, and the sign a reader of the page needs is the importer's to write.
+     */
+    void WriteSignsOfSound();
+
     /*
      * @name Helper methods for rendering text elements
      */
