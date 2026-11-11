@@ -14,6 +14,7 @@
 #include <climits>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -567,6 +568,72 @@ bool MusicXmlInput::IsInStack(ClassId classId, Layer *layer)
     return (m_elementStackMap.at(layer).end()
         != std::find_if(m_elementStackMap.at(layer).begin(), m_elementStackMap.at(layer).end(),
             [classId](LayerElement *element) { return element->Is(classId); }));
+}
+
+void MusicXmlInput::CloseTuplet(Layer *layer, const std::string &measureNum)
+{
+    std::vector<LayerElement *> &stack = m_elementStackMap.at(layer);
+    const auto tuplet = std::find_if(stack.rbegin(), stack.rend(), [](LayerElement *e) { return e->Is(TUPLET); });
+    if (tuplet == stack.rend()) return;
+    const size_t opened = std::distance(stack.rbegin(), tuplet);
+    if (opened > 0) {
+        LogWarning("MusicXML import: %zu element(s) opened inside a tuplet in measure %s end with it",
+            opened, measureNum.c_str());
+    }
+    stack.erase((tuplet + 1).base(), stack.end());
+}
+
+namespace {
+
+    // The voice a MusicXML note is in ("1" when it names none).
+    std::string VoiceOfNote(const pugi::xml_node &note)
+    {
+        const pugi::xml_node voice = note.child("voice");
+        return voice ? std::string(voice.text().as_string()) : std::string("1");
+    }
+
+} // namespace
+
+void MusicXmlInput::NestBeamAndTupletByTheirEnds(
+    const pugi::xml_node &node, Layer *layer, const std::vector<pugi::xml_node> &measureNodes)
+{
+    std::vector<LayerElement *> &stack = m_elementStackMap.at(layer);
+    if (stack.size() < 2) return;
+    LayerElement *inner = stack.back();
+    LayerElement *outer = stack.at(stack.size() - 2);
+    const bool beamOverTuplet = outer->Is(BEAM) && inner->Is(TUPLET);
+    if (!beamOverTuplet && !(outer->Is(TUPLET) && inner->Is(BEAM))) return;
+    // Only the two just built: the inner one the outer one's only child, both empty
+    if ((inner->GetParent() != outer) || (outer->GetChildCount() != 1) || (inner->GetChildCount() != 0)) return;
+
+    const auto start = std::find(measureNodes.begin(), measureNodes.end(), node);
+    if (start == measureNodes.end()) return;
+    const std::string voice = VoiceOfNote(node);
+    constexpr int noEnd = std::numeric_limits<int>::max();
+    int beamEnd = noEnd;
+    int tupletEnd = noEnd;
+    for (auto it = start; it != measureNodes.end(); ++it) {
+        if ((std::string(it->name()) != "note") || (VoiceOfNote(*it) != voice)) continue;
+        const int index = static_cast<int>(std::distance(measureNodes.begin(), it));
+        if ((beamEnd == noEnd) && (it != start) && it->select_node("beam[text()='end']")
+            && !it->select_node("beam[text()='continue']")) {
+            beamEnd = index;
+        }
+        if ((tupletEnd == noEnd) && it->select_node("notations/tuplet[@type='stop']")) tupletEnd = index;
+    }
+    // The longer one goes outside; on a tie (both end on one note, or neither in the measure) the beam does, as
+    // the import has always nested them then
+    const bool beamOutside = (beamEnd >= tupletEnd);
+    if (beamOutside == beamOverTuplet) return;
+
+    Object *parent = outer->GetParent();
+    const int index = parent->GetChildIndex(outer);
+    if (index < 0) return;
+    outer->DetachChild(0);
+    parent->DetachChild(index);
+    parent->InsertChild(inner, index);
+    inner->AddChild(outer);
+    std::swap(stack.at(stack.size() - 1), stack.at(stack.size() - 2));
 }
 
 void MusicXmlInput::FillSpace(Layer *layer, int dur, bool withClefs, int offset)
@@ -4145,7 +4212,7 @@ void MusicXmlInput::ReadMusicXmlNote(
     // tuplet end
     pugi::xpath_node tupletEnd = node.select_node("notations/tuplet[@type='stop']");
     if (tupletEnd) {
-        this->RemoveLastFromStack(TUPLET, layer);
+        this->CloseTuplet(layer, measureNum);
     }
 
     // beam end
@@ -4406,6 +4473,9 @@ bool MusicXmlInput::ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Laye
             this->ReadMusicXmlBeamStart(node, beamStart.node(), layer);
             if (!isChord) ReadMusicXmlTupletStart(node, tupletStart.node(), layer);
         }
+        // The order above reads the first beam-1 "end" of any voice, which a file whose beam 1 ends while beam 2 goes
+        // on puts before the tuplet's stop: the beam went inside the tuplet and kept it open over the notes after it.
+        this->NestBeamAndTupletByTheirEnds(node, layer, currentMeasureNodes);
     }
     // If note is a start of the beam only - check if there is a tuplet starting/ending in the span of
     // the whole duration of this beam

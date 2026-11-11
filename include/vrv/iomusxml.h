@@ -372,6 +372,19 @@ private:
     void ReadMusicXmlSound(pugi::xml_node, Measure *measure, Section *section);
     bool ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord);
     void ReadMusicXmlTupletStart(const pugi::xml_node &node, const pugi::xml_node &tupletStart, Layer *layer);
+    /**
+     * A beam and a tuplet that start on one note nest by where each really ends in the note's voice: the beam on the
+     * note the import closes it on (an "end" with no "continue"), the tuplet on its stop. The two have just been
+     * built, empty, in the order the import has always built them (their ids); they swap when the other nesting is
+     * the right one.
+     */
+    void NestBeamAndTupletByTheirEnds(
+        const pugi::xml_node &node, Layer *layer, const std::vector<pugi::xml_node> &measureNodes);
+    /**
+     * Closes the last tuplet open in the layer, with what was opened inside it: a tuplet ends on its stop and must not
+     * take in the notes after it.
+     */
+    void CloseTuplet(Layer *layer, const std::string &measureNum);
     void ReadMusicXmlBeamStart(const pugi::xml_node &node, const pugi::xml_node &beamStart, Layer *layer);
     void ReadMusicXMLMeterSig(const pugi::xml_node &node, Object *parent);
     void ReadMusicXmlTies(const pugi::xml_node &node, Layer *layer, Note *note, const std::string &measureNum);
