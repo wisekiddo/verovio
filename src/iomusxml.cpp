@@ -3352,7 +3352,8 @@ void MusicXmlInput::ReadMusicXmlNote(
             }
         }
         // we assume /note without /type or with duration of an entire bar to be mRest
-        else if (typeStr.empty() || rest.attribute("measure").as_bool()) {
+        else if (typeStr.empty() || rest.attribute("measure").as_bool()
+            || this->FillsItsBarOtherwise(node, layer, typeStr, dots, duration)) {
             if (m_slash) {
                 MeterSig tmpMeterSig;
                 tmpMeterSig.SetCount({ m_meterCount, m_meterSign });
@@ -3393,6 +3394,14 @@ void MusicXmlInput::ReadMusicXmlNote(
                 rest->SetDur(ConvertTypeToDur(typeStr));
                 rest->SetDurPpq(duration);
                 if (dots > 0) rest->SetDots(dots);
+                // the value its ticks play, when the file writes another: the page shows what plays
+                data_DURATION played = DURATION_NONE;
+                int playedDots = 0;
+                if (this->ValueOfItsTicks(node, layer, typeStr, dots, duration, played, playedDots)) {
+                    rest->SetDur(played);
+                    rest->ResetAugmentDots();
+                    if (playedDots > 0) rest->SetDots(playedDots);
+                }
                 if (cue) rest->SetCue(BOOLEAN_true);
                 if (!stepStr.empty()) rest->SetPloc(ConvertStepToPitchName(stepStr));
                 if (const std::optional<int> octave = ToInt(octaveStr)) rest->SetOloc(*octave);
@@ -3405,6 +3414,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                         rest->AttStaffIdent::StrToXsdPositiveIntegerList(std::to_string(noteStaffNum + staffOffset)));
                 this->AddLayerElement(layer, rest, duration);
                 this->KeepUnbracketedRatio(node, layer, rest);
+                if (grace) m_graceRests.push_back(rest);
             }
         }
     }
@@ -3575,6 +3585,13 @@ void MusicXmlInput::ReadMusicXmlNote(
                 chord->SetDur(ConvertTypeToDur(typeStr));
                 chord->SetDurPpq(duration);
                 if (dots > 0) chord->SetDots(dots);
+                data_DURATION played = DURATION_NONE;
+                int playedDots = 0;
+                if (this->ValueOfItsTicks(node, layer, typeStr, dots, duration, played, playedDots)) {
+                    chord->SetDur(played);
+                    chord->ResetAugmentDots();
+                    if (playedDots > 0) chord->SetDots(playedDots);
+                }
                 chord->SetStemDir(stemDir);
                 if (!strcmp(notehead.text().as_string(), "cluster")) chord->SetCluster(CLUSTER_white);
                 if (stemText == "none") chord->SetStemVisible(BOOLEAN_false);
@@ -3638,6 +3655,13 @@ void MusicXmlInput::ReadMusicXmlNote(
             if (!typeStr.empty()) note->SetDur(ConvertTypeToDur(typeStr));
             note->SetDurPpq(duration);
             if (dots > 0) note->SetDots(dots);
+            data_DURATION played = DURATION_NONE;
+            int playedDots = 0;
+            if (this->ValueOfItsTicks(node, layer, typeStr, dots, duration, played, playedDots)) {
+                note->SetDur(played);
+                note->ResetAugmentDots();
+                if (playedDots > 0) note->SetDots(playedDots);
+            }
             note->SetStemDir(stemDir);
             if (node.attribute("default-y") && stem.attribute("default-y")) {
                 float stemLen
@@ -5737,6 +5761,48 @@ using Row = std::vector<PageNote *>;
 
 } // namespace
 
+bool MusicXmlInput::ValueOfItsTicks(const pugi::xml_node &node, Layer *layer, const std::string &typeStr, int dots,
+    int ticks, data_DURATION &duration, int &valueDots)
+{
+    if (typeStr.empty() || (ticks <= 0) || (m_ppq <= 0) || node.child("grace") || node.child("time-modification")) {
+        return false;
+    }
+    if (this->IsInStack(TUPLET, layer) || this->IsInStack(FTREM, layer)
+        || node.select_node("notations/ornaments/tremolo[@type='start' or @type='stop']")) {
+        return false;
+    }
+    const Fraction written = Fraction(ConvertTypeToDur(typeStr)) * Fraction((1 << (dots + 1)) - 1, 1 << dots);
+    const Fraction played(ticks, 4 * m_ppq);
+    if (written == played) return false;
+    for (int value = DURATION_long; value <= DURATION_2048; ++value) {
+        for (int k = 0; k <= 2; ++k) {
+            if (Fraction(static_cast<data_DURATION>(value)) * Fraction((1 << (k + 1)) - 1, 1 << k) == played) {
+                duration = static_cast<data_DURATION>(value);
+                valueDots = k;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool MusicXmlInput::FillsItsBarOtherwise(
+    const pugi::xml_node &node, Layer *layer, const std::string &typeStr, int dots, int ticks)
+{
+    // A bar of slashes is built of several objects, a rest of one: a rest whose bar shows slashes stays a rest (the
+    // build order, which is the ids, is kept)
+    if (m_slash || typeStr.empty() || (ticks <= 0) || (m_ppq <= 0) || (m_durTotal != 0)) return false;
+    if (node.child("grace") || node.child("time-modification") || node.child("chord")) return false;
+    if (this->IsInStack(TUPLET, layer)) return false;
+    int steps = 0;
+    for (const int count : m_meterCount) steps += count;
+    if ((steps <= 0) || (m_meterUnit <= 0)) return false;
+    const Fraction played(ticks, 4 * m_ppq);
+    if (played != Fraction(steps, m_meterUnit)) return false;
+    const Fraction written = Fraction(ConvertTypeToDur(typeStr)) * Fraction((1 << (dots + 1)) - 1, 1 << dots);
+    return written != played;
+}
+
 void MusicXmlInput::KeepUnbracketedRatio(const pugi::xml_node &node, Layer *layer, LayerElement *element)
 {
     if (!element || node.child("grace")) return;
@@ -5851,6 +5917,14 @@ void MusicXmlInput::WriteExactTime()
         parent->InsertChild(tuplet, index);
         tuplet->AddChild(ratio.m_element);
         previous = tuplet;
+    }
+
+    // A grace rest takes no time in the file, and MEI has no rest without one: it is left out, and said
+    for (LayerElement *rest : m_graceRests) {
+        Object *parent = rest->GetParent();
+        if (!parent) continue;
+        LogWarning("MusicXML import: a grace rest takes no time and is left out");
+        parent->DeleteChild(rest);
     }
 }
 

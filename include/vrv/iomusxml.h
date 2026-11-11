@@ -547,6 +547,20 @@ private:
     /** Keeps [element] for WriteExactTime when [node] is timed by a ratio no open tuplet bracket gives it */
     void KeepUnbracketedRatio(const pugi::xml_node &node, Layer *layer, LayerElement *element);
 
+    /**
+     * The written value and dots of [node]'s ticks when they are not the time its type and dots give (a "half" rest
+     * holding three beats): a value with up to two dots, or false when they make none. Not for what a ratio times (a
+     * tuplet's, or its own), a grace note, or a note of a fingered tremolo (written at the whole tremolo's value).
+     */
+    bool ValueOfItsTicks(const pugi::xml_node &node, Layer *layer, const std::string &typeStr, int dots, int ticks,
+        data_DURATION &duration, int &valueDots);
+
+    /**
+     * Whether a rest written [typeStr] and [dots], [ticks] long, fills its whole bar with another time than it is
+     * written for (a whole rest in a bar of 3/4): it is the bar's rest.
+     */
+    bool FillsItsBarOtherwise(const pugi::xml_node &node, Layer *layer, const std::string &typeStr, int dots, int ticks);
+
     /*
      * @name Helper methods for rendering text elements
      */
@@ -706,6 +720,8 @@ private:
     /** The gaps and the ratios the import could not write exactly, for WriteExactTime */
     std::vector<musicxml::InexactGap> m_inexactGaps;
     std::vector<musicxml::UnbracketedRatio> m_unbracketedRatios;
+    /** Grace rests: no time in the file, and MEI has no rest without one; left out after the import */
+    std::vector<LayerElement *> m_graceRests;
     /* To remember layer of last element (note) to handle chords */
     Layer *m_prevLayer = NULL;
     /* To remember current layer to properly handle layers/staves/cross-staff elements */
