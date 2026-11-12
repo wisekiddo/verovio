@@ -575,12 +575,15 @@ void MusicXmlInput::CloseTuplet(Layer *layer, const std::string &measureNum)
     std::vector<LayerElement *> &stack = m_elementStackMap.at(layer);
     const auto tuplet = std::find_if(stack.rbegin(), stack.rend(), [](LayerElement *e) { return e->Is(TUPLET); });
     if (tuplet == stack.rend()) return;
-    const size_t opened = std::distance(stack.rbegin(), tuplet);
+    // The chord this note begins stays open: its other notes follow, and its own last note closes it
+    LayerElement *chord = (stack.back()->Is(CHORD) || stack.back()->Is(TABGRP)) ? stack.back() : nullptr;
+    const size_t opened = std::distance(stack.rbegin(), tuplet) - (chord ? 1 : 0);
     if (opened > 0) {
         LogWarning("MusicXML import: %zu element(s) opened inside a tuplet in measure %s end with it",
             opened, measureNum.c_str());
     }
     stack.erase((tuplet + 1).base(), stack.end());
+    if (chord) stack.push_back(chord);
 }
 
 namespace {
@@ -4278,12 +4281,6 @@ void MusicXmlInput::ReadMusicXmlNote(
         }
     }
 
-    // tuplet end
-    pugi::xpath_node tupletEnd = node.select_node("notations/tuplet[@type='stop']");
-    if (tupletEnd) {
-        this->CloseTuplet(layer, measureNum);
-    }
-
     // beam end
     bool beamEnd = node.select_node("beam[text()='end']");
     if (beamEnd) {
@@ -4314,6 +4311,12 @@ void MusicXmlInput::ReadMusicXmlNote(
                 this->CloseBeamSpan(staff, layer, element);
             }
         }
+    }
+
+    // tuplet end, after the note's own beam end: what the tuplet closes is only what goes on past it
+    pugi::xpath_node tupletEnd = node.select_node("notations/tuplet[@type='stop']");
+    if (tupletEnd) {
+        this->CloseTuplet(layer, measureNum);
     }
 
     // add StartIDs to dir, dynam, and pedal
@@ -5848,15 +5851,25 @@ void MusicXmlInput::WriteExactTime()
                 gap.m_ppq);
             continue;
         }
-        // What is written for it where it stands, in whole notes (the engine's measure of a written value): its time
-        // times the open tuplets' num / numbase. That is p / (2^k r), r odd. When r is 1 it is a sum of written values;
-        // else r in the time of the largest power of two below r, and what is written inside is that times r over it.
-        const Fraction length = Fraction(gap.m_ticks, 4 * gap.m_ppq) * gap.m_scale;
-        int num = length.GetDenominator();
+        // Its time, in whole notes (the engine's measure of a written value). Where it stands, what is written for it
+        // is that time times the open tuplets' num / numbase; when that is a sum of written values, they are written.
+        // Else they go into a tuplet that shows nothing, and that tuplet holds the whole ratio: the engine times a
+        // note by its innermost tuplet alone, as the import's own nested tuplets take the note's time-modification,
+        // the whole ratio. The time is p / (2^k r), r odd: r in the time of the largest power of two below r, and
+        // what is written inside is the time times r over it.
+        const Fraction time(gap.m_ticks, 4 * gap.m_ppq);
+        Fraction left = time * gap.m_scale;
+        Fraction soundsPerWritten = Fraction(1) / gap.m_scale;
+        int num = left.GetDenominator();
         while ((num % 2) == 0) num /= 2;
         int numbase = 1;
-        while (numbase * 2 < num) numbase *= 2;
-        Fraction left = length * Fraction(num) / Fraction(numbase);
+        if (num > 1) {
+            num = time.GetDenominator();
+            while ((num % 2) == 0) num /= 2;
+            while (numbase * 2 < num) numbase *= 2;
+            left = time * Fraction(num) / Fraction(numbase);
+            soundsPerWritten = Fraction(numbase) / Fraction(num);
+        }
         std::vector<data_DURATION> pieces;
         while (left > Fraction(0)) {
             // the longest written value that fits, a half at most, as the import writes spaces
@@ -5888,8 +5901,7 @@ void MusicXmlInput::WriteExactTime()
             // the import's own spaces first (their ids), new ones past them
             Space *space = (i < gap.m_spaces.size()) ? vrv_cast<Space *>(gap.m_spaces.at(i)) : new Space();
             space->SetDur(pieces.at(i));
-            const Fraction sounding = Fraction(pieces.at(i)) * Fraction(numbase) / Fraction(num) / gap.m_scale
-                * Fraction(4 * gap.m_ppq);
+            const Fraction sounding = Fraction(pieces.at(i)) * soundsPerWritten * Fraction(4 * gap.m_ppq);
             const int ticks = (i + 1 == pieces.size()) ? ticksLeft : sounding.GetNumerator() / sounding.GetDenominator();
             space->SetDurPpq(ticks);
             ticksLeft -= ticks;
