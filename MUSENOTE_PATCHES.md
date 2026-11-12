@@ -58,6 +58,9 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 48 | 2026-10-25 | A score definition's insert flag starts false (1aadb2e1b) | `src/scoredef.cpp`, +1 | `ScoreDef::Reset` left `m_insertScoreDef` unset, and `ScoreDefSetCurrentFunctor` read it for a first measure no score definition with a clef, key, meter or mensuration came before (a GABC chant, a mensural score; UBSan: a load of a value that is no bool). None where the flag was set before it was read | Not offered upstream |
 | 49 | 2026-10-25 | MusicXML: a tuplet's numbers are read as the int they are (22792787b) | `src/iomusxml.cpp`, +2 / -2 | A MusicXML tuplet whose `<actual-notes>`, `<normal-notes>` or `<tuplet-number>` passed 32,767 wrapped in a `short int` and was timed as one the file does not write (3 in the time of 40000 as 3 in the time of 1). None for numbers up to 32,767: none of the corpus is larger | Not offered upstream |
 | 50 | 2026-11-11 | MusicXML: write the sign of a note whose page would not show its sound (ca114f5) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +379 | A MusicXML note with no `<accidental>` whose page would read another sound than it plays gets the sign of that sound, on the `<accid>` the importer built: 1,336 signs in 160 of the 2,765 MusicXML scores of the corpus, whose MEI export and drawing change (640 outputs: each one's page, MEI and two locator exports). The MEI is byte for byte what MuseNote's Dart pass wrote (V3_2_0_09). No id of a document moves, and no MIDI, pitch map or timemap changes. None for a score with no such note, and none for MEI, ABC or Humdrum input | Not offered upstream |
+| 51 | 2026-11-12 | MusicXML: a tuplet holds only the notes its bracket covers (00483f1); amended the same day by: MusicXML: patches 51 and 52 as the corpus gate found them (a2aed60) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +84 / -1, then (with patch 52) +28 / -16 | A beam and a tuplet that start on one note nest by where each really ends in the note's own voice; a tuplet's stop closes what was opened inside it and goes on past it (a beam then ends with the tuplet, with a warning), after the note's own beam end, and the chord the note begins stays open. 7 scores of the corpus change: each tuplet holds only its bracket's notes, and the notes after it play their own time. The objects are built in the same order: no id moves | Not offered upstream |
+| 52 | 2026-11-12 | MusicXML: a gap, a hidden rest and an unbracketed tuplet note play their time (6650892); amended the same day by a2aed60 (above) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +199, then (with patch 51) +28 / -16 | A `<forward>` or hidden rest whose length is no sum of written values where it stands, and a note, chord or rest timed by a `<time-modification>` that no `<tuplet>` shows, is set in a tuplet that shows neither bracket nor number, holding written values that add up exactly; a gap that is a sum of written values is written as those values, counted in whole ticks. A walk after the import does it: the import's spaces keep their ids, the surplus ones go, the new tuplets and spaces take ids after every other. 9 scores: 50 spaces rewritten, 39 spaces gone, 31 unseen tuplets | Not offered upstream |
+| 53 | 2026-11-12 | MusicXML: a rest or note is written as its ticks play it (cb58fcb) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +91 / -1 | A rest that fills its bar but is typed as another length is the bar's rest (`<mRest>`, the same object and id), as the importer's own comment says; a note, chord or rest whose ticks make a written value (a power of two, up to two dots) and whose type says another is written that value; a grace rest is left out, with a warning. Not for a note in a tuplet, with a time-modification or of a tremolo. 16 scores: 33 rests become bar rests, 9 values are written as they play, 3 grace rests go | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2746,6 +2749,118 @@ cut bars of the songs stay in its monorepo; the corpus check holds them.
 
 **Upstream status**: not offered.
 
+### 51 to 53. A MusicXML score plays each note, rest and gap for the ticks its file gives (tb.16)
+
+The engine times a note or a rest by its written value (`@dur`, `@dots`,
+or their `.ges`), the ratio of its innermost tuplet and its own
+`@num`/`@numbase`; it never reads `@dur.ppq`, the ticks of the file.
+Wherever the MusicXML importer wrote a value other than the ticks, the
+score played otherwise than its file: on tb.15, 177 elements in 31 of
+the 2,765 MusicXML scores of the corpus, so notes came early or late and
+bars stretched. MuseNote grades a take by the same timing (its plan
+V3_2_0_25, findings W17 to W20). Four causes, all in the importer:
+
+- **A tuplet kept notes after its end (51).** `ReadMusicXmlBeamsAndTuplets`
+  nested a beam and a tuplet that start on one note by the first beam-1
+  "end" of any voice, where the loop closes a beam only on an "end" with
+  no "continue"; files that mark beam 1 "end" while beam 2 goes on put
+  the beam inside the tuplet. Closing the tuplet then left that beam
+  open, and every later note went into it, at the tuplet's ratio (Will
+  You Still Love Me Tomorrow bar 71: four 32nds after a triplet of 16ths
+  at 2/3, bar 72 a sixth of a beat early).
+- **A gap of no binary length was written short (52).** `FillSpace` split
+  a `<forward>` into spaces of power-of-two lengths in floating point and
+  truncated each to whole ticks: a gap a third of a quarter long became a
+  chain of spaces down to 1 and 0 ticks, and the voice ended short.
+- **Notes timed by a ratio no bracket shows played their plain value
+  (52).** A `<time-modification>` of 3 in 2 with no `<tuplet>` was
+  written `dur="8"` and played a full eighth.
+- **A rest or note whose type disagrees with its ticks played its type
+  (53).** Whole rests that fill a bar of another length (each played four
+  beats: Since I Don't Have You, in 6/8, gained a beat of silence at
+  each), rests typed without their dot, and grace rests, which take no
+  time in the file and played as eighths.
+
+**The rule.** The import writes each note, rest and gap so that the
+engine plays it for exactly the ticks the file gives, and so that the
+page shows what plays; no object built today changes its place in the
+order of construction, so no id moves.
+
+- **51.** A beam and a tuplet that start on one note nest by where each
+  really ends in the note's own voice (the beam's end by the loop's own
+  rule, the tuplet's stop): both are built as before and attached in
+  that order. A tuplet's stop comes after the note's own beam end, and
+  closes what was opened inside it and goes on past it; a beam that does
+  ends with the tuplet, and the next notes are beamed afresh, with a
+  warning. The chord the note begins stays open: its other notes follow
+  the stop, and its own last note closes it.
+- **52.** A gap whose length times the ratio of its open tuplets is a sum
+  of written values is written as those values, counted in whole ticks.
+  A gap that is not, and a note, chord or rest timed by a
+  `<time-modification>` that no open tuplet gives, go into a tuplet that
+  shows neither bracket nor number (`bracket.visible="false"`,
+  `num.visible="false"`): for a gap, r in the time of the largest power
+  of two below r, r the odd part of its length's denominator, holding
+  written values that add up exactly; for a note, its own ratio, and
+  neighbours of one ratio share one. Inside an open tuplet the unseen
+  one holds the whole ratio of the gap's time: the engine times a note
+  by its innermost tuplet alone, as the importer's own nested tuplets
+  take a note's whole time-modification. A walk after the import does
+  it, before the signs of patch 50: the import's spaces are kept (their
+  ids) and given their values, the surplus deleted, and what it adds
+  takes ids after every object the import built.
+- **53.** A rest that fills its whole bar (no slash, no tuplet, no
+  time-modification, not in a chord, at the bar's start) becomes the
+  bar's rest, `<mRest>`, where the importer's comment always said so; it
+  is one object either way, and keeps its id. Otherwise a note, chord or
+  rest whose ticks make a written value (long to 2048th, up to two dots)
+  is written that value. A grace rest is built and then dropped (MEI has
+  no rest that takes no time), with a warning. Notes in a tuplet, with a
+  time-modification, or of a fingered tremolo are left to their ratio.
+
+**Measured** (tool/parity, tb.15 against tb.16):
+
+- 185 of 19,930 outputs differ, all of the 31 scores: the MEI in its
+  three forms, the page, the timemap, and the MIDI of 30 of them (Let It
+  Be's last rest is now three beats long, as its file says, and nothing
+  sounds after it). Every other output is the same, the pitch maps of all
+  2,785 scores among them; seeded ids are the same on a fresh thread
+  (2,785 of 2,785).
+- Every element's time against its ticks (each note, rest, chord and
+  space of the 2,765 MusicXML exports, by the engine's own rule): 177
+  differ in 31 scores on tb.15, none on tb.16.
+- Layers longer than their bar: 181 bars on tb.15, 146 on tb.16, none
+  new. Every element of those 146 bars carries its file's ticks and plays
+  exactly them: the files overfill them.
+- Ids: every note of tb.15's export keeps its id, in order, and every
+  other id is kept, but 39 surplus spaces of inexact gaps and 3 grace
+  rests; 33 rests become bar rests with their id. Nested tuplets: 11 in 4
+  scores on tb.15 (the fault of patch 51), none on tb.16.
+- By patch: 51 changes 7 scores (each tuplet holds only its bracket's
+  notes), 52 changes 9 (50 spaces given their values, 39 gone, 31 unseen
+  tuplets), 53 changes 16 (33 bar rests, 9 values written as they play,
+  3 grace rests gone); one score is changed by 52 and 53.
+- Load and MEI export of the corpus's ten largest files, best of three:
+  0.100 to 0.199 s against 0.102 to 0.198 s.
+- `tool/log_format_audit.py`: 0 calls.
+
+**Found by the gate**, and mended before the tag (a2aed60): a tuplet
+whose stop is on the first note of a chord closed that chord with it, and
+its other notes were lost (Como la Flor 5, Va Pensiero 5, El dia que me
+quieras 1, The Blue Side of Lonesome 1) or began a chord of their own (in
+We Are the World every later id moved); a beam that ends with its tuplet
+was closed by the tuplet, and the beam end then ended a beam span opened
+elsewhere on the staff (All By Myself, bars 39 to 40); an unseen tuplet
+inside an open one took only its own ratio (no score of the corpus has
+one).
+
+**Cases**: `test/native/test_tb16_timing_engine.cpp` in MuseNote's
+`corelib/verovio` (16, a small MusicXML score each, timed by the
+timemap's fractions; 10 give another result on tb.15, 6 must not change
+and do not); 13 deliberate breaks of the patches, each caught.
+
+**Upstream status**: not offered.
+
 ## Rules for this branch
 
 - A patch is carried only when the change cannot be made outside the
@@ -2847,6 +2962,16 @@ cut bars of the songs stay in its monorepo; the corpus check holds them.
   attributes on objects the importer built, and builds and removes none:
   no id of the corpus moved. MuseSync's pages of MusicXML gain the signs
   too.
+  Fifty-three since 2026-11-12, by the owner's decision of that day
+  (MuseNote's plan V3_2_0_25, "go ahead with W17 and W18", with W19 and
+  W20 folded in): patches 51 to 53 are in an importer and change what it
+  writes for 31 scores of the corpus by design, so that each plays its
+  file's ticks. Patch 51 builds every object as before and attaches two
+  in the order their ends say; patches 52 and 53 rewrite after the
+  import, keep the objects the import built, and delete only a gap's
+  surplus spaces and grace rests: no id of the corpus moved. Patches 51
+  and 52 were amended before the tag by what the gate found. Patch 52 is
+  199 lines, a walk like patch 50's.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
