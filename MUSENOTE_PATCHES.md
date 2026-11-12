@@ -61,6 +61,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 51 | 2026-11-12 | MusicXML: a tuplet holds only the notes its bracket covers (00483f1); amended the same day by: MusicXML: patches 51 and 52 as the corpus gate found them (a2aed60) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +84 / -1, then (with patch 52) +28 / -16 | A beam and a tuplet that start on one note nest by where each really ends in the note's own voice; a tuplet's stop closes what was opened inside it and goes on past it (a beam then ends with the tuplet, with a warning), after the note's own beam end, and the chord the note begins stays open. 7 scores of the corpus change: each tuplet holds only its bracket's notes, and the notes after it play their own time. The objects are built in the same order: no id moves | Not offered upstream |
 | 52 | 2026-11-12 | MusicXML: a gap, a hidden rest and an unbracketed tuplet note play their time (6650892); amended the same day by a2aed60 (above) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +199, then (with patch 51) +28 / -16 | A `<forward>` or hidden rest whose length is no sum of written values where it stands, and a note, chord or rest timed by a `<time-modification>` that no `<tuplet>` shows, is set in a tuplet that shows neither bracket nor number, holding written values that add up exactly; a gap that is a sum of written values is written as those values, counted in whole ticks. A walk after the import does it: the import's spaces keep their ids, the surplus ones go, the new tuplets and spaces take ids after every other. 9 scores: 50 spaces rewritten, 39 spaces gone, 31 unseen tuplets | Not offered upstream |
 | 53 | 2026-11-12 | MusicXML: a rest or note is written as its ticks play it (cb58fcb) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +91 / -1 | A rest that fills its bar but is typed as another length is the bar's rest (`<mRest>`, the same object and id), as the importer's own comment says; a note, chord or rest whose ticks make a written value (a power of two, up to two dots) and whose type says another is written that value; a grace rest is left out, with a warning. Not for a note in a tuplet, with a time-modification or of a tremolo. 16 scores: 33 rests become bar rests, 9 values are written as they play, 3 grace rests go | Not offered upstream |
+| 54 | 2026-11-12 | Tuplets: nested ratios multiply, every MusicXML tuplet level is read, ABC tuplets hold the notes ABC gives them (11e1428) | `src/layerelement.cpp`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, `src/ioabc.cpp`, `include/vrv/ioabc.h`, +333 / -89 | A tuplet inside a tuplet plays the product of the ratios (MEI's rule; the innermost alone was read): an MEI file, or a MusicXML file that numbers each level, with nested tuplets plays otherwise, and no score of the corpus has one. A nested MusicXML tuplet holds its own level's ratio (3 and 3 where the inner one said 9); two tuplets that start or stop on one note are both read. An ABC tuplet holds the notes ABC gives it: 13 of the 194 ABC files of the parity set change (180 tuplets built where 130 were, and the notes that went with the lost ones are back; their generated ids move). Every MusicXML, MEI, Humdrum and PAE output of the corpus is byte-identical | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2861,6 +2862,75 @@ and do not); 13 deliberate breaks of the patches, each caught.
 
 **Upstream status**: not offered.
 
+### 54. Every tuplet is timed and read as its file says, nested ones by MEI's rule (tb.17)
+
+MEI's rule for a tuplet inside a tuplet is that the ratios multiply. The
+engine timed a note by its innermost tuplet alone
+(`LayerElement::GetAlignmentDuration`): an MEI file written to MEI's
+rule, and a MusicXML file that writes each level's own numbers
+(`<tuplet-actual>`), played a triplet inside a triplet 3 in 2 where it is
+9 in 4 (bar 2 of the probe at beat 13/3). The MusicXML importer made up
+for it where a file gave only `<time-modification>`: the inner tuplet
+took the whole ratio, so the page showed "9" and the MEI meant another
+length to a reader that follows MEI. MuseNote's plan V3_2_0_26 (W21,
+the owner's choice of 2026-11-12: MEI's rule everywhere), with what the
+survey of the tuplet paths found beside it (W22, W25).
+
+- **Timing.** The ratios of every tuplet around an element multiply. One
+  tuplet gives its ratio as before.
+- **MusicXML levels.** A tuplet takes its own level's ratio: the numbers
+  its notation writes, else the time-modification of the note it times
+  over the levels open around it. Every `<tuplet type="start">` of a note
+  opens a level, outer first (the one that stops later; an outer level
+  with no numbers is timed by the first note it holds directly, and is 1
+  in 1 with no number shown when it holds none); every stop closes its
+  level by `number`, inner first, and a chord's later notes do not give a
+  stop again. One start and one stop a note were read: two stops on a
+  note left the outer level open over the notes after it (a half note at
+  2/3, bar 2 at beat 10/3), and of two starts the outer bracket was lost.
+  Patch 51's nesting of a beam and a tuplet takes the innermost level's
+  own stop; patch 52's gaps and unbracketed notes follow the rule inside
+  open levels (a time-modified note whose ratio is not the product of the
+  open levels gets an unseen tuplet of what is left over).
+- **ABC.** A tuplet takes the next notes ABC gives it, r of `(p:q:r` (p
+  was used: `(3:2:2` took a third note), wherever their beams begin and
+  end. Only a beamed group of exactly its notes stayed in a tuplet: a
+  triplet of quarters was no tuplet at all, a tuplet whose notes were in
+  two groups was deleted, with notes it already held, and one that ended
+  inside a group took the whole group. A rest and a space count; what
+  takes no time before its first note (a change of clef) stands before
+  it; a bar line or the next tuplet closes one that still waits, with a
+  warning. `(5`, `(7` and `(9` are in 3 in a compound meter (6/8, 9/8,
+  12/8) and in 2 otherwise, as ABC 2.1 has it (9 was always in 3, 5 and 7
+  always in 2).
+
+Not changed: the Humdrum export (`Tool_mei2hum::parseTuplet` already
+multiplies), the Humdrum and PAE readers (they never nest), the MIDI
+tremolo's stroke count (no timing ratio).
+
+**Measured** (tool/parity, tb.16 against tb.17):
+
+- 13 of 19,930 outputs differ, all MEI exports of ABC files of the
+  parity set: `tuplets.abc` and 12 of MuseNote's own ABC exports. tb.17
+  builds each of the 180 tuplets those files write; tb.16 built 130, and
+  dropped notes with some of the others (Star Wars: 93 notes, now 101).
+  Their generated ids move, as ABC ids are made in the order of building.
+- Every other output is byte-identical: all MusicXML, MEI, Humdrum, PAE
+  and GABC scores, in every form. No score of the corpus has a nested
+  tuplet or a note with two tuplet notations.
+- Seeded ids are the same on a fresh thread (2,785 of 2,785). MuseSync's
+  24 starter songs: 120 outputs, none differs.
+
+**Cases**: `test/native/test_tb17_tuplets_engine.cpp` in MuseNote's
+`corelib/verovio` (19: nested MEI, nested MusicXML with and without level
+numbers, two starts and two stops on a note, a chord that repeats a stop,
+a gap and an unbracketed level inside nested ones, six ABC cases; 14 give
+another result on tb.16, counting one subcase of tb.10's clef case that
+pinned "the tuplet is dropped" and now says it holds its note; 5 must not
+change and do not). 13 deliberate breaks, each caught.
+
+**Upstream status**: not offered.
+
 ## Rules for this branch
 
 - A patch is carried only when the change cannot be made outside the
@@ -2972,6 +3042,15 @@ and do not); 13 deliberate breaks of the patches, each caught.
   surplus spaces and grace rests: no id of the corpus moved. Patches 51
   and 52 were amended before the tag by what the gate found. Patch 52 is
   199 lines, a walk like patch 50's.
+  Fifty-four since 2026-11-12, by the owner's decision of that day
+  (MuseNote's plan V3_2_0_26, "MEI's rule everywhere"): patch 54 changes
+  how the engine times nested tuplets (in `layerelement.cpp`, the first
+  patch outside importers, exports and the MIDI path since patch 6), and
+  the MusicXML and ABC importers with it. No score of the corpus is
+  nested: no output of a MusicXML, MEI or Humdrum score changed, and no
+  id of one. It changes what the ABC importer builds for tuplets (13 of
+  the 194 ABC files of the parity set, their ids with them), declared in
+  its section.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
