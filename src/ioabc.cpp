@@ -17,7 +17,6 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <unordered_set>
 
 //----------------------------------------------------------------------------
 
@@ -92,7 +91,11 @@ ABCInput::ABCInput(Doc *doc) : Input(doc)
     m_layoutInformation = LAYOUT_ENCODED;
 }
 
-ABCInput::~ABCInput() {}
+ABCInput::~ABCInput()
+{
+    // a tuplet still waiting for its notes when the input ended is in no layer
+    if (m_containerElement.m_element && !m_containerElement.m_element->GetParent()) delete m_containerElement.m_element;
+}
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -313,62 +316,115 @@ void ABCInput::CalcUnitNoteLength()
     }
 }
 
+namespace {
+
+    // A note, chord, rest or space that takes time: what a tuplet counts
+    bool IsTimed(const LayerElement *element)
+    {
+        if (!element->Is({ NOTE, CHORD, REST, SPACE })) return false;
+        return !element->IsGraceNote();
+    }
+
+} // namespace
+
+void ABCInput::AddToLayerOrTuplet(LayerElement *element, int timed)
+{
+    // (what takes no time before the tuplet's first note, a change of clef, stands before the tuplet)
+    if (!m_containerElement.m_element || (ElementType::Tuplet != m_containerElement.m_type)
+        || (!timed && !m_containerElement.m_element->GetChildCount())) {
+        m_layer->AddChild(element);
+        return;
+    }
+    m_containerElement.m_element->AddChild(element);
+    m_containerElement.m_count -= timed;
+    if (m_containerElement.m_count <= 0) {
+        m_layer->AddChild(m_containerElement.m_element);
+        m_containerElement = {};
+    }
+}
+
+void ABCInput::CloseOpenTuplet()
+{
+    if (!m_containerElement.m_element) return;
+    // A tuplet holds the notes ABC gives it in its bar and before the next one starts: one these end first holds
+    // those it has
+    if (m_containerElement.m_element->GetChildCount()) {
+        LogWarning("ABC import: a tuplet ends with %d of its notes not there", m_containerElement.m_count);
+        m_layer->AddChild(m_containerElement.m_element);
+    }
+    else {
+        delete m_containerElement.m_element;
+    }
+    m_containerElement = {};
+}
+
 void ABCInput::AddLayerElement()
 {
     // exit if there is nothing to add
     if (!m_noteStack.size()) return;
-    // if just one note in the stack - add it do the layer directly
+    // A tuplet takes the next notes ABC gives it (p, or r of "(p:q:r"), wherever their beams begin and end: a note that
+    // is not beamed, a rest and a space go into it as a beamed group does. (Only a group of exactly its notes stayed in
+    // it: the others went to the layer, and the tuplet was deleted, or held a group's notes after its own)
     if (m_noteStack.size() == 1) {
-        if (m_containerElement.m_element && (ElementType::Tuplet == m_containerElement.m_type)) {
-            m_containerElement.m_element->AddChild(m_noteStack.back());
-            if (!--m_containerElement.m_count) {
-                m_layer->AddChild(m_containerElement.m_element);
-                m_containerElement = {};
-            }
-        }
-        else {
-            m_layer->AddChild(m_noteStack.back());
-        }
+        this->AddToLayerOrTuplet(m_noteStack.back(), IsTimed(m_noteStack.back()) ? 1 : 0);
         m_noteStack.clear();
         return;
     }
-    // otherwise we can have beam or tuplet (for now)
-    // Nothing to beam where no note is among them (two changes of clef in a row): they go to the layer as they are.
-    // (They were put into a beam first, and so had two parents.) A tuplet that waits for the rest of its notes is
-    // closed with those it has: it was deleted with them, and the line's lyrics then read a note that was gone
+    // Nothing to beam where no note is among them (two changes of clef in a row): they go as they are. (They were put
+    // into a beam first, and so had two parents)
     const bool hasNote = std::any_of(m_noteStack.begin(), m_noteStack.end(),
         [](LayerElement *element) { return element->Is(NOTE) || element->FindDescendantByType(NOTE); });
     if (!hasNote) {
-        if (m_containerElement.m_element && m_containerElement.m_element->GetChildCount()) {
-            m_layer->AddChild(m_containerElement.m_element);
-            m_containerElement.m_element = NULL;
-        }
-        for (LayerElement *element : m_noteStack) {
-            m_layer->AddChild(element);
-        }
+        for (LayerElement *element : m_noteStack) this->AddToLayerOrTuplet(element, 0);
+        m_noteStack.clear();
+        return;
+    }
+    Beam *beam = new Beam();
+    const bool inTuplet = m_containerElement.m_element && (ElementType::Tuplet == m_containerElement.m_type);
+    const int timed = static_cast<int>(std::count_if(m_noteStack.begin(), m_noteStack.end(), IsTimed));
+    if (!inTuplet || (timed <= m_containerElement.m_count)) {
+        for (LayerElement *element : m_noteStack) beam->AddChild(element);
+        this->AddToLayerOrTuplet(beam, timed);
+        m_noteStack.clear();
+        return;
+    }
+    // The tuplet ends inside the group: its notes up to its last one are in it, those after are not
+    size_t split = 0;
+    for (int counted = 0; split < m_noteStack.size() && counted < m_containerElement.m_count; ++split) {
+        if (IsTimed(m_noteStack.at(split))) ++counted;
+    }
+    Object *tuplet = m_containerElement.m_element;
+    if (!tuplet->GetChildCount()) {
+        // the group's beam holds the tuplet and the notes after it
+        for (size_t i = 0; i < split; ++i) tuplet->AddChild(m_noteStack.at(i));
+        beam->AddChild(tuplet);
+        for (size_t i = split; i < m_noteStack.size(); ++i) beam->AddChild(m_noteStack.at(i));
+        m_layer->AddChild(beam);
+        m_containerElement = {};
     }
     else {
-        Beam *beam = new Beam();
-        // add stacked notes to the current element
-        for (LayerElement *element : m_noteStack) {
-            beam->AddChild(element);
+        // the tuplet began before the group: the beam holds the part in it when that is two or more, else the part
+        // after it, and a part that is one goes as it is
+        const bool beamInTuplet = (split >= 2);
+        if (beamInTuplet) {
+            for (size_t i = 0; i < split; ++i) beam->AddChild(m_noteStack.at(i));
+            tuplet->AddChild(beam);
         }
-        LayerElement *element = NULL;
-        if (m_containerElement.m_element && (ElementType::Tuplet == m_containerElement.m_type)) {
-            element = m_containerElement.m_element;
-            element->AddChild(beam);
-            m_containerElement.m_element = NULL;
-        }
-        // otherwise default to it being beam
         else {
-            element = beam;
+            for (size_t i = 0; i < split; ++i) tuplet->AddChild(m_noteStack.at(i));
         }
-        m_layer->AddChild(element);
+        m_layer->AddChild(tuplet);
+        m_containerElement = {};
+        const size_t after = m_noteStack.size() - split;
+        if (!beamInTuplet && (after >= 2)) {
+            for (size_t i = split; i < m_noteStack.size(); ++i) beam->AddChild(m_noteStack.at(i));
+            m_layer->AddChild(beam);
+        }
+        else {
+            for (size_t i = split; i < m_noteStack.size(); ++i) m_layer->AddChild(m_noteStack.at(i));
+            if (!beamInTuplet) delete beam;
+        }
     }
-    // clean-up leftover data, if any
-    if (m_containerElement.m_element) delete m_containerElement.m_element;
-
-    m_containerElement = {};
     m_noteStack.clear();
 }
 
@@ -426,17 +482,32 @@ int ABCInput::ParseTuplet(const std::string &musicCode, int index)
         LogWarning("ABC import: '(%s' is no tuplet, its notes are read as written", tupletStr.c_str());
         return last;
     }
-    Tuplet *tuplet = new Tuplet();
-    // List of tuplets with default base of 3
-    const std::unordered_set<int> threeBase = { 2, 4, 8, 9 };
-    if (!tupletNumbase) {
-        tupletNumbase = threeBase.contains(tupletNum) ? 3 : 2;
+    // The notes it holds, _:_:r (p when not written)
+    int tupletCount = tupletNum;
+    const size_t firstColon = tupletStr.find(':');
+    const size_t secondColon = (firstColon == std::string::npos) ? std::string::npos : tupletStr.find(':', firstColon + 1);
+    if ((secondColon != std::string::npos) && (secondColon + 1 < tupletStr.size())) {
+        const int count = TupletNumber(tupletStr.substr(secondColon + 1));
+        if (count > 0) tupletCount = count;
     }
-    // Get number of elements supposed to be in the tuplet _:_:9
-    // Ignore this for the time being
+    this->CloseOpenTuplet();
+    Tuplet *tuplet = new Tuplet();
+    // The time when none is written, as ABC 2.1 has it: 2, 4 and 8 in 3, 3 and 6 in 2, any other in 3 in a compound
+    // meter (6/8, 9/8, 12/8) and in 2 otherwise (9 was in 3 always, 5 and 7 in 2 always)
+    if (!tupletNumbase) {
+        const bool compound = (m_meterCount > 3) && ((m_meterCount % 3) == 0);
+        switch (tupletNum) {
+            case 2:
+            case 4:
+            case 8: tupletNumbase = 3; break;
+            case 3:
+            case 6: tupletNumbase = 2; break;
+            default: tupletNumbase = compound ? 3 : 2; break;
+        }
+    }
     tuplet->SetNum(tupletNum);
     tuplet->SetNumbase(tupletNumbase);
-    m_containerElement = { ElementType::Tuplet, tuplet, tupletNum };
+    m_containerElement = { ElementType::Tuplet, tuplet, tupletCount };
 
     return last;
 }
@@ -892,14 +963,17 @@ void ABCInput::ParseUnitNoteLength(const std::string &unitNoteLength)
 void ABCInput::ParseMeter(const std::string &meterString)
 {
     m_meter = new MeterSig();
+    m_meterCount = 0;
     if (meterString.find('C') != std::string::npos) {
         if (meterString[meterString.find('C') + 1] == '|') {
             m_meter->SetSym(METERSIGN_cut);
+            m_meterCount = 2;
             m_meter->SetCount({ { 2 }, MeterCountSign::None });
             m_meter->SetUnit(2);
         }
         else {
             m_meter->SetSym(METERSIGN_common);
+            m_meterCount = 4;
             m_meter->SetCount({ { 4 }, MeterCountSign::None });
             m_meter->SetUnit(4);
         }
@@ -909,7 +983,8 @@ void ABCInput::ParseMeter(const std::string &meterString)
         if (meterCount.front() == '(' && meterCount.back() == ')')
             meterCount = meterCount.substr(1, meterCount.length() - 1);
         // this is a little "hack", until libMEI is fixed
-        m_meter->SetCount({ { atoi(meterCount.c_str()) }, MeterCountSign::None });
+        m_meterCount = atoi(meterCount.c_str());
+        m_meter->SetCount({ { m_meterCount }, MeterCountSign::None });
         // (a unit below zero, as a number too long for an int comes out, is none: the MIDI writer never came back
         // from working out which power of two it is)
         m_meter->SetUnit(std::max(0, atoi(&meterString[meterString.find('/') + 1])));
@@ -1490,9 +1565,9 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
         else if (chord && (i >= 1) && musicCode.at(i) == ']' && musicCode.at(i - 1) != '|') {
             // end chord
             if (chord->GetDur() < DURATION_8) {
-                // if chord cannot be beamed, write it directly to the layer
+                // if chord cannot be beamed, write it directly to the layer (or the tuplet it is in)
                 if (m_noteStack.size() > 0) AddLayerElement();
-                m_layer->AddChild(chord);
+                this->AddToLayerOrTuplet(chord, chord->IsGraceNote() ? 0 : 1);
                 m_lineNoteArray.push_back(chord);
             }
             else {
@@ -1684,9 +1759,9 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
                 if (num == 0) note->SetStemVisible(BOOLEAN_false);
                 note->SetDur(meiDur);
                 if (note->GetDur() < DURATION_8) {
-                    // if note cannot be beamed, write it directly to the layer
+                    // if note cannot be beamed, write it directly to the layer (or the tuplet it is in)
                     if (m_noteStack.size() > 0) AddLayerElement();
-                    m_layer->AddChild(note);
+                    this->AddToLayerOrTuplet(note, note->IsGraceNote() ? 0 : 1);
                     m_lineNoteArray.push_back(note);
                 }
                 else {
@@ -1771,7 +1846,7 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
 
             // spaces cannot be beamed
             this->AddLayerElement();
-            m_layer->AddChild(space);
+            this->AddToLayerOrTuplet(space, 1);
         }
 
         // padding
@@ -1855,7 +1930,7 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
 
             // rests cannot be beamed
             this->AddLayerElement();
-            m_layer->AddChild(rest);
+            this->AddToLayerOrTuplet(rest, 1);
         }
 
         // multi-measure rests
@@ -1914,6 +1989,7 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
         else if ((musicCode.at(i) == '|') || IsColonPair(musicCode, i)) {
             // add stacked elements to layer
             this->AddLayerElement();
+            this->CloseOpenTuplet();
             // "::" and ":|:" end one repeat and start the next, as ":||:" does (ABC 2.1, 4.8). The start was dropped
             // from ":|:", and "::" was no bar line at all: what stood on either side of it was one measure
             const bool startsNext = (musicCode.at(i) == ':')

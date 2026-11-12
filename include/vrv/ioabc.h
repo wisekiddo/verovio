@@ -63,6 +63,10 @@ private:
     void CalcUnitNoteLength();
     void AddAnnot(const std::string &remark);
     void AddLayerElement();
+    /** Puts [element], with [timed] notes in it, into the tuplet that waits for its notes, or the layer */
+    void AddToLayerOrTuplet(LayerElement *element, int timed);
+    /** Closes the tuplet that waits for its notes with those it has (a bar line, or the next tuplet) */
+    void CloseOpenTuplet();
     void AddTie();
     void StartSlur();
     void EndSlur();
@@ -114,6 +118,8 @@ private:
     Clef *m_clef = NULL;
     KeySig *m_key = NULL;
     MeterSig *m_meter = NULL;
+    // The count of the meter in force (0 for none): a tuplet's default time depends on it
+    int m_meterCount = 0;
     Layer *m_layer = NULL;
 
     data_DURATION m_durDefault;

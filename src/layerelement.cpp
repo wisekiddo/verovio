@@ -699,11 +699,16 @@ Fraction LayerElement::GetAlignmentDuration(
             ClassIdsComparison ids({ CHORD, NOTE, REST, SPACE });
             tuplet->FindAllDescendantsByComparison(&objects, &ids);
             if (objects.size() > 0) {
-                num = tuplet->GetNum();
-                numbase = tuplet->GetNumbase();
-                // Adjust VRV_UNSET and 0 - which is not valid in MEI anyway
-                num = std::max(1, num);
-                numbase = std::max(1, numbase);
+                // The ratios of every tuplet around the element multiply, as MEI has it: a triplet inside a triplet
+                // is 9 in the time of 4 (the innermost alone timed it 3 in 2). One tuplet gives its ratio as before
+                num = 1;
+                numbase = 1;
+                for (const Object *level = tuplet; level; level = level->GetFirstAncestor(TUPLET, MAX_TUPLET_DEPTH)) {
+                    const Tuplet *around = vrv_cast<const Tuplet *>(level);
+                    // Adjust VRV_UNSET and 0 - which is not valid in MEI anyway
+                    num *= std::max(1, around->GetNum());
+                    numbase *= std::max(1, around->GetNumbase());
+                }
             }
         }
         const DurationInterface *duration = this->GetDurationInterface();

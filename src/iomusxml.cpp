@@ -570,10 +570,38 @@ bool MusicXmlInput::IsInStack(ClassId classId, Layer *layer)
             [classId](LayerElement *element) { return element->Is(classId); }));
 }
 
-void MusicXmlInput::CloseTuplet(Layer *layer, const std::string &measureNum)
+int MusicXmlInput::DepthOfTuplet(Layer *layer, const std::string &number) const
+{
+    const std::vector<LayerElement *> &stack = m_elementStackMap.at(layer);
+    for (int i = static_cast<int>(stack.size()) - 1; i >= 0; --i) {
+        if (!stack.at(i)->Is(TUPLET)) continue;
+        const auto level = m_tupletNumbers.find(stack.at(i));
+        if ((level != m_tupletNumbers.end()) && (level->second == number)) return i;
+    }
+    return -1;
+}
+
+Fraction MusicXmlInput::OpenTupletRatio(Layer *layer) const
+{
+    Fraction ratio(1);
+    for (const LayerElement *open : m_elementStackMap.at(layer)) {
+        if (!open->Is(TUPLET)) continue;
+        const Tuplet *tuplet = vrv_cast<const Tuplet *>(open);
+        if ((tuplet->GetNum() > 0) && (tuplet->GetNumbase() > 0)) {
+            ratio = ratio * Fraction(tuplet->GetNum(), tuplet->GetNumbase());
+        }
+    }
+    return ratio;
+}
+
+void MusicXmlInput::CloseTuplet(Layer *layer, const std::string &measureNum, const std::string &number)
 {
     std::vector<LayerElement *> &stack = m_elementStackMap.at(layer);
-    const auto tuplet = std::find_if(stack.rbegin(), stack.rend(), [](LayerElement *e) { return e->Is(TUPLET); });
+    // The level the stop names; a stop whose number no open level has (a file that numbers it otherwise) closes the
+    // innermost one, as every stop did
+    const int depth = this->DepthOfTuplet(layer, number);
+    auto tuplet = (depth >= 0) ? stack.rbegin() + (static_cast<int>(stack.size()) - 1 - depth)
+                               : std::find_if(stack.rbegin(), stack.rend(), [](LayerElement *e) { return e->Is(TUPLET); });
     if (tuplet == stack.rend()) return;
     // The chord this note begins stays open: its other notes follow, and its own last note closes it
     LayerElement *chord = (stack.back()->Is(CHORD) || stack.back()->Is(TABGRP)) ? stack.back() : nullptr;
@@ -595,10 +623,84 @@ namespace {
         return voice ? std::string(voice.text().as_string()) : std::string("1");
     }
 
+    // The level a <tuplet> notation names ("1" when it names none).
+    std::string TupletNumberOf(const pugi::xml_node &notation)
+    {
+        const pugi::xml_attribute number = notation.attribute("number");
+        return number ? std::string(number.as_string()) : std::string("1");
+    }
+
+    constexpr int stopsPastTheMeasure = std::numeric_limits<int>::max();
+
+    // Where the level [start] opens on [note] stops: the index in [measureNodes] of the first note of its voice, from
+    // [note] on, with a stop of its number (else, a file that numbers its stop otherwise, its first stop)
+    int StopIndexOf(
+        const pugi::xml_node &note, const pugi::xml_node &start, const std::vector<pugi::xml_node> &measureNodes)
+    {
+        const std::string number = TupletNumberOf(start);
+        const std::string voice = VoiceOfNote(note);
+        const auto from = std::find(measureNodes.begin(), measureNodes.end(), note);
+        int firstStop = stopsPastTheMeasure;
+        for (auto it = from; it != measureNodes.end(); ++it) {
+            if ((std::string(it->name()) != "note") || (VoiceOfNote(*it) != voice)) continue;
+            const int index = static_cast<int>(std::distance(measureNodes.begin(), it));
+            for (const pugi::xpath_node &stop : it->select_nodes("notations/tuplet[@type='stop']")) {
+                if (TupletNumberOf(stop.node()) == number) return index;
+                firstStop = std::min(firstStop, index);
+            }
+        }
+        return firstStop;
+    }
+
+    // The first note of [note]'s voice a level holds directly: after the level inside it stops ([innerStop]) and up
+    // to its own stop ([ownStop]), in no level opened after [note]; none when there is no such note
+    pugi::xml_node FirstNoteHeldDirectly(
+        const pugi::xml_node &note, int innerStop, int ownStop, const std::vector<pugi::xml_node> &measureNodes)
+    {
+        if (innerStop == stopsPastTheMeasure) return pugi::xml_node();
+        const std::string voice = VoiceOfNote(note);
+        std::set<std::string> inside;
+        for (int i = innerStop + 1; (i <= ownStop) && (i < static_cast<int>(measureNodes.size())); ++i) {
+            const pugi::xml_node &other = measureNodes.at(i);
+            if ((std::string(other.name()) != "note") || (VoiceOfNote(other) != voice) || other.child("chord")
+                || other.child("grace")) {
+                continue;
+            }
+            for (const pugi::xpath_node &start : other.select_nodes("notations/tuplet[@type='start']")) {
+                inside.insert(TupletNumberOf(start.node()));
+            }
+            if (inside.empty()) return other;
+            for (const pugi::xpath_node &stop : other.select_nodes("notations/tuplet[@type='stop']")) {
+                inside.erase(TupletNumberOf(stop.node()));
+            }
+        }
+        return pugi::xml_node();
+    }
+
 } // namespace
 
-void MusicXmlInput::NestBeamAndTupletByTheirEnds(
-    const pugi::xml_node &node, Layer *layer, const std::vector<pugi::xml_node> &measureNodes)
+pugi::xml_node MusicXmlInput::OpenOuterTupletLevels(
+    const pugi::xml_node &node, Layer *layer, bool isChord, const std::vector<pugi::xml_node> &measureNodes)
+{
+    std::vector<std::pair<int, pugi::xml_node>> levels; // where each one stops, its start
+    for (const pugi::xpath_node &start : node.select_nodes("notations/tuplet[@type='start']")) {
+        levels.push_back({ StopIndexOf(node, start.node(), measureNodes), start.node() });
+    }
+    if (levels.empty()) return pugi::xml_node();
+    // Outer first: the level that stops later holds the others; on one stop, the one written first
+    std::stable_sort(levels.begin(), levels.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    if (!isChord) {
+        for (size_t i = 0; i + 1 < levels.size(); ++i) {
+            const pugi::xml_node timedBy
+                = FirstNoteHeldDirectly(node, levels.at(i + 1).first, levels.at(i).first, measureNodes);
+            this->ReadMusicXmlTupletStart(levels.at(i).second, layer, timedBy);
+        }
+    }
+    return levels.back().second;
+}
+
+void MusicXmlInput::NestBeamAndTupletByTheirEnds(const pugi::xml_node &node, const pugi::xml_node &tupletStart,
+    Layer *layer, const std::vector<pugi::xml_node> &measureNodes)
 {
     std::vector<LayerElement *> &stack = m_elementStackMap.at(layer);
     if (stack.size() < 2) return;
@@ -612,18 +714,16 @@ void MusicXmlInput::NestBeamAndTupletByTheirEnds(
     const auto start = std::find(measureNodes.begin(), measureNodes.end(), node);
     if (start == measureNodes.end()) return;
     const std::string voice = VoiceOfNote(node);
-    constexpr int noEnd = std::numeric_limits<int>::max();
-    int beamEnd = noEnd;
-    int tupletEnd = noEnd;
+    int beamEnd = stopsPastTheMeasure;
     for (auto it = start; it != measureNodes.end(); ++it) {
         if ((std::string(it->name()) != "note") || (VoiceOfNote(*it) != voice)) continue;
-        const int index = static_cast<int>(std::distance(measureNodes.begin(), it));
-        if ((beamEnd == noEnd) && (it != start) && it->select_node("beam[text()='end']")
-            && !it->select_node("beam[text()='continue']")) {
-            beamEnd = index;
+        if ((it != start) && it->select_node("beam[text()='end']") && !it->select_node("beam[text()='continue']")) {
+            beamEnd = static_cast<int>(std::distance(measureNodes.begin(), it));
+            break;
         }
-        if ((tupletEnd == noEnd) && it->select_node("notations/tuplet[@type='stop']")) tupletEnd = index;
     }
+    // The tuplet's own stop: its number's, the innermost level that starts on the note being the one built here
+    const int tupletEnd = StopIndexOf(node, tupletStart, measureNodes);
     // The longer one goes outside; on a tie (both end on one note, or neither in the measure) the beam does, as
     // the import has always nested them then
     const bool beamOutside = (beamEnd >= tupletEnd);
@@ -696,14 +796,7 @@ void MusicXmlInput::FillSpace(Layer *layer, int dur, bool withClefs, int offset)
     // fall short of it, each step cut to whole ticks. And spaces that went into an open tuplet play at its ratio. Such
     // a gap is written again, exactly, after the import.
     if ((ticks > 0) && (m_ppq > 0)) {
-        Fraction scale(1);
-        for (LayerElement *open : m_elementStackMap.at(layer)) {
-            if (!open->Is(TUPLET)) continue;
-            const Tuplet *tuplet = vrv_cast<Tuplet *>(open);
-            if ((tuplet->GetNum() > 0) && (tuplet->GetNumbase() > 0)) {
-                scale = scale * Fraction(tuplet->GetNum(), tuplet->GetNumbase());
-            }
-        }
+        const Fraction scale = this->OpenTupletRatio(layer);
         const int denominator = Fraction(ticks, m_ppq).GetDenominator();
         if (((denominator & (denominator - 1)) != 0) || (scale != Fraction(1))) {
             m_inexactGaps.push_back({ spaces, ticks, m_ppq, scale });
@@ -3331,14 +3424,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                 // A hidden rest is time the page does not show, as a gap is: when what is written for it, in the
                 // tuplets open around it, does not play its ticks, it is written again after the import
                 if (!node.child("time-modification") && (duration > 0) && (m_ppq > 0)) {
-                    Fraction scale(1);
-                    for (LayerElement *open : m_elementStackMap.at(layer)) {
-                        if (!open->Is(TUPLET)) continue;
-                        const Tuplet *tuplet = vrv_cast<Tuplet *>(open);
-                        if ((tuplet->GetNum() > 0) && (tuplet->GetNumbase() > 0)) {
-                            scale = scale * Fraction(tuplet->GetNum(), tuplet->GetNumbase());
-                        }
-                    }
+                    const Fraction scale = this->OpenTupletRatio(layer);
                     const Fraction written = Fraction(ConvertTypeToDur(typeStr))
                         * Fraction((1 << (dots + 1)) - 1, 1 << dots);
                     if (written != Fraction(duration, 4 * m_ppq) * scale) {
@@ -4313,11 +4399,18 @@ void MusicXmlInput::ReadMusicXmlNote(
         }
     }
 
-    // tuplet end, after the note's own beam end: what the tuplet closes is only what goes on past it
-    pugi::xpath_node tupletEnd = node.select_node("notations/tuplet[@type='stop']");
-    if (tupletEnd) {
-        this->CloseTuplet(layer, measureNum);
+    // tuplet ends, after the note's own beam end: what a tuplet closes is only what goes on past it. Each stop closes
+    // its level, the inner ones first; one a chord's earlier note gave is not given again
+    if (!isChord) m_chordTupletStops.clear();
+    std::vector<std::pair<int, std::string>> tupletStops; // the depth of the level each stop names, its number
+    for (const pugi::xpath_node &stop : node.select_nodes("notations/tuplet[@type='stop']")) {
+        const std::string number = TupletNumberOf(stop.node());
+        if (!m_chordTupletStops.insert(number).second) continue;
+        tupletStops.push_back({ this->DepthOfTuplet(layer, number), number });
     }
+    std::stable_sort(tupletStops.begin(), tupletStops.end(),
+        [](const auto &a, const auto &b) { return a.first > b.first; });
+    for (const auto &stop : tupletStops) this->CloseTuplet(layer, measureNum, stop.second);
 
     // add StartIDs to dir, dynam, and pedal
     if (!m_dirStack.empty()) {
@@ -4521,7 +4614,6 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
 bool MusicXmlInput::ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord)
 {
     pugi::xpath_node beamStart = node.select_node("beam[@number='1' and text()='begin']");
-    pugi::xpath_node tupletStart = node.select_node("notations/tuplet[@type='start']");
     pugi::xpath_node currentMeasure = node.select_node("ancestor::measure");
 
     pugi::xml_node beamEnd = node.select_node("./following-sibling::note[beam[@number='1' and text()='end']]").node();
@@ -4529,6 +4621,9 @@ bool MusicXmlInput::ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Laye
 
     const auto measureNodeChildren = currentMeasure.node().children();
     std::vector<pugi::xml_node> currentMeasureNodes(measureNodeChildren.begin(), measureNodeChildren.end());
+    // Every tuplet that starts on the note: the levels around the innermost open here, outer first; the innermost
+    // goes through what follows, as one tuplet always has
+    const pugi::xml_node tupletStart = this->OpenOuterTupletLevels(node, layer, isChord, currentMeasureNodes);
     // in case note is a start of both beam and tuplet - need to figure which one is longer
     if (beamStart && tupletStart) {
         const auto beamEndIterator = std::find(currentMeasureNodes.begin(), currentMeasureNodes.end(), beamEnd);
@@ -4538,16 +4633,16 @@ bool MusicXmlInput::ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Laye
         // Negative number - beam ends first, positive - tuplet, zero - both are of the same length
         const int distance = static_cast<int>(std::distance(beamEndIterator, tupletEndIterator));
         if (distance > 0) {
-            if (!isChord) ReadMusicXmlTupletStart(node, tupletStart.node(), layer);
+            if (!isChord) this->ReadMusicXmlTupletStart(tupletStart, layer, node);
             this->ReadMusicXmlBeamStart(node, beamStart.node(), layer);
         }
         else {
             this->ReadMusicXmlBeamStart(node, beamStart.node(), layer);
-            if (!isChord) ReadMusicXmlTupletStart(node, tupletStart.node(), layer);
+            if (!isChord) this->ReadMusicXmlTupletStart(tupletStart, layer, node);
         }
         // The order above reads the first beam-1 "end" of any voice, which a file whose beam 1 ends while beam 2 goes
         // on puts before the tuplet's stop: the beam went inside the tuplet and kept it open over the notes after it.
-        this->NestBeamAndTupletByTheirEnds(node, layer, currentMeasureNodes);
+        this->NestBeamAndTupletByTheirEnds(node, tupletStart, layer, currentMeasureNodes);
     }
     // If note is a start of the beam only - check if there is a tuplet starting/ending in the span of
     // the whole duration of this beam
@@ -4591,29 +4686,46 @@ bool MusicXmlInput::ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Laye
     }
     // no special logic needed if we have just tupletStart - just read it as is
     else if (tupletStart) {
-        if (!isChord) ReadMusicXmlTupletStart(node, tupletStart.node(), layer);
+        if (!isChord) this->ReadMusicXmlTupletStart(tupletStart, layer, node);
     }
 
     return true;
 }
 
-void MusicXmlInput::ReadMusicXmlTupletStart(const pugi::xml_node &node, const pugi::xml_node &tupletStart, Layer *layer)
+void MusicXmlInput::ReadMusicXmlTupletStart(
+    const pugi::xml_node &tupletStart, Layer *layer, const pugi::xml_node &timedBy)
 {
     // TODO <tuplet> does not support child <tabGrp>
 
     if (!tupletStart) return;
 
+    // The ratio of this level alone, as MEI's nested tuplets hold it (their ratios multiply): the numbers the file
+    // writes for it, else the time-modification of the note it times, which is the whole ratio, over the levels open
+    // around it. An outer level with no numbers that holds no note of its own (all of it is inside a level that
+    // starts on the same note) is 1 in 1 and shows no number: the levels inside it hold the time
+    const Fraction around = this->OpenTupletRatio(layer);
     Tuplet *tuplet = new Tuplet();
     this->AddLayerElement(layer, tuplet);
     m_elementStackMap.at(layer).push_back(tuplet);
-    int num = node.select_node("time-modification/actual-notes").node().text().as_int();
-    int numbase = node.select_node("time-modification/normal-notes").node().text().as_int();
-    if (tupletStart.first_child()) {
-        num = tupletStart.select_node("tuplet-actual/tuplet-number").node().text().as_int();
-        numbase = tupletStart.select_node("tuplet-normal/tuplet-number").node().text().as_int();
+    m_tupletNumbers[tuplet] = TupletNumberOf(tupletStart);
+    int num = tupletStart.select_node("tuplet-actual/tuplet-number").node().text().as_int();
+    int numbase = tupletStart.select_node("tuplet-normal/tuplet-number").node().text().as_int();
+    if ((num <= 0) || (numbase <= 0)) {
+        num = timedBy.select_node("time-modification/actual-notes").node().text().as_int();
+        numbase = timedBy.select_node("time-modification/normal-notes").node().text().as_int();
+        if (!timedBy) {
+            num = 1;
+            numbase = 1;
+            tuplet->SetNumVisible(BOOLEAN_false);
+        }
+        else if ((num > 0) && (numbase > 0) && (around != Fraction(1))) {
+            const Fraction own = Fraction(num, numbase) / around;
+            num = own.GetNumerator();
+            numbase = own.GetDenominator();
+        }
     }
-    if (num) tuplet->SetNum(num);
-    if (numbase) tuplet->SetNumbase(numbase);
+    if (num > 0) tuplet->SetNum(num);
+    if (numbase > 0) tuplet->SetNumbase(numbase);
     tuplet->SetNumPlace(tuplet->AttTupletVis::StrToStaffrelBasic(tupletStart.attribute("placement").as_string()));
     tuplet->SetBracketPlace(tuplet->AttTupletVis::StrToStaffrelBasic(tupletStart.attribute("placement").as_string()));
     tuplet->SetNumFormat(ConvertTupletNumberValue(tupletStart.attribute("show-number").as_string()));
@@ -5813,10 +5925,16 @@ void MusicXmlInput::KeepUnbracketedRatio(const pugi::xml_node &node, Layer *laye
     if (!timeModification) return;
     const int num = timeModification.child("actual-notes").text().as_int();
     const int numbase = timeModification.child("normal-notes").text().as_int();
-    if ((num <= 0) || (numbase <= 0) || (num == numbase)) return;
-    // An open tuplet bracket gives its notes their ratio
-    if (this->IsInStack(TUPLET, layer)) return;
-    m_unbracketedRatios.push_back({ element, num, numbase });
+    if ((num <= 0) || (numbase <= 0)) return;
+    if (!this->IsInStack(TUPLET, layer)) {
+        if (num != numbase) m_unbracketedRatios.push_back({ element, num, numbase });
+        return;
+    }
+    // Open tuplets give their notes the product of their ratios (MEI's rule); a time-modification that is not that
+    // product is a level no bracket shows, the ratio left over
+    const Fraction leftOver = Fraction(num, numbase) / this->OpenTupletRatio(layer);
+    if (leftOver == Fraction(1)) return;
+    m_unbracketedRatios.push_back({ element, leftOver.GetNumerator(), leftOver.GetDenominator() });
 }
 
 namespace {
@@ -5852,24 +5970,18 @@ void MusicXmlInput::WriteExactTime()
             continue;
         }
         // Its time, in whole notes (the engine's measure of a written value). Where it stands, what is written for it
-        // is that time times the open tuplets' num / numbase; when that is a sum of written values, they are written.
-        // Else they go into a tuplet that shows nothing, and that tuplet holds the whole ratio: the engine times a
-        // note by its innermost tuplet alone, as the import's own nested tuplets take the note's time-modification,
-        // the whole ratio. The time is p / (2^k r), r odd: r in the time of the largest power of two below r, and
-        // what is written inside is the time times r over it.
+        // is that time times the open tuplets' num / numbase (their ratios multiply, MEI's rule); when that is a sum
+        // of written values, they are written. Else they go into a tuplet that shows nothing, a level of its own
+        // inside the open ones: what is written is p / (2^k r), r odd, so r in the time of the largest power of two
+        // below r, and what is written inside is that times r over it.
         const Fraction time(gap.m_ticks, 4 * gap.m_ppq);
         Fraction left = time * gap.m_scale;
-        Fraction soundsPerWritten = Fraction(1) / gap.m_scale;
         int num = left.GetDenominator();
         while ((num % 2) == 0) num /= 2;
         int numbase = 1;
-        if (num > 1) {
-            num = time.GetDenominator();
-            while ((num % 2) == 0) num /= 2;
-            while (numbase * 2 < num) numbase *= 2;
-            left = time * Fraction(num) / Fraction(numbase);
-            soundsPerWritten = Fraction(numbase) / Fraction(num);
-        }
+        while (numbase * 2 < num) numbase *= 2;
+        left = left * Fraction(num) / Fraction(numbase);
+        const Fraction soundsPerWritten = Fraction(numbase) / Fraction(num) / gap.m_scale;
         std::vector<data_DURATION> pieces;
         while (left > Fraction(0)) {
             // the longest written value that fits, a half at most, as the import writes spaces

@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <queue>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -395,20 +396,35 @@ private:
     void ReadMusicXmlPrint(pugi::xml_node, Section *section);
     void ReadMusicXmlSound(pugi::xml_node, Measure *measure, Section *section);
     bool ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord);
-    void ReadMusicXmlTupletStart(const pugi::xml_node &node, const pugi::xml_node &tupletStart, Layer *layer);
+    /**
+     * Opens a tuplet level for [tupletStart] with its own ratio (MEI's rule: the ratios of nested tuplets multiply):
+     * the numbers the notation writes, else [timedBy]'s time-modification over the levels open around it.
+     */
+    void ReadMusicXmlTupletStart(const pugi::xml_node &tupletStart, Layer *layer, const pugi::xml_node &timedBy);
+    /**
+     * Every tuplet that starts on [node] is a level: those around the innermost open here, outer first (the one that
+     * stops later; an outer one with no numbers is timed by the first note it holds directly). Returns the innermost
+     * start, which the caller opens as one tuplet always was.
+     */
+    pugi::xml_node OpenOuterTupletLevels(
+        const pugi::xml_node &node, Layer *layer, bool isChord, const std::vector<pugi::xml_node> &measureNodes);
+    /** The index on the layer's stack of the innermost open tuplet of [number], or -1 */
+    int DepthOfTuplet(Layer *layer, const std::string &number) const;
+    /** The product of the ratios (num / numbase) of the tuplets open in [layer] */
+    Fraction OpenTupletRatio(Layer *layer) const;
     /**
      * A beam and a tuplet that start on one note nest by where each really ends in the note's voice: the beam on the
      * note the import closes it on (an "end" with no "continue"), the tuplet on its stop. The two have just been
      * built, empty, in the order the import has always built them (their ids); they swap when the other nesting is
      * the right one.
      */
-    void NestBeamAndTupletByTheirEnds(
-        const pugi::xml_node &node, Layer *layer, const std::vector<pugi::xml_node> &measureNodes);
+    void NestBeamAndTupletByTheirEnds(const pugi::xml_node &node, const pugi::xml_node &tupletStart, Layer *layer,
+        const std::vector<pugi::xml_node> &measureNodes);
     /**
-     * Closes the last tuplet open in the layer, with what was opened inside it: a tuplet ends on its stop and must not
-     * take in the notes after it.
+     * Closes the open tuplet of [number] (the innermost one when none has it), with what was opened inside it: a
+     * tuplet ends on its stop and must not take in the notes after it.
      */
-    void CloseTuplet(Layer *layer, const std::string &measureNum);
+    void CloseTuplet(Layer *layer, const std::string &measureNum, const std::string &number);
     void ReadMusicXmlBeamStart(const pugi::xml_node &node, const pugi::xml_node &beamStart, Layer *layer);
     void ReadMusicXMLMeterSig(const pugi::xml_node &node, Object *parent);
     void ReadMusicXmlTies(const pugi::xml_node &node, Layer *layer, Note *note, const std::string &measureNum);
@@ -722,6 +738,10 @@ private:
     std::vector<musicxml::UnbracketedRatio> m_unbracketedRatios;
     /** Grace rests: no time in the file, and MEI has no rest without one; left out after the import */
     std::vector<LayerElement *> m_graceRests;
+    /** The number each tuplet level was opened with, which its stop names */
+    std::map<const LayerElement *, std::string> m_tupletNumbers;
+    /** The tuplet stops the chord being read has given (its later notes may write them again) */
+    std::set<std::string> m_chordTupletStops;
     /* To remember layer of last element (note) to handle chords */
     Layer *m_prevLayer = NULL;
     /* To remember current layer to properly handle layers/staves/cross-staff elements */
