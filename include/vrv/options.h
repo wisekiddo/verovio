@@ -669,6 +669,7 @@ public:
     OptionBool m_preserveAnalyticalMarkup;
     OptionBool m_removeIds;
     OptionBool m_scaleToPageSize;
+    OptionBool m_staffLabelsHidden;
     OptionBool m_setLocale;
     OptionBool m_showRuntime;
     OptionBool m_shrinkToFit;
@@ -858,6 +859,7 @@ public:
     OptionGrp m_midi;
 
     OptionBool m_midiNoCue;
+    OptionArray m_midiStaffChannels;
     OptionDbl m_midiTempoAdjustment;
     OptionString m_midiTuningFile;
 

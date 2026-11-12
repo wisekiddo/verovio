@@ -546,6 +546,17 @@ void Doc::ExportMIDI(smf::MidiFile *midiFile, std::map<std::string, int> *notePi
                         LogWarning("A high MIDI track number was assigned to staff %d", staffDef->GetN());
                     }
                 }
+            }
+            // The channel a caller gives the staff ("staff:channel") is the one it plays on
+            for (const std::string &entry : m_options->m_midiStaffChannels.GetValue()) {
+                const size_t colon = entry.find(':');
+                if (colon == std::string::npos) continue;
+                const int channel = atoi(entry.c_str() + colon + 1);
+                if ((atoi(entry.c_str()) == staffDef->GetN()) && (channel >= 0) && (channel <= 15)) {
+                    midiChannel = channel;
+                }
+            }
+            if (instrDef) {
                 if (instrDef->HasMidiInstrnum()) {
                     midiFile->addPatchChange(midiTrack, 0, midiChannel, instrDef->GetMidiInstrnum());
                 }

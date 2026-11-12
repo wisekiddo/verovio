@@ -491,6 +491,10 @@ void View::DrawLabels(
     assert(scoreDef);
     assert(object->Is({ LAYERDEF, STAFFDEF, STAFFGRP }));
 
+    // A caller that shows the names itself asks for none: nothing is drawn, and no width is kept for the next layout
+    // to indent the system by
+    if (m_options->m_staffLabelsHidden.GetValue()) return;
+
     Label *label = vrv_cast<Label *>(object->FindDescendantByType(LABEL, 1));
     LabelAbbr *labelAbbr = vrv_cast<LabelAbbr *>(object->FindDescendantByType(LABELABBR, 1));
     Object *graphic = label;

@@ -1137,6 +1137,11 @@ Options::Options()
     m_scaleToPageSize.Init(false);
     this->Register(&m_scaleToPageSize, "scaleToPageSize", &m_general);
 
+    m_staffLabelsHidden.SetInfo("Staff labels hidden",
+        "Do not draw the labels of staves, staff groups and layers, and leave no room for them");
+    m_staffLabelsHidden.Init(false);
+    this->Register(&m_staffLabelsHidden, "staffLabelsHidden", &m_general);
+
     m_setLocale.SetInfo("Set the global locale", "Changes the global locale to C (this is not thread-safe)");
     m_setLocale.Init(false);
     this->Register(&m_setLocale, "setLocale", &m_general);
@@ -1850,6 +1855,12 @@ Options::Options()
     m_midiNoCue.SetInfo("MIDI playback without cue notes", "Skip cue notes in MIDI output");
     m_midiNoCue.Init(false);
     this->Register(&m_midiNoCue, "midiNoCue", &m_midi);
+
+    m_midiStaffChannels.SetInfo("MIDI staff channels",
+        "The MIDI channel of staves, each as \"staff:channel\" (\"2:1\"); a staff not listed plays on the channel of "
+        "its instrDef");
+    m_midiStaffChannels.Init();
+    this->Register(&m_midiStaffChannels, "midiStaffChannels", &m_midi);
 
     m_midiTempoAdjustment.SetInfo("MIDI tempo adjustment", "The MIDI tempo adjustment factor");
     m_midiTempoAdjustment.Init(1.0, 0.2, 4.0);
