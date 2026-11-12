@@ -62,6 +62,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 52 | 2026-11-12 | MusicXML: a gap, a hidden rest and an unbracketed tuplet note play their time (6650892); amended the same day by a2aed60 (above) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +199, then (with patch 51) +28 / -16 | A `<forward>` or hidden rest whose length is no sum of written values where it stands, and a note, chord or rest timed by a `<time-modification>` that no `<tuplet>` shows, is set in a tuplet that shows neither bracket nor number, holding written values that add up exactly; a gap that is a sum of written values is written as those values, counted in whole ticks. A walk after the import does it: the import's spaces keep their ids, the surplus ones go, the new tuplets and spaces take ids after every other. 9 scores: 50 spaces rewritten, 39 spaces gone, 31 unseen tuplets | Not offered upstream |
 | 53 | 2026-11-12 | MusicXML: a rest or note is written as its ticks play it (cb58fcb) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +91 / -1 | A rest that fills its bar but is typed as another length is the bar's rest (`<mRest>`, the same object and id), as the importer's own comment says; a note, chord or rest whose ticks make a written value (a power of two, up to two dots) and whose type says another is written that value; a grace rest is left out, with a warning. Not for a note in a tuplet, with a time-modification or of a tremolo. 16 scores: 33 rests become bar rests, 9 values are written as they play, 3 grace rests go | Not offered upstream |
 | 54 | 2026-11-12 | Tuplets: nested ratios multiply, every MusicXML tuplet level is read, ABC tuplets hold the notes ABC gives them (11e1428) | `src/layerelement.cpp`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, `src/ioabc.cpp`, `include/vrv/ioabc.h`, +348 / -129 | A tuplet inside a tuplet plays the product of the ratios (MEI's rule; the innermost alone was read): an MEI file, or a MusicXML file that numbers each level, with nested tuplets plays otherwise, and no score of the corpus has one. A nested MusicXML tuplet holds its own level's ratio (3 and 3 where the inner one said 9); two tuplets that start or stop on one note are both read. An ABC tuplet holds the notes ABC gives it: 13 of the 194 ABC files of the parity set change (180 tuplets built where 130 were, and the notes that went with the lost ones are back; their generated ids move). Every MusicXML, MEI, Humdrum and PAE output of the corpus is byte-identical | Not offered upstream |
+| 55 | 2026-11-12 | What a reader asks of the engine: no staff labels, the channels of staves; a text keeps its own spaces through MEI (d6caaaf) | `include/vrv/options.h`, `src/options.cpp`, `src/view_page.cpp`, `src/doc.cpp`, `src/iomei.cpp`, +43 / -4 | Two options, both off by default: `staffLabelsHidden` (labels are not drawn and leave no room) and `midiStaffChannels` (a listed staff plays on the channel given). With both off no page, MEI, timemap or pitch map of the corpus changes. The MEI reader keeps a space at the start or end of an element's text unless the run holds a line break: 92 MIDI files of the corpus change, in the spaces of 3,673 lyric texts and one track name (the MIDI is written from the document read back from its own MEI) | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2931,6 +2932,44 @@ change and do not). 13 deliberate breaks, each caught.
 
 **Upstream status**: not offered.
 
+### 55. What a reader asks of the engine, in place of editing its file (tb.18)
+
+MuseNote's reader loaded a score, took the engine's MEI, cut the part
+names out of it (it draws them itself, over the page) and wrote a MIDI
+channel for each staff into it, and loaded that text a second time:
+1,528 of the corpus's 2,765 MusicXML scores were loaded twice for the
+names alone, 250 to 360 ms more per open on a phone. MuseNote's plan
+V3_2_0_27 (W11, W12): the reader asks the engine for both.
+
+- **`staffLabelsHidden`** (off by default): `View::DrawLabels` draws
+  nothing and keeps no width, for a staff, a staff group or a layer. The
+  page is the one a score with no names gives; the MEI keeps the names.
+- **`midiStaffChannels`** (empty by default): a list of "staff:channel".
+  `Doc::ExportMIDI` plays a listed staff on that channel in place of its
+  instrDef's (0 to 15; an entry that is no staff and channel is passed
+  over). Set after a load, it is what the next MIDI is written with.
+- **A text keeps its own spaces through MEI.** `MEIInput::LeftTrim` and
+  `RightTrim` took all white space off the start of an element's first
+  text and the end of its last. That is the file's layout only when the
+  run holds a line break; a space on one line is text. A `<rend>` that
+  began with a space after another run lost it when a score went out to
+  MEI and came back ("Ø CODA" drawn "ØCODA"; 469 scores of the corpus
+  changed text on a second load).
+
+**Measured** (tool/parity, tb.17 against tb.18, both options off):
+
+- 92 of 19,930 outputs differ, all MIDI files: the spaces of 3,673 lyric
+  texts and one track name, and nothing else in them. The MIDI is written
+  from the document read back from its own MEI, which now keeps the
+  spaces the file has. Every page, MEI export, timemap and pitch map is
+  byte-identical; seeded ids are the same on a fresh thread (2,785 of
+  2,785).
+
+**Cases**: `test/native/test_tb18_one_load_engine.cpp` in MuseNote's
+`corelib/verovio` (3 cases, 9 subcases); 6 deliberate breaks, each caught.
+
+**Upstream status**: not offered.
+
 ## Rules for this branch
 
 - A patch is carried only when the change cannot be made outside the
@@ -3051,6 +3090,12 @@ change and do not). 13 deliberate breaks, each caught.
   id of one. It changes what the ABC importer builds for tuplets (13 of
   the 194 ABC files of the parity set, their ids with them), declared in
   its section.
+  Fifty-five since 2026-11-12, by the owner's decision of that day
+  (MuseNote's plan V3_2_0_27): patch 55 adds two options, off by default,
+  one in drawing (`view_page.cpp`: labels not drawn) and one in the MIDI
+  export, and changes which white space the MEI reader takes off a text.
+  With the options off no page, MEI, timemap or id of the corpus changed;
+  92 MIDI files did, in the spaces of their lyric texts.
 - Every patch lists its date, why, test input, output change and
   upstream status in this file.
 - Tags `musenote-<base>-tb.<n>` mark exact shipped states. They are
