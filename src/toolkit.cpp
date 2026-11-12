@@ -272,6 +272,15 @@ void Toolkit::ResetMidiDoc()
     m_midiDoc = NULL;
 }
 
+void Toolkit::PassMidiOptionsOn()
+{
+    // The document the MIDI is written from holds the options of the moment it was made (the first timemap or
+    // MIDI): the channels a caller has given the staves since then are passed on to it
+    if (m_midiDoc && (m_midiDoc != &m_doc)) {
+        m_midiDoc->GetOptions()->m_midiStaffChannels.SetValue(m_doc.GetOptions()->m_midiStaffChannels.GetValue());
+    }
+}
+
 void Toolkit::SetMidiDoc()
 {
     // Nothing to do
@@ -1842,6 +1851,7 @@ std::string Toolkit::RenderToMIDI()
 
     smf::MidiFile outputfile;
     assert(m_midiDoc);
+    this->PassMidiOptionsOn();
     m_midiDoc->ExportMIDI(&outputfile);
 
     std::stringstream stream;
@@ -1999,6 +2009,7 @@ bool Toolkit::RenderToMIDIFile(const std::string &filename)
 
     smf::MidiFile outputfile;
     assert(m_midiDoc);
+    this->PassMidiOptionsOn();
     m_midiDoc->ExportMIDI(&outputfile);
     outputfile.write(filename);
 

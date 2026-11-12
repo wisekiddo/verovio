@@ -827,6 +827,8 @@ private:
      * Point to the main Doc if no difference in expansion handling is needed.
      */
     void SetMidiDoc();
+    /** Passes the MIDI options set since the document for MIDI was made on to it */
+    void PassMidiOptionsOn();
 
 public:
     //
