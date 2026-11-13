@@ -65,6 +65,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 55 | 2026-11-12 | What a reader asks of the engine: no staff labels, the channels of staves; a text keeps its own spaces through MEI (d6caaaf); amended the same day by: The channels given to staves reach the document the MIDI is written from (bc4c9fe, tb.19) | `include/vrv/options.h`, `src/options.cpp`, `src/view_page.cpp`, `src/doc.cpp`, `src/iomei.cpp`, +43 / -4 | Two options, both off by default: `staffLabelsHidden` (labels are not drawn and leave no room) and `midiStaffChannels` (a listed staff plays on the channel given). With both off no page, MEI, timemap or pitch map of the corpus changes. The MEI reader keeps a space at the start or end of an element's text unless the run holds a line break: 92 MIDI files of the corpus change, in the spaces of 3,673 lyric texts and one track name (the MIDI is written from the document read back from its own MEI) | Not offered upstream |
 | 56 | 2026-11-13 | MusicXML: an ending is played in the passes its number names, also where plain bars stand between the endings of a repeat; after a jump back the last ending of the repeat is the one played (6bca52a) | `src/iomusxml.cpp`, +58 / -5 | **Changes the order of play of 272 scores of the corpus, by design.** `MusicXmlInput::CreateExpansion` played the bars of a repeat again whole, an ending among them too: with plain bars between a first ending and the bar that holds its repeat sign, the ending numbered 1 was played on pass 2 as well (and after a D.C. or D.S. although it is not the last). Their MIDI, timemap, pitch map and the `<expansion>` of their MEI change; no page and nothing else of any MEI does. One score (Song For Guy) no longer plays a first ending's bar at all, which only its jump-back pass reached | Not offered upstream |
 | 57 | 2026-11-13 | One rule for the order of play, for every format: the general rule (MEI, ABC, Humdrum and any score with no order of its own) reads endings and jumps as the MusicXML reader's does (aefcf4e) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h` | **Changes the order of play of scores that are not MusicXML and have endings, jumps, or measures inside sections, by design.** `ExpansionMap::GenerateExpansionFor` knew repeat signs only, and only measures standing directly in the one section: an ending was played in every pass, no jump was taken, and a score with its measures in endings or sub-sections played no repeat. No output of the corpus changes (21,743 outputs, 0 differ): MusicXML goes through the same code as before, and no bundled score of another format has an ending or a jump | Not offered upstream |
+| 58 | 2026-11-14 | ABC: the reader rebuilt on the standard, in two halves: the text read into tunes, each tune written into the score (882ff86) | `src/ioabc.cpp`, `include/vrv/ioabc.h`, `src/expansionmap.cpp`, `include/vrv/expansionmap.h` | **Changes how ABC is read, by design** (MuseNote root cause RC6). Replaces patches 7, 13, 22, 31, 41 and 49's work in the reader. No output of the corpus moves but the ABC inputs' MEI (194 of 21,743). MuseNote's ABC export of 2,765 songs read back: 2,359 play the same in every aspect (56 before); 1,037 hand-written tunes against abc2midi: 984 the same (603). A stored ABC score's notes keep their locator where the old reader read them rightly: 99.6% (hand-written tunes), 93% (MuseNote's exports) | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2978,6 +2979,57 @@ and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
+
+### 58. The ABC reader rebuilt on the standard (tb.22)
+
+MuseNote's root cause RC6 (plan V3_2_0_34): the reader had no model of a tune
+and no account of the standard. It wrote each character it met into one layer
+of one staff; a voice, an ending, a change of key, a part had no place, and
+what it did not know it passed over. Six patches (7, 13, 22, 31, 41, 49) fixed
+it symptom by symptom.
+
+**Two halves** (`src/ioabc.cpp`; the header keeps only the class):
+- namespace `abc` reads the text into tunes: the fields with their scope (the
+  file, a tune, a voice, a point in the music), the voices, each voice's bars,
+  and in each bar its events (notes, chords, rests, spaces, bar rests) with what
+  belongs to them (lengths, signs, ties, grace groups, tuplets, decorations,
+  texts, syllables, changes of key, meter, clef and tempo). A note's sound is
+  worked out once, by ABC's rule.
+- the writer makes the score: staves from `%%score`/`%%staves` (voices in round
+  brackets share a staff; braces and brackets group staves), bars across all
+  voices, `<ending>`s, a length as the notes it takes (tied pieces down to a
+  1024th, the shortest value with a written form), beams and tuplets as ranges,
+  marks where they stand (a jump written before a bar line is its bar's), the
+  name of a part as a rehearsal mark, and the order of play by
+  `WriteOrderOfPlayFor` (patch 57), with the counts of the colons and the order
+  of the parts (P:, single upper-case letters, an order in the standard's
+  grammar only).
+- Files with no version, or one before 2.1, are read loosely (12.2): `+...+`
+  is a decoration of 2.0 or a chord of before 1.6. A file of 2.1 has neither.
+- What is not read is said in the log, once a kind; the reserved characters are
+  ignored and said (8.1).
+- Character tests are ABC's own (ASCII). `isspace` followed the C locale and
+  said yes to 0xA0, the second byte of "a grave": a title lost it (MuseNote W46).
+- No measure numbers: ABC gives none, and a mark stored on an ABC score knows
+  its bar by its notes.
+
+`WriteOrderOfPlayFor` takes the repeat counts and a playlist of stretches; a
+part starts after a stretch's end too, so a stretch is played to its end and no
+further.
+
+**Cases:** `abc_standard.table` in the monorepo (152 constructs of ABC 2.1: 147
+read, 5 knowingly not read with their reasons), and the existing ABC cases, six
+of them restated where the standard reads otherwise than the old reader (each
+says "since tb.22"). 32 deliberate breaks, all caught. 286 native cases, also
+under the address sanitizer.
+
+**Measured:** tool/parity, tb.21 against this: 21,743 outputs, 194 differ, all
+the ABC inputs' MEI. MuseNote's ABC export of 2,765 songs read back: 2,359 play
+the same in every aspect (56 before). 1,037 hand-written tunes (the Nottingham
+Music Database) against abc2midi: 984 the same (603); each of the 53 left read
+against the standard's text. Locators of stored ABC scores, old reader against
+new: 99.6% of notes kept (hand-written tunes), 93% (MuseNote's exports); every
+note that moves is one the old reader misread.
 
 ### 57. One rule for the order of play (tb.21)
 
