@@ -13,6 +13,7 @@
 #include <cassert>
 #include <climits>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <iostream>
 
@@ -485,7 +486,12 @@ namespace {
 void ExpansionMap::GenerateExpansionFor(Score *score)
 {
     m_isProcessed = true;
+    WriteOrderOfPlayFor(score, {}, {});
+}
 
+void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &repeatTimes,
+    const std::vector<std::pair<const Measure *, const Measure *>> &playlist)
+{
     if (score->HasEditorialContent()) {
         LogWarning("An expansion cannot be generated with editorial content");
         return;
@@ -518,7 +524,15 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
     // The parts: a new one where a container (a section, an ending) or a repeat starts, at a segno or a coda, and
     // after a part was closed by a repeat end, a jump or a fine. As the MusicXML reader parts its score.
     play::Sections parts;
-    bool isOrdered = false; // whether anything in the score says more than "once through"
+    bool isOrdered = !playlist.empty(); // whether anything in the score says more than "once through"
+    // Where a stretch of the playlist starts, and where one ends: a part starts at the one and after the other, so
+    // that a stretch is played to its last measure and no further. (Parts were begun only where a stretch starts: the
+    // music after a stretch's end stayed in its part, and was played with it)
+    std::set<const Measure *> listed, listedEnds;
+    for (const auto &stretch : playlist) {
+        listed.insert(stretch.first);
+        listedEnds.insert(stretch.second);
+    }
     bool startsPart = true;
     bool startsRepeat = false;
     const size_t count = measures.size();
@@ -528,7 +542,9 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
         const PlayMarks marks = MarksOf(measure);
         const bool isNewContainer = (i == 0) || (measures[i - 1].m_parent != current.m_parent);
         const bool isRepeatStart = startsRepeat || ExpansionMap::IsRepeatStart(measure);
-        if (startsPart || isNewContainer || isRepeatStart || marks.m_segno || marks.m_coda) {
+        const bool afterListedEnd = (i > 0) && listedEnds.contains(measures[i - 1].m_measure);
+        if (startsPart || isNewContainer || isRepeatStart || marks.m_segno || marks.m_coda || listed.contains(measure)
+            || afterListedEnd) {
             play::SectionInfo info(isRepeatStart);
             // Every part of an ending is the ending's (one that a mark or a repeat start divides is played whole
             // in its passes, as one ending written as two brackets is)
@@ -546,8 +562,10 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
             || ((i + 1 < count) && ExpansionMap::IsPreviousRepeatEnd(measures[i + 1].m_measure));
         startsPart = false;
         if (isRepeatEnd) {
-            // (in an ending the rule goes by the endings' numbers, not by this)
-            part.m_repeatInfo = play::RepeatInfo(2, false);
+            // (in an ending the rule goes by the endings' numbers, not by this.) Twice, unless the reader knows
+            // of more: the score itself has no place for how often
+            const auto said = repeatTimes.find(measure);
+            part.m_repeatInfo = play::RepeatInfo((said == repeatTimes.end()) ? 2 : std::clamp(said->second, 1, 100), false);
             startsPart = true;
         }
         if (marks.m_jump == play::JumpInfo::DACAPO) {
@@ -609,7 +627,27 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
         info.m_target = target;
     }
 
-    const xsdAnyURI_List order = WriteOrderOfPlay(parts);
+    xsdAnyURI_List order;
+    if (playlist.empty()) {
+        order = WriteOrderOfPlay(parts);
+    }
+    else {
+        // Each stretch of the playlist in its turn, by the rule: its repeats, endings and jumps are its own
+        std::map<const Measure *, size_t> position;
+        for (size_t i = 0; i < count; ++i) position[measures[i].m_measure] = i;
+        for (const auto &[first, last] : playlist) {
+            if (!position.contains(first) || !position.contains(last)) continue;
+            play::Sections stretch;
+            for (const auto &part : parts) {
+                const size_t at = position.at(part.second.front());
+                if ((at >= position.at(first)) && (at <= position.at(last))) stretch.push_back(part);
+            }
+            const xsdAnyURI_List refs = WriteOrderOfPlay(stretch);
+            order.insert(order.end(), refs.begin(), refs.end());
+            // (no more than can be followed: Doc::ExpandExpansions counts what it costs, and refuses past its limit)
+            if (order.size() > 100000) break;
+        }
+    }
     if (order.empty()) return;
     Expansion *expansion = new Expansion();
     expansion->GetPlistInterface()->SetPlist(order);

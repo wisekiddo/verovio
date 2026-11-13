@@ -171,6 +171,17 @@ typedef std::vector<std::pair<SectionInfo, std::vector<Measure *>>> Sections;
  */
 xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections);
 
+/**
+ * Writes the order of play of [score] into it, from the score as it stands: its measures in score order through
+ * sections and endings, their repeat signs, and the marks of a jump (WriteOrderOfPlay is asked). Nothing is written
+ * for a score with no repeat end, no ending and no jump. [repeatTimes] says how often the repeat that ends at a
+ * measure is played, where a reader knows of more than twice. [playlist], where it is not empty, is the stretches of
+ * the score (each from its first measure to its last) in the order they are played, a stretch as often as it is
+ * listed (the parts of an ABC tune): the order is then each stretch's own, one after the other.
+ */
+void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &repeatTimes,
+    const std::vector<std::pair<const Measure *, const Measure *>> &playlist);
+
 /** The numbers in a list like "1, 2" (an ending's passes, the times a jump is taken) */
 std::list<int> parseInts(const std::string &str);
 
