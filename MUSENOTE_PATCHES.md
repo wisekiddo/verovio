@@ -67,6 +67,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 57 | 2026-11-13 | One rule for the order of play, for every format: the general rule (MEI, ABC, Humdrum and any score with no order of its own) reads endings and jumps as the MusicXML reader's does (aefcf4e) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h` | **Changes the order of play of scores that are not MusicXML and have endings, jumps, or measures inside sections, by design.** `ExpansionMap::GenerateExpansionFor` knew repeat signs only, and only measures standing directly in the one section: an ending was played in every pass, no jump was taken, and a score with its measures in endings or sub-sections played no repeat. No output of the corpus changes (21,743 outputs, 0 differ): MusicXML goes through the same code as before, and no bundled score of another format has an ending or a jump | Not offered upstream |
 | 58 | 2026-11-14 | ABC: the reader rebuilt on the standard, in two halves: the text read into tunes, each tune written into the score (882ff86) | `src/ioabc.cpp`, `include/vrv/ioabc.h`, `src/expansionmap.cpp`, `include/vrv/expansionmap.h` | **Changes how ABC is read, by design** (MuseNote root cause RC6). Replaces patches 7, 13, 22, 31, 41 and 49's work in the reader. No output of the corpus moves but the ABC inputs' MEI (194 of 21,743). MuseNote's ABC export of 2,765 songs read back: 2,359 play the same in every aspect (56 before); 1,037 hand-written tunes against abc2midi: 984 the same (603). A stored ABC score's notes keep their locator where the old reader read them rightly: 99.6% (hand-written tunes), 93% (MuseNote's exports) | Not offered upstream |
 | 59 | 2026-11-14 | ABC: a file is told by its tunes, and its file header sets the defaults of every tune (8db7dda) | `src/toolkit.cpp`, `src/ioabc.cpp` | **Reads ABC files the engine refused or misread.** `IdentifyInputFrom` looked at an ABC file's first character only; a file that began with an empty line, a comment or a file header (ABC 2.1, 2.2) was taken for MEI, PAE or GABC. Of 1,055 hand-written files and tunes read by detection alone, 345 were read before, 1,055 now. No output of the corpus changes (21,743 outputs, 0 differ) | Not offered upstream |
+| 60 | 2026-11-14 | Expansion: every tie, slur and line of the score as played is judged by the order of play (b1b4318) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/doc.cpp`, +221 | **Changes what 192 scores of the corpus play, by design** (MuseNote root cause RC18, finding W53). A copy of a spanning element got its end when it was made, or as a count of played bars: the second time through or after a jump a tie ended on another pass's note, or on one already played (a note held for the wrong length, its end note attacked again, or a note held past the end). 227 MIDI outputs of 21,743 change (192 songs and 35 corrected files of the same songs); no page, MEI, timemap, pitch map or id | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2980,6 +2981,51 @@ and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
+
+### 60. Every tie, slur and line of the score as played is judged by the order of play (tb.24)
+
+Found by MuseNote's ABC gate (plan V3_2_0_34; finding W53, root cause RC18), and
+measured over the corpus before the fix: 330 ends wrong in 217 songs. The
+expansion writes the order of play by cloning sections one after another. As
+each clone was made, `UpdateIDs` pointed a copied element's end at the latest
+copy of its end made so far; an end given as a count of bars (`@tstamp2`)
+counts, in the score as played, played bars. Nothing judged either against the
+order: (a) where the end's bar was cloned after the start's, a copy ended on an
+earlier pass's note; (b) where the play never reaches the end in that pass (a
+jump back, a Fine) it still ended on a note already played. 500 Miles held its
+last note 1.5 quarters past the end of the song; in Sweet Dreams and Bolero a
+tied note attacked again on the second pass.
+
+- `Doc::ExpandExpansions` takes each measure's place in the score as written
+  before `Expand` moves anything, and after it calls
+  `ExpansionMap::FollowSpansInOrder` over the score as played.
+- From an element's start the play goes on while it stays within the bars the
+  element spans on the page and its start is not played again (that is the
+  next pass, with its own copy). What joins notes (tie, glissando, beam across
+  bars) ends on the copy of its end reached there, and is taken out of a pass
+  where none is; what spans music ends on the copy reached there, or on the
+  last note, chord or rest it covers before the play leaves its bars. A count
+  of bars is written again as the count of played bars; a beam's note list
+  follows the copies played. Starts were measured right and are not changed.
+
+This is MusicXML 4.0's account of a tie's sound across a repeat (`<tie>` apart
+from `<tied>`, `time-only`) and MEI's (one tie per ending, a tie back over a
+repeat): a tie sounds where its note is followed, in that pass, by the note it
+joins. MEI's two ties into two endings and a tie back to a repeat's start need
+no case of their own.
+
+Cases: `test_tb24_spans_in_order_engine.cpp` (ties over a repeat sign, into the
+bar after Fine, into each ending, back to a repeat's start, three passes with
+the end's bar copied after the start's; octave lines over a repeat and over a
+whole repeated passage; slurs and hairpins by count of bars; beams across bars
+with their note lists), ten deliberate breaks each caught, the suite under the
+address sanitizer. The corpus guard (MuseNote's
+`tool/export_gate/expanded_spans.py`) judges every spanning element of every
+song as played: 0 wrong (330 before). Parity tb.23 to tb.24: 227 of 21,743
+outputs differ, all MIDI, every one a song the guard named for a tie; seeded
+ids 3,044 of 3,044. Found with it, not this patch's: a MusicXML file that
+numbers two measures alike gets ties in the wrong measure (W59, 5 ties in 2
+songs; the reader places a control element by its measure's number).
 
 ### 59. An ABC file told by its tunes (tb.23)
 
