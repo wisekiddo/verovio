@@ -1560,12 +1560,27 @@ void MusicXmlInput::CreateExpansion(Section *section)
         if (!it->first.m_segnoLabel.empty()) segnos.insert({ it->first.m_segnoLabel, it });
         if (!it->first.m_codaLabel.empty()) codas.insert({ it->first.m_codaLabel, it });
     }
+    // The pass of the repeat being played, and whether what stands at [it] is played in it: an ending is played in
+    // the passes its number names, in a repeat as anywhere. (The bars of a repeat were played again whole, an ending
+    // among them too: where plain bars stand between a first ending and the bar with its repeat sign, the ending
+    // numbered 1 was played on pass 2 as well. 257 of MuseNote's songs are written so.) An ending with no number
+    // names no pass and is played as before.
+    int pass = 1;
+    const auto isPlayed = [&pass, &rptIter](decltype(iter) it) {
+        // (an ending the repeat itself starts in is that repeat's own music)
+        if ((it->first.m_classId != ENDING) || (it == rptIter)) return true;
+        const std::list<int> numbers = parseInts(it->first.m_endingInfo.m_number);
+        return numbers.empty() || (std::find(numbers.begin(), numbers.end(), pass) != numbers.end());
+    };
     while (isFollowed && (iter != m_sections.end())) {
         // increment visited count
         iter->first.m_visited++;
 
         // remember this repeat start
-        if (iter->first.m_repeatStart) rptIter = iter;
+        if (iter->first.m_repeatStart) {
+            rptIter = iter;
+            pass = 1;
+        }
 
         // handle section
         if (iter->first.m_classId == SECTION) {
@@ -1576,7 +1591,9 @@ void MusicXmlInput::CreateExpansion(Section *section)
             // repeat the sections, beginning with the repeat start
             int times = (jumpBack && !iter->first.m_repeatInfo.m_afterJump) ? 1 : iter->first.m_repeatInfo.m_times;
             for (int t = 2; isFollowed && (t <= times); ++t) {
+                ++pass;
                 for (auto it = rptIter; isFollowed && (it != std::next(iter)); ++it) {
+                    if (!isPlayed(it)) continue;
                     std::string ref = "#" + it->first.m_target->GetID();
                     isFollowed = order.Add(ref);
                 }
@@ -1624,17 +1641,50 @@ void MusicXmlInput::CreateExpansion(Section *section)
                 if (endIter != begIter) endIter->first.m_visited++;
             }
 
-            // when jumping back, keep only last ending
+            // when jumping back, keep only last ending: the last of its repeat. That one may stand further on, after
+            // plain bars: an ending whose numbers go on from these (a "2" after this "1"). Then none of these is
+            // played. One that starts its numbers again belongs to another repeat.
             if (jumpBack && endings.size() > 0) {
-                endings.erase(endings.begin(), std::prev(endings.end()));
-                endIter = endings.begin()->second.back();
+                bool isLast = true;
+                for (auto it = iter; it != m_sections.end(); ++it) {
+                    if (it->first.m_classId == ENDING) {
+                        const std::list<int> numbers = parseInts(it->first.m_endingInfo.m_number);
+                        isLast = numbers.empty()
+                            || (*std::min_element(numbers.begin(), numbers.end()) <= endings.rbegin()->first);
+                        break;
+                    }
+                    if (it->first.m_repeatStart) break;
+                }
+                if (isLast) {
+                    endings.erase(endings.begin(), std::prev(endings.end()));
+                    endIter = endings.begin()->second.back();
+                }
+                else {
+                    endings.clear();
+                }
+            }
+
+            // whether a repeat sign follows these endings after plain bars, before another ending or repeat begins
+            bool signFollows = false;
+            for (auto it = iter; (it != m_sections.end()) && (it->first.m_classId == SECTION) && !it->first.m_repeatStart;
+                ++it) {
+                const data_BARRENDITION right = it->second.back()->GetRight();
+                if ((right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth)) {
+                    signFollows = true;
+                    break;
+                }
             }
 
             // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
             // skip section first time because it was already added in the SECTION block
             for (auto ending = endings.begin(); isFollowed && (ending != endings.end()); ++ending) {
                 if (ending != endings.begin()) {
+                    // one ending for several passes comes round by the repeat sign at its end. Where that sign stands
+                    // further on, after plain bars, it brings the ending round itself, in the passes it names
+                    if ((ending->second == std::prev(ending)->second) && signFollows) continue;
+                    ++pass;
                     for (auto it = rptIter; isFollowed && (it != std::next(secIter)); ++it) {
+                        if (!isPlayed(it)) continue;
                         std::string ref = "#" + it->first.m_target->GetID();
                         isFollowed = order.Add(ref);
                     }
@@ -1646,7 +1696,10 @@ void MusicXmlInput::CreateExpansion(Section *section)
             }
 
             // set the repetition to the (latest) nested one
-            if (rptNestedIter) rptIter = *rptNestedIter;
+            if (rptNestedIter) {
+                rptIter = *rptNestedIter;
+                pass = 1;
+            }
         }
 
         // fine
