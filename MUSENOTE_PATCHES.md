@@ -66,6 +66,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 56 | 2026-11-13 | MusicXML: an ending is played in the passes its number names, also where plain bars stand between the endings of a repeat; after a jump back the last ending of the repeat is the one played (6bca52a) | `src/iomusxml.cpp`, +58 / -5 | **Changes the order of play of 272 scores of the corpus, by design.** `MusicXmlInput::CreateExpansion` played the bars of a repeat again whole, an ending among them too: with plain bars between a first ending and the bar that holds its repeat sign, the ending numbered 1 was played on pass 2 as well (and after a D.C. or D.S. although it is not the last). Their MIDI, timemap, pitch map and the `<expansion>` of their MEI change; no page and nothing else of any MEI does. One score (Song For Guy) no longer plays a first ending's bar at all, which only its jump-back pass reached | Not offered upstream |
 | 57 | 2026-11-13 | One rule for the order of play, for every format: the general rule (MEI, ABC, Humdrum and any score with no order of its own) reads endings and jumps as the MusicXML reader's does (aefcf4e) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h` | **Changes the order of play of scores that are not MusicXML and have endings, jumps, or measures inside sections, by design.** `ExpansionMap::GenerateExpansionFor` knew repeat signs only, and only measures standing directly in the one section: an ending was played in every pass, no jump was taken, and a score with its measures in endings or sub-sections played no repeat. No output of the corpus changes (21,743 outputs, 0 differ): MusicXML goes through the same code as before, and no bundled score of another format has an ending or a jump | Not offered upstream |
 | 58 | 2026-11-14 | ABC: the reader rebuilt on the standard, in two halves: the text read into tunes, each tune written into the score (882ff86) | `src/ioabc.cpp`, `include/vrv/ioabc.h`, `src/expansionmap.cpp`, `include/vrv/expansionmap.h` | **Changes how ABC is read, by design** (MuseNote root cause RC6). Replaces patches 7, 13, 22, 31, 41 and 49's work in the reader. No output of the corpus moves but the ABC inputs' MEI (194 of 21,743). MuseNote's ABC export of 2,765 songs read back: 2,359 play the same in every aspect (56 before); 1,037 hand-written tunes against abc2midi: 984 the same (603). A stored ABC score's notes keep their locator where the old reader read them rightly: 99.6% (hand-written tunes), 93% (MuseNote's exports) | Not offered upstream |
+| 59 | 2026-11-14 | ABC: a file is told by its tunes, and its file header sets the defaults of every tune (8db7dda) | `src/toolkit.cpp`, `src/ioabc.cpp` | **Reads ABC files the engine refused or misread.** `IdentifyInputFrom` looked at an ABC file's first character only; a file that began with an empty line, a comment or a file header (ABC 2.1, 2.2) was taken for MEI, PAE or GABC. Of 1,055 hand-written files and tunes read by detection alone, 345 were read before, 1,055 now. No output of the corpus changes (21,743 outputs, 0 differ) | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2979,6 +2980,30 @@ and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
+
+### 59. An ABC file told by its tunes (tb.23)
+
+Found by MuseNote's check of the rebuilt reader in the running app (plan
+V3_2_0_34, step 4; finding W58): the app hands a stored score to the engine
+without naming its format, and the engine told ABC by its first character only
+(`X`, or `%` and `a`). ABC 2.1 lets a file begin with empty lines, free text,
+comments and a file header before its first tune (2.2): the Nottingham Music
+Database's files begin with an empty line, many files with a comment. Such a
+file was taken for MEI, for PAE ("%" and a space), or for GABC when it held a
+"%%" directive (the GABC test's comment said "%%" cannot appear in ABC; ABC's
+stylesheet directives begin with it).
+
+- `IdentifyInputFrom`: a text whose first `X:` line comes after nothing but
+  empty lines, `%` lines and information fields is ABC. Plaine & Easie has no
+  `X:` line; a GABC header's names are words.
+- The reader reads the file header (the fields and directives a file begins
+  with, up to its first empty line) and sets it at the head of every tune
+  (2.2.2: "used to set default values for the tunes in the file").
+
+Cases: `abc_standard.table` rows loaded without naming the format (an empty
+line first, a comment first, a file header first) and a case that PAE, GABC
+and Humdrum keep their own. Measured: of 1,055 hand-written files and tunes
+read by detection alone, 345 were read before, all now; parity 0 of 21,743.
 
 ### 58. The ABC reader rebuilt on the standard (tb.22)
 
