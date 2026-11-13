@@ -63,6 +63,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 53 | 2026-11-12 | MusicXML: a rest or note is written as its ticks play it (cb58fcb) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +91 / -1 | A rest that fills its bar but is typed as another length is the bar's rest (`<mRest>`, the same object and id), as the importer's own comment says; a note, chord or rest whose ticks make a written value (a power of two, up to two dots) and whose type says another is written that value; a grace rest is left out, with a warning. Not for a note in a tuplet, with a time-modification or of a tremolo. 16 scores: 33 rests become bar rests, 9 values are written as they play, 3 grace rests go | Not offered upstream |
 | 54 | 2026-11-12 | Tuplets: nested ratios multiply, every MusicXML tuplet level is read, ABC tuplets hold the notes ABC gives them (11e1428) | `src/layerelement.cpp`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, `src/ioabc.cpp`, `include/vrv/ioabc.h`, +348 / -129 | A tuplet inside a tuplet plays the product of the ratios (MEI's rule; the innermost alone was read): an MEI file, or a MusicXML file that numbers each level, with nested tuplets plays otherwise, and no score of the corpus has one. A nested MusicXML tuplet holds its own level's ratio (3 and 3 where the inner one said 9); two tuplets that start or stop on one note are both read. An ABC tuplet holds the notes ABC gives it: 13 of the 194 ABC files of the parity set change (180 tuplets built where 130 were, and the notes that went with the lost ones are back; their generated ids move). Every MusicXML, MEI, Humdrum and PAE output of the corpus is byte-identical | Not offered upstream |
 | 55 | 2026-11-12 | What a reader asks of the engine: no staff labels, the channels of staves; a text keeps its own spaces through MEI (d6caaaf); amended the same day by: The channels given to staves reach the document the MIDI is written from (bc4c9fe, tb.19) | `include/vrv/options.h`, `src/options.cpp`, `src/view_page.cpp`, `src/doc.cpp`, `src/iomei.cpp`, +43 / -4 | Two options, both off by default: `staffLabelsHidden` (labels are not drawn and leave no room) and `midiStaffChannels` (a listed staff plays on the channel given). With both off no page, MEI, timemap or pitch map of the corpus changes. The MEI reader keeps a space at the start or end of an element's text unless the run holds a line break: 92 MIDI files of the corpus change, in the spaces of 3,673 lyric texts and one track name (the MIDI is written from the document read back from its own MEI) | Not offered upstream |
+| 56 | 2026-11-13 | MusicXML: an ending is played in the passes its number names, also where plain bars stand between the endings of a repeat; after a jump back the last ending of the repeat is the one played (6bca52a) | `src/iomusxml.cpp`, +58 / -5 | **Changes the order of play of 272 scores of the corpus, by design.** `MusicXmlInput::CreateExpansion` played the bars of a repeat again whole, an ending among them too: with plain bars between a first ending and the bar that holds its repeat sign, the ending numbered 1 was played on pass 2 as well (and after a D.C. or D.S. although it is not the last). Their MIDI, timemap, pitch map and the `<expansion>` of their MEI change; no page and nothing else of any MEI does. One score (Song For Guy) no longer plays a first ending's bar at all, which only its jump-back pass reached | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2974,6 +2975,58 @@ been written did nothing: the MIDI is written from a document made at the
 first of them, with the options of that moment. `Toolkit::RenderToMIDI`
 and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
+
+**Upstream status**: not offered.
+
+### 56. An ending is played in its own pass (tb.20)
+
+MuseNote's finding W49 (plan V3_2_0_33): in 257 of its songs the first
+ending was played on every pass. Their files bracket the first ending
+over one bar and put the repeat sign a bar or more later, in no ending
+(MuseScore 0.9.5, where a bracket dropped on a bar covers that bar).
+`MusicXmlInput::CreateExpansion` gathers the endings of a repeat only
+while they stand one directly after the other; with plain bars between,
+the first ending was ordinary music to it, and the repeat sign played
+everything from the repeat's start again, the ending numbered 1 too.
+
+The files are wrong in themselves (the bracket was meant to reach the
+sign) and are corrected in MuseNote's catalog. This patch is the engine's
+part: whatever a file brackets, an ending is not played in a pass its
+number does not name.
+
+- **The passes of a repeat are counted** from its start (a repeat start,
+  one inside an ending, or the beginning). Where a repeat sign or a
+  further ending sends the music back, an ending in the bars played again
+  is played only if its number names that pass. An ending with no number
+  names no pass and is played as before; an ending the repeat itself
+  starts in is that repeat's own music and is always played.
+- **One ending for several passes** ("1, 2") comes round by the repeat
+  sign at its end. Where that sign stands further on, after plain bars,
+  the sign brings it round in the passes it names, and the ending's own
+  group does not play it a second time. With no sign after it at all it
+  is played as before.
+- **After a jump back** the last ending of a repeat is the one played, as
+  before, also when plain bars stand between the endings: an ending
+  followed, before any new repeat start, by one whose numbers go on from
+  its own is not the last. One that starts its numbers again belongs to
+  another repeat.
+
+Nothing is guessed about where a bracket should end: the bars between a
+short first ending and its repeat sign are plain bars and are played in
+every pass.
+
+**Measured** (tool/parity, tb.19 against tb.20): 1,627 of 19,930 outputs
+differ, all of 272 MusicXML scores: MIDI, timemap, pitch map, and the
+`<expansion>` line of their MEI exports. No page differs and no other
+line of any MEI. Seeded ids are the same on a fresh thread (2,785 of
+2,785). MuseNote's count of the bars in the order they first sound is
+the same for every score but one (Song For Guy, whose first ending only
+its D.C. pass reached, and no pass reaches now).
+
+**Cases**: `test/native/test_tb20_endings_engine.cpp` in MuseNote's
+`corelib/verovio` (9 cases; 7 fail on tb.19, the other two hold what
+tb.19 played rightly); 11 deliberate breaks, each caught; clean under
+AddressSanitizer with libc++ hardening.
 
 **Upstream status**: not offered.
 
