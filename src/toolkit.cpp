@@ -9,6 +9,7 @@
 
 //----------------------------------------------------------------------------
 
+#include <sstream>
 #include <cassert>
 #include <locale>
 #include <regex>
@@ -169,6 +170,34 @@ bool Toolkit::SetInputFrom(std::string const &inputFrom)
     return m_options->SetInputFrom(inputFrom);
 }
 
+namespace {
+
+    /**
+     * Whether [data] is an ABC file by its tunes: its first line "X:" (a tune begins) comes after nothing but empty
+     * lines, lines that begin with "%" (comments, the version line, directives) and information fields (a file
+     * header). ABC 2.1 lets a file begin so (2.2); only its first character was looked at, and a file that began with
+     * an empty line or a comment was taken for MEI, PAE or (holding a "%%" directive) GABC. Plaine & Easie ("%G-2...")
+     * has no "X:" line; a GABC header's names are words ("name:...;").
+     */
+    bool IsAbcByItsTunes(const std::string &data)
+    {
+        const std::string excerpt = data.substr(0, 8000);
+        std::istringstream lines(excerpt);
+        std::string line;
+        while (std::getline(lines, line)) {
+            if (!line.empty() && (line.back() == '\r')) line.pop_back();
+            if (line.find_first_not_of(" \t") == std::string::npos) continue;
+            if (line[0] == '%') continue;
+            const bool isField = (line.size() >= 2) && (line[1] == ':')
+                && (((line[0] >= 'A') && (line[0] <= 'Z')) || ((line[0] >= 'a') && (line[0] <= 'z')));
+            if (!isField) return false;
+            if (line[0] == 'X') return true;
+        }
+        return false;
+    }
+
+} // namespace
+
 FileFormat Toolkit::IdentifyInputFrom(const std::string &data)
 {
 #ifdef MUSICXML_DEFAULT_HUMDRUM
@@ -189,6 +218,9 @@ FileFormat Toolkit::IdentifyInputFrom(const std::string &data)
         // MuseData may contain '@' as first character, so needs
         // to be checked before PAE identification.
         return MUSEDATAHUM;
+    }
+    if (IsAbcByItsTunes(data)) {
+        return ABC;
     }
     if (data[0] == '@' || data[0] == '{') {
         return PAE;
@@ -249,7 +281,8 @@ FileFormat Toolkit::IdentifyInputFrom(const std::string &data)
     // letters are restricted to a..p, plus prefix/suffix punctuation (see S-GABC grammar, grule
     // body / grule syllable / grule syl_musical_symbols, in the .tex referenced from CLAUDE.md
     // section "GABC / S-GABC Specification Reference"). The `%%` separator is the most reliable
-    // marker because it cannot legally appear inside MEI, ABC (which starts with `X:`), or PAE.
+    // marker because it cannot legally appear inside MEI or PAE. (ABC's directives begin with "%%" too: an ABC file
+    // has been told by its tunes above.)
     // We only look at the prefix to avoid scanning very large files.
     if (initial.find("\n%%") != std::string::npos || initial.compare(0, 3, "%%\n") == 0) {
         return GABC;

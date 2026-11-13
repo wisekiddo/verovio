@@ -964,13 +964,38 @@ namespace abc {
         std::istringstream lines(text);
         std::string line;
         int lineNum = 1;
+        // The file header: the fields and directives a file begins with, up to its first empty line. They set the
+        // defaults of every tune of the file, and a tune's own fields override them (2.2.2)
+        std::vector<std::pair<std::string, int>> fileHeader;
+        bool inFileHeader = true;
         while (std::getline(lines, line)) {
             ++lineNum;
             if (!line.empty() && (line.back() == '\r')) line.pop_back();
+            if (inFileHeader && tunes.empty()) {
+                const bool isEmpty = (line.find_first_not_of(" \t") == std::string::npos);
+                const bool isField = (line.size() >= 2) && (line[1] == ':') && IsAlpha(line[0]) && (line[0] != 'X');
+                if (isEmpty) {
+                    if (!fileHeader.empty()) inFileHeader = false;
+                    continue;
+                }
+                if (isField || (line.rfind("%%", 0) == 0)) {
+                    fileHeader.push_back({ line, lineNum });
+                    continue;
+                }
+                if (line.rfind("%", 0) != 0) inFileHeader = false;
+            }
             // A tune begins at its X, with a number after it or without, and its header runs to its key
             if (!line.empty() && (line[0] == 'X') && ((line.size() == 1) || (line[1] == ':')) && !inHeader) {
                 tunes.emplace_back();
                 tunes.back().m_strict = isStrictFile;
+                for (const auto &[headerLine, headerLineNum] : fileHeader) {
+                    if (headerLine.rfind("%%", 0) == 0) {
+                        this->Directive(tunes.back(), headerLine.substr(2), false);
+                    }
+                    else {
+                        this->HeaderField(tunes.back(), headerLine[0], headerLine.substr(2), headerLineNum);
+                    }
+                }
                 if (line.size() > 2) tunes.back().m_number = Trimmed(line.substr(2).substr(0, line.substr(2).find('%')));
                 tunes.back().m_symbols = { { '~', "!roll!" }, { 'H', "!fermata!" }, { 'L', "!accent!" },
                     { 'M', "!lowermordent!" }, { 'O', "!coda!" }, { 'P', "!uppermordent!" }, { 'S', "!segno!" },
