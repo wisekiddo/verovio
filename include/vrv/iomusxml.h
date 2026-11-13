@@ -18,6 +18,7 @@
 //----------------------------------------------------------------------------
 
 #include "attdef.h"
+#include "expansionmap.h"
 #include "fraction.h"
 #include "iobase.h"
 #include "metersig.h"
@@ -116,111 +117,12 @@ namespace musicxml {
         Fraction m_timeStamp;
     };
 
-    struct EndingInfo {
-        EndingInfo() {}
-
-        EndingInfo(const std::string &number, const std::string &type, const std::string &text)
-        {
-            m_number = number;
-            m_type = type;
-            m_text = text;
-        }
-
-        std::string m_number;
-        std::string m_type;
-        std::string m_text;
-    };
-
-    struct RepeatInfo {
-        RepeatInfo()
-        {
-            m_times = 1;
-            m_afterJump = false;
-        }
-
-        RepeatInfo(int times, bool afterJump)
-        {
-            m_times = times;
-            m_afterJump = afterJump;
-        }
-
-        int m_times;
-        bool m_afterJump;
-    };
-
-    struct JumpInfo {
-        typedef enum { NONE = 0, DALSEGNO, DACAPO, TOCODA } JUMPTYPE;
-
-        JumpInfo() { m_jump = NONE; }
-        JumpInfo(JUMPTYPE jump, const std::string &label, const std::list<int> &times)
-        {
-            m_label = label;
-            m_jump = jump;
-            m_times = times;
-        }
-        JumpInfo(JUMPTYPE jump, const std::list<int> &times)
-        {
-            m_jump = jump;
-            m_times = times;
-        }
-        JumpInfo(JUMPTYPE jump) { m_jump = jump; }
-
-        std::string m_label;
-        JUMPTYPE m_jump;
-        std::list<int> m_times;
-    };
-
-    struct FineInfo {
-        FineInfo() { m_fine = false; }
-        FineInfo(bool fine) { m_fine = fine; }
-
-        bool m_fine;
-    };
-
-    struct SectionInfo {
-        SectionInfo(bool repeatStart = false)
-        {
-            m_visited = 0;
-            m_classId = SECTION;
-            m_target = NULL;
-            m_repeatStart = repeatStart;
-        }
-        SectionInfo(const EndingInfo &endingInfo)
-        {
-            m_visited = 0;
-            m_classId = ENDING;
-            m_target = NULL;
-            m_endingInfo = endingInfo;
-            m_repeatStart = false;
-        }
-        SectionInfo(const RepeatInfo &repeatInfo)
-        {
-            m_visited = 0;
-            m_classId = SECTION;
-            m_target = NULL;
-            m_repeatInfo = repeatInfo;
-            m_repeatStart = false;
-        }
-
-        void merge(const EndingInfo &endingInfo)
-        {
-            m_classId = ENDING;
-            m_endingInfo = endingInfo;
-        }
-
-        ClassId m_classId;
-        Object *m_target;
-        // what a dalsegno and a tocoda name: a segno's label and a coda's are two kinds (MusicXML pairs dalsegno
-        // with segno, tocoda with coda)
-        std::string m_segnoLabel;
-        std::string m_codaLabel;
-        EndingInfo m_endingInfo;
-        RepeatInfo m_repeatInfo;
-        bool m_repeatStart;
-        JumpInfo m_jumpInfo;
-        FineInfo m_fineInfo;
-        int m_visited;
-    };
+    // What an order of play is worked out from is every reader's (expansionmap.h): there is one rule for it.
+    using EndingInfo = play::EndingInfo;
+    using RepeatInfo = play::RepeatInfo;
+    using JumpInfo = play::JumpInfo;
+    using FineInfo = play::FineInfo;
+    using SectionInfo = play::SectionInfo;
 
     struct ClefChange {
         ClefChange(const std::string &measureNum, Staff *staff, Layer *layer, Clef *clef, const int &scoreOnset,

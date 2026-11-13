@@ -8,7 +8,10 @@
 #ifndef __VRV_EXPANSION_MAP_H__
 #define __VRV_EXPANSION_MAP_H__
 
+#include <list>
 #include <map>
+#include <string>
+#include <vector>
 
 //----------------------------------------------------------------------------
 
@@ -17,6 +20,8 @@
 
 namespace vrv {
 
+class Measure;
+class Object;
 class Score;
 class Section;
 
@@ -40,6 +45,134 @@ private:
     std::map<std::string, size_t> m_timesNamed;
     size_t m_leastCost = 0;
 };
+
+/**
+ * What an order of play is worked out from: the score as a run of parts, each a plain section or an ending, with what
+ * its barlines and marks say (where a repeat starts and how often it is played, an ending's number, a jump, a fine,
+ * the labels a jump names). Every reader that works out an order gives it in this form to WriteOrderOfPlay.
+ */
+namespace play {
+
+struct EndingInfo {
+    EndingInfo() {}
+
+    EndingInfo(const std::string &number, const std::string &type, const std::string &text)
+    {
+        m_number = number;
+        m_type = type;
+        m_text = text;
+    }
+
+    std::string m_number;
+    std::string m_type;
+    std::string m_text;
+};
+
+struct RepeatInfo {
+    RepeatInfo()
+    {
+        m_times = 1;
+        m_afterJump = false;
+    }
+
+    RepeatInfo(int times, bool afterJump)
+    {
+        m_times = times;
+        m_afterJump = afterJump;
+    }
+
+    int m_times;
+    bool m_afterJump;
+};
+
+struct JumpInfo {
+    typedef enum { NONE = 0, DALSEGNO, DACAPO, TOCODA } JUMPTYPE;
+
+    JumpInfo() { m_jump = NONE; }
+    JumpInfo(JUMPTYPE jump, const std::string &label, const std::list<int> &times)
+    {
+        m_label = label;
+        m_jump = jump;
+        m_times = times;
+    }
+    JumpInfo(JUMPTYPE jump, const std::list<int> &times)
+    {
+        m_jump = jump;
+        m_times = times;
+    }
+    JumpInfo(JUMPTYPE jump) { m_jump = jump; }
+
+    std::string m_label;
+    JUMPTYPE m_jump;
+    std::list<int> m_times;
+};
+
+struct FineInfo {
+    FineInfo() { m_fine = false; }
+    FineInfo(bool fine) { m_fine = fine; }
+
+    bool m_fine;
+};
+
+struct SectionInfo {
+    SectionInfo(bool repeatStart = false)
+    {
+        m_visited = 0;
+        m_classId = SECTION;
+        m_target = NULL;
+        m_repeatStart = repeatStart;
+    }
+    SectionInfo(const EndingInfo &endingInfo)
+    {
+        m_visited = 0;
+        m_classId = ENDING;
+        m_target = NULL;
+        m_endingInfo = endingInfo;
+        m_repeatStart = false;
+    }
+    SectionInfo(const RepeatInfo &repeatInfo)
+    {
+        m_visited = 0;
+        m_classId = SECTION;
+        m_target = NULL;
+        m_repeatInfo = repeatInfo;
+        m_repeatStart = false;
+    }
+
+    void merge(const EndingInfo &endingInfo)
+    {
+        m_classId = ENDING;
+        m_endingInfo = endingInfo;
+    }
+
+    ClassId m_classId;
+    Object *m_target;
+    // what a dalsegno and a tocoda name: a segno's label and a coda's are two kinds (MusicXML pairs dalsegno
+    // with segno, tocoda with coda)
+    std::string m_segnoLabel;
+    std::string m_codaLabel;
+    EndingInfo m_endingInfo;
+    RepeatInfo m_repeatInfo;
+    bool m_repeatStart;
+    JumpInfo m_jumpInfo;
+    FineInfo m_fineInfo;
+    int m_visited;
+};
+
+/** The parts in score order, each with its measures */
+typedef std::vector<std::pair<SectionInfo, std::vector<Measure *>>> Sections;
+
+} // namespace play
+
+/**
+ * The order of play of [sections]: repeats, endings in the passes their numbers name, jumps (da capo, dal segno, to
+ * coda) and fine. The one rule of the engine, for every format: each part's m_target is the element named in the
+ * order. Counts its visits in the parts.
+ */
+xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections);
+
+/** The numbers in a list like "1, 2" (an ending's passes, the times a jump is taken) */
+std::list<int> parseInts(const std::string &str);
 
 class ExpansionMap {
 
@@ -112,9 +245,6 @@ private:
 
     /** Ads an id string to an original/notated id */
     bool AddExpandedIDToExpansionMap(const std::string &origXmlId, std::string newXmlId);
-
-    std::string CreateSection(
-        Section *section, const ListOfObjects::iterator &first, const ListOfObjects::iterator &last);
 
 public:
     /** The expansion map indicates which xmlId has been repeated (expanded) elsewhere */

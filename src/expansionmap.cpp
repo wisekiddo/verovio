@@ -9,11 +9,16 @@
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
 #include <cassert>
+#include <climits>
+#include <optional>
+#include <sstream>
 #include <iostream>
 
 //----------------------------------------------------------------------------
 
+#include "dir.h"
 #include "editorial.h"
 #include "ending.h"
 #include "expansion.h"
@@ -22,6 +27,7 @@
 #include "measure.h"
 #include "plistinterface.h"
 #include "rdg.h"
+#include "repeatmark.h"
 #include "score.h"
 #include "section.h"
 #include "timeinterface.h"
@@ -398,6 +404,84 @@ void ExpansionMap::ToJson(std::string &output)
     output = expansionmap.json();
 }
 
+namespace {
+
+    /** What the marks in a measure say of the order of play */
+    struct PlayMarks {
+        bool m_segno = false;
+        bool m_coda = false;
+        bool m_fine = false;
+        play::JumpInfo::JUMPTYPE m_jump = play::JumpInfo::NONE;
+    };
+
+    /**
+     * The marks of [measure] that say something of the order: a repeatMark by its function, and a direction typed
+     * as the MusicXML reader types the jumps it reads ("dacapo", "dalsegno", "tocoda", "fine").
+     */
+    PlayMarks MarksOf(const Measure *measure)
+    {
+        PlayMarks marks;
+        for (const Object *child : measure->GetChildren()) {
+            if (child->Is(REPEATMARK)) {
+                switch (vrv_cast<const RepeatMark *>(child)->GetFunc()) {
+                    case repeatMarkLog_FUNC_segno: marks.m_segno = true; break;
+                    case repeatMarkLog_FUNC_coda: marks.m_coda = true; break;
+                    case repeatMarkLog_FUNC_fine: marks.m_fine = true; break;
+                    case repeatMarkLog_FUNC_daCapo:
+                    case repeatMarkLog_FUNC_daCapoAlFine:
+                    case repeatMarkLog_FUNC_daCapoAlCoda: marks.m_jump = play::JumpInfo::DACAPO; break;
+                    case repeatMarkLog_FUNC_dalSegno:
+                    case repeatMarkLog_FUNC_dalSegnoAlFine:
+                    case repeatMarkLog_FUNC_dalSegnoAlCoda: marks.m_jump = play::JumpInfo::DALSEGNO; break;
+                    default: break;
+                }
+            }
+            else if (child->Is(DIR)) {
+                const std::string type = vrv_cast<const Dir *>(child)->GetType();
+                if (type == "dacapo") marks.m_jump = play::JumpInfo::DACAPO;
+                if (type == "dalsegno") marks.m_jump = play::JumpInfo::DALSEGNO;
+                if (type == "tocoda") marks.m_jump = play::JumpInfo::TOCODA;
+                if (type == "fine") marks.m_fine = true;
+            }
+        }
+        return marks;
+    }
+
+    /** A measure in score order, the ending it stands in (or none) and the element it is a child of */
+    struct PlayedMeasure {
+        Measure *m_measure;
+        Ending *m_ending;
+        Object *m_parent;
+    };
+
+    void GatherMeasures(Object *parent, Ending *ending, std::vector<PlayedMeasure> &measures)
+    {
+        for (Object *child : parent->GetChildren()) {
+            if (child->Is(MEASURE)) {
+                measures.push_back({ vrv_cast<Measure *>(child), ending, parent });
+            }
+            else if (child->Is(SECTION)) {
+                GatherMeasures(child, ending, measures);
+            }
+            else if (child->Is(ENDING)) {
+                GatherMeasures(child, vrv_cast<Ending *>(child), measures);
+            }
+        }
+    }
+
+    /** Whether [container] holds [measures] and no other measure, section or ending */
+    bool HoldsOnly(const Object *container, const std::vector<Measure *> &measures)
+    {
+        size_t count = 0;
+        for (const Object *child : container->GetChildren()) {
+            if (child->Is({ SECTION, ENDING })) return false;
+            if (child->Is(MEASURE)) ++count;
+        }
+        return (count == measures.size());
+    }
+
+} // namespace
+
 void ExpansionMap::GenerateExpansionFor(Score *score)
 {
     m_isProcessed = true;
@@ -407,7 +491,12 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
         return;
     }
 
-    if (score->FindAllDescendantsByType(SECTION).size() > 1) {
+    // The score's own sections (a section inside another is part of it: an order is worked out through them)
+    int topSections = 0;
+    for (const Object *child : score->GetChildren()) {
+        if (child->Is(SECTION)) ++topSections;
+    }
+    if (topSections > 1) {
         LogWarning("An expansion cannot be generated with more than one section");
         return;
     }
@@ -417,89 +506,333 @@ void ExpansionMap::GenerateExpansionFor(Score *score)
     // out. (Only an assert said so: without it the null section was read)
     if (!section) return;
 
-    ArrayOfObjects childrenArray = section->GetChildrenForModification();
-    ListOfObjects children(childrenArray.begin(), childrenArray.end());
+    // The order is worked out by the rule every format has (WriteOrderOfPlay), from the score as it stands: its
+    // measures in score order, the endings they stand in, their repeat signs and the marks of a jump. (This worked
+    // out an order of its own, from repeat signs alone and only for measures that stood directly in the section:
+    // an ending was played in every pass, a jump was not taken, and a score whose measures stood in endings or in
+    // sections of the section played no repeat at all.)
+    std::vector<PlayedMeasure> measures;
+    GatherMeasures(section, NULL, measures);
+    if (measures.empty()) return;
 
+    // The parts: a new one where a container (a section, an ending) or a repeat starts, at a segno or a coda, and
+    // after a part was closed by a repeat end, a jump or a fine. As the MusicXML reader parts its score.
+    play::Sections parts;
+    bool isOrdered = false; // whether anything in the score says more than "once through"
+    bool startsPart = true;
+    bool startsRepeat = false;
+    const size_t count = measures.size();
+    for (size_t i = 0; i < count; ++i) {
+        const PlayedMeasure &current = measures[i];
+        Measure *measure = current.m_measure;
+        const PlayMarks marks = MarksOf(measure);
+        const bool isNewContainer = (i == 0) || (measures[i - 1].m_parent != current.m_parent);
+        const bool isRepeatStart = startsRepeat || ExpansionMap::IsRepeatStart(measure);
+        if (startsPart || isNewContainer || isRepeatStart || marks.m_segno || marks.m_coda) {
+            play::SectionInfo info(isRepeatStart);
+            // Every part of an ending is the ending's (one that a mark or a repeat start divides is played whole
+            // in its passes, as one ending written as two brackets is)
+            if (current.m_ending) info.merge(play::EndingInfo(current.m_ending->GetN(), "", ""));
+            if (marks.m_segno) info.m_segnoLabel = "segno";
+            if (marks.m_coda) info.m_codaLabel = "coda";
+            parts.push_back({ info, {} });
+        }
+        parts.back().second.push_back(measure);
+        play::SectionInfo &part = parts.back().first;
+
+        // A repeat end on this measure's right, or on the left of the next. (One on the left of the first measure
+        // has nothing before it to repeat.)
+        const bool isRepeatEnd = ExpansionMap::IsRepeatEnd(measure)
+            || ((i + 1 < count) && ExpansionMap::IsPreviousRepeatEnd(measures[i + 1].m_measure));
+        startsPart = false;
+        if (isRepeatEnd) {
+            // (in an ending the rule goes by the endings' numbers, not by this)
+            part.m_repeatInfo = play::RepeatInfo(2, false);
+            startsPart = true;
+        }
+        if (marks.m_jump == play::JumpInfo::DACAPO) {
+            part.m_jumpInfo = play::JumpInfo(play::JumpInfo::DACAPO, std::list<int>{ 1 });
+        }
+        else if (marks.m_jump == play::JumpInfo::DALSEGNO) {
+            part.m_jumpInfo = play::JumpInfo(play::JumpInfo::DALSEGNO, "segno", std::list<int>{ 1 });
+        }
+        else if (marks.m_jump == play::JumpInfo::TOCODA) {
+            part.m_jumpInfo = play::JumpInfo(play::JumpInfo::TOCODA, "coda", std::list<int>{ 2 });
+        }
+        if (marks.m_fine) part.m_fineInfo = play::FineInfo(true);
+        // (the end of an ending needs no word here: what follows it stands in another container)
+        if ((marks.m_jump != play::JumpInfo::NONE) || marks.m_fine) startsPart = true;
+        startsRepeat = ExpansionMap::IsNextRepeatStart(measure);
+
+        isOrdered = isOrdered || isRepeatEnd || current.m_ending || (marks.m_jump != play::JumpInfo::NONE);
+    }
+    // Nothing to follow: the score is left as it stands
+    if (!isOrdered) return;
+
+    // Each part gets the element the order names: the ending or the section that holds just its measures, where
+    // that is a child of the score's section; otherwise a new section there, with its measures and what stands
+    // before each of them (a change of key, a break).
+    for (auto &[info, partMeasures] : parts) {
+        Object *parent = partMeasures.front()->GetParent();
+        if ((parent != section) && (parent->GetParent() == section) && HoldsOnly(parent, partMeasures)
+            && (parent->Is(ENDING) == (info.m_classId == ENDING))) {
+            info.m_target = parent;
+            continue;
+        }
+        Object *top = partMeasures.front();
+        while (top->GetParent() != section) top = top->GetParent();
+        Section *target = new Section();
+        if (top->Is(MEASURE)) {
+            // ahead of what stands before the measure, which goes with it
+            Object *first = top;
+            for (Object *before = section->GetPrevious(first); before && !before->Is({ MEASURE, SECTION, ENDING, EXPANSION });
+                before = section->GetPrevious(first)) {
+                first = before;
+            }
+            section->InsertBefore(first, target);
+        }
+        else {
+            section->InsertBefore(top, target);
+        }
+        for (Measure *measure : partMeasures) {
+            Object *from = measure->GetParent();
+            std::list<Object *> moved{ measure };
+            for (Object *before = from->GetPrevious(measure);
+                before && !before->Is({ MEASURE, SECTION, ENDING, EXPANSION }); before = from->GetPrevious(before)) {
+                moved.push_front(before);
+            }
+            for (Object *object : moved) {
+                from->DetachChild(from->GetChildIndex(object));
+                target->AddChild(object);
+            }
+        }
+        info.m_target = target;
+    }
+
+    const xsdAnyURI_List order = WriteOrderOfPlay(parts);
+    if (order.empty()) return;
     Expansion *expansion = new Expansion();
-
-    ListOfObjects::iterator first = children.begin();
-    ListOfObjects::iterator last = children.begin();
-
-    bool isStartFromPrevious = false;
-    // A repeat end on the left of the first measure has nothing before it to repeat. (It made a section of that
-    // measure itself, played it twice, and lost the repeat that followed)
-    bool hasMeasureBefore = false;
-    // A section has just been closed: the measure that follows starts the next one. (The start of the last
-    // section was kept, a measure that had been moved into that section already.)
-    bool isAfterSection = false;
-    // The sections made since the last repeat start, or since the beginning: a repeat end goes back to there, as
-    // it does in MusicXmlInput::CreateExpansion, so what was repeated on the way is played once more.
-    // `C :| E :| G` is C C E C E G from every format.
-    std::vector<std::string> sinceStart;
-    // The order is gathered here and given to the expansion once, and no more of it is written than can be
-    // followed. (Each reference was added to the expansion's own list, which is copied whole for every one, and
-    // the cost was counted when all of the order stood there: 400 repeat ends in a row took half a minute)
-    OrderOfPlay order;
-    const auto repeat = [&](const std::string &id) {
-        if (id.empty()) return;
-        order.Add("#" + id);
-        for (const std::string &before : sinceStart) {
-            if (!order.Add("#" + before)) break;
-        }
-        order.Add("#" + id);
-        sinceStart.push_back(id);
-    };
-
-    for (auto current = children.begin(); current != children.end(); current++) {
-        if ((*current)->Is(MEASURE)) {
-            Measure *measure = vrv_cast<Measure *>(*current);
-            // The current measure has a repeat end on its left
-            if (hasMeasureBefore && ExpansionMap::IsPreviousRepeatEnd(measure)) {
-                repeat(this->CreateSection(section, first, last));
-                isAfterSection = true;
-            }
-            hasMeasureBefore = true;
-            if (isStartFromPrevious || ExpansionMap::IsRepeatStart(measure)) {
-                sinceStart.clear();
-                first = current;
-            }
-            else if (isAfterSection) {
-                first = current;
-            }
-            isAfterSection = false;
-            // The current measure has a repeat start on its right
-            isStartFromPrevious = ExpansionMap::IsNextRepeatStart(measure);
-            last = current;
-            if (ExpansionMap::IsRepeatEnd(measure)) {
-                repeat(this->CreateSection(section, first, last));
-                isAfterSection = true;
-            }
-        }
-    }
-
-    if (order.GetRefs().empty()) {
-        delete expansion;
-    }
-    else {
-        expansion->GetPlistInterface()->SetPlist(order.GetRefs());
-        section->InsertChild(expansion, 0);
-    }
+    expansion->GetPlistInterface()->SetPlist(order);
+    section->InsertChild(expansion, 0);
 }
 
-std::string ExpansionMap::CreateSection(
-    Section *section, const ListOfObjects::iterator &first, const ListOfObjects::iterator &last)
-{
-    // Nothing to make a section of: its measures are in one already (the same repeat end written on both of the
-    // measures it stands between)
-    if (section->GetChildIndex(*first) == -1) return "";
+//----------------------------------------------------------------------------
+// The order of play
+//----------------------------------------------------------------------------
 
-    Section *subSection = new Section();
-    section->InsertBefore(*first, subSection);
-    for (auto sectionCurrent = first; sectionCurrent != std::next(last); sectionCurrent++) {
-        section->DetachChild((*sectionCurrent)->GetIdx());
-        subSection->AddChild(*sectionCurrent);
+// vibe-coded on Claude AI using prompt:
+//
+// in C++, write a concise function to parse a string of comma separated ints with optional spaces into a list (array or
+// vector) of ints
+//
+// verified at https://onlinegdb.com/blxCanxpAW
+std::list<int> parseInts(const std::string &str)
+{
+    std::list<int> result;
+    std::stringstream ss(str);
+    int num;
+    while (ss >> num) {
+        result.push_back(num);
+        if (ss.peek() == ',') ss.ignore();
     }
-    return subSection->GetID();
+    return result;
+}
+
+xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
+{
+    // The order is gathered here and given to the expansion once, and no more of it is written than can be
+    // followed. (Each reference was added to the expansion's own list, which is copied whole for every one, and
+    // the cost was counted when all of the order stood there: 60 measures each marked to be played 100 times took
+    // two minutes and more to load, 100 of them a quarter of an hour)
+    OrderOfPlay order;
+    bool isFollowed = true;
+
+    // iterate on sections to create expansion
+    // prepopulate the labels map because there are forward jumps (tocoda)
+    bool jumpBack = false;
+    auto iter = sections.begin();
+    auto rptIter = iter;
+    auto secIter = iter;
+    auto endIter = iter;
+    std::map<std::string, decltype(iter)> segnos, codas;
+    for (auto it = sections.begin(); it != sections.end(); ++it) {
+        if (!it->first.m_segnoLabel.empty()) segnos.insert({ it->first.m_segnoLabel, it });
+        if (!it->first.m_codaLabel.empty()) codas.insert({ it->first.m_codaLabel, it });
+    }
+    // The pass of the repeat being played, and whether what stands at [it] is played in it: an ending is played in
+    // the passes its number names, in a repeat as anywhere. (The bars of a repeat were played again whole, an ending
+    // among them too: where plain bars stand between a first ending and the bar with its repeat sign, the ending
+    // numbered 1 was played on pass 2 as well. 257 of MuseNote's songs are written so.) An ending with no number
+    // names no pass and is played as before.
+    int pass = 1;
+    const auto isPlayed = [&pass, &rptIter](decltype(iter) it) {
+        // (an ending the repeat itself starts in is that repeat's own music)
+        if ((it->first.m_classId != ENDING) || (it == rptIter)) return true;
+        const std::list<int> numbers = parseInts(it->first.m_endingInfo.m_number);
+        return numbers.empty() || (std::find(numbers.begin(), numbers.end(), pass) != numbers.end());
+    };
+    while (isFollowed && (iter != sections.end())) {
+        // increment visited count
+        iter->first.m_visited++;
+
+        // remember this repeat start
+        if (iter->first.m_repeatStart) {
+            rptIter = iter;
+            pass = 1;
+        }
+
+        // handle section
+        if (iter->first.m_classId == SECTION) {
+            // add the section
+            std::string ref = "#" + iter->first.m_target->GetID();
+            isFollowed = order.Add(ref);
+
+            // repeat the sections, beginning with the repeat start
+            int times = (jumpBack && !iter->first.m_repeatInfo.m_afterJump) ? 1 : iter->first.m_repeatInfo.m_times;
+            for (int t = 2; isFollowed && (t <= times); ++t) {
+                ++pass;
+                for (auto it = rptIter; isFollowed && (it != std::next(iter)); ++it) {
+                    if (!isPlayed(it)) continue;
+                    std::string ref = "#" + it->first.m_target->GetID();
+                    isFollowed = order.Add(ref);
+                }
+            }
+
+            // remember last section
+            secIter = endIter = iter++;
+        }
+        // ending
+        else {
+            // gather the endings: each pass, and the endings played in it in score order. An ending is played in
+            // the passes its number names that no ending before it has. One that names none goes on from the ending
+            // just before it when it has that one's number and no repeat ends that one (one ending written as two
+            // brackets); otherwise it is the pass after the last: a blank number (MusicXML: there is an ending, the
+            // writer could not tell which), or a pass the repeat before it has left
+            std::map<int, std::vector<decltype(iter)>> endings;
+            auto begIter = iter;
+            std::optional<decltype(iter)> rptNestedIter;
+            while (iter != sections.end() && iter->first.m_classId == ENDING) {
+                const std::list<int> numbers = parseInts(iter->first.m_endingInfo.m_number);
+                bool hasPass = false;
+                for (int i : numbers) {
+                    if (endings.contains(i)) continue;
+                    endings[i].push_back(iter);
+                    hasPass = true;
+                }
+                const bool goesOn = !hasPass && (iter != begIter)
+                    && (parseInts(std::prev(iter)->first.m_endingInfo.m_number) == numbers)
+                    && (std::prev(iter)->second.back()->GetRight() != BARRENDITION_rptend);
+                if (goesOn) {
+                    for (auto &pass : endings) {
+                        if (pass.second.back() == std::prev(iter)) pass.second.push_back(iter);
+                    }
+                }
+                else if (!hasPass) {
+                    const int last = endings.empty() ? 0 : endings.rbegin()->first;
+                    endings[(last < INT_MAX) ? last + 1 : last].push_back(iter);
+                }
+                endIter = iter++;
+
+                // remember a nested repeat start
+                if (endIter != begIter && endIter->first.m_repeatStart) rptNestedIter = endIter;
+
+                // increment visited count of subsequent sections
+                if (endIter != begIter) endIter->first.m_visited++;
+            }
+
+            // when jumping back, keep only last ending: the last of its repeat. That one may stand further on, after
+            // plain bars: an ending whose numbers go on from these (a "2" after this "1"). Then none of these is
+            // played. One that starts its numbers again belongs to another repeat.
+            if (jumpBack && endings.size() > 0) {
+                bool isLast = true;
+                for (auto it = iter; it != sections.end(); ++it) {
+                    if (it->first.m_classId == ENDING) {
+                        const std::list<int> numbers = parseInts(it->first.m_endingInfo.m_number);
+                        isLast = numbers.empty()
+                            || (*std::min_element(numbers.begin(), numbers.end()) <= endings.rbegin()->first);
+                        break;
+                    }
+                    if (it->first.m_repeatStart) break;
+                }
+                if (isLast) {
+                    endings.erase(endings.begin(), std::prev(endings.end()));
+                    endIter = endings.begin()->second.back();
+                }
+                else {
+                    endings.clear();
+                }
+            }
+
+            // whether a repeat sign follows these endings after plain bars, before another ending or repeat begins
+            bool signFollows = false;
+            for (auto it = iter; (it != sections.end()) && (it->first.m_classId == SECTION) && !it->first.m_repeatStart;
+                ++it) {
+                const data_BARRENDITION right = it->second.back()->GetRight();
+                if ((right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth)) {
+                    signFollows = true;
+                    break;
+                }
+            }
+
+            // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
+            // skip section first time because it was already added in the SECTION block
+            for (auto ending = endings.begin(); isFollowed && (ending != endings.end()); ++ending) {
+                if (ending != endings.begin()) {
+                    // one ending for several passes comes round by the repeat sign at its end. Where that sign stands
+                    // further on, after plain bars, it brings the ending round itself, in the passes it names
+                    if ((ending->second == std::prev(ending)->second) && signFollows) continue;
+                    ++pass;
+                    for (auto it = rptIter; isFollowed && (it != std::next(secIter)); ++it) {
+                        if (!isPlayed(it)) continue;
+                        std::string ref = "#" + it->first.m_target->GetID();
+                        isFollowed = order.Add(ref);
+                    }
+                }
+                for (auto it = ending->second.begin(); isFollowed && (it != ending->second.end()); ++it) {
+                    std::string endref = "#" + (*it)->first.m_target->GetID();
+                    isFollowed = order.Add(endref);
+                }
+            }
+
+            // set the repetition to the (latest) nested one
+            if (rptNestedIter) {
+                rptIter = *rptNestedIter;
+                pass = 1;
+            }
+        }
+
+        // fine
+        if (jumpBack && endIter->first.m_fineInfo.m_fine) {
+            break;
+        }
+
+        // dacapo
+        if (endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DACAPO
+            && endIter->first.m_jumpInfo.m_times.end()
+                != std::find(endIter->first.m_jumpInfo.m_times.begin(), endIter->first.m_jumpInfo.m_times.end(),
+                    endIter->first.m_visited)) {
+            iter = sections.begin();
+            jumpBack = true;
+        }
+
+        // dalsegno / tocoda
+        if ((endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DALSEGNO
+                || endIter->first.m_jumpInfo.m_jump == play::JumpInfo::TOCODA)
+            && endIter->first.m_jumpInfo.m_times.end()
+                != std::find(endIter->first.m_jumpInfo.m_times.begin(), endIter->first.m_jumpInfo.m_times.end(),
+                    endIter->first.m_visited)) {
+            const auto &labels = (endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DALSEGNO) ? segnos : codas;
+            if (!labels.contains(endIter->first.m_jumpInfo.m_label)) {
+                LogWarning(
+                    "Order of play: Segno/Coda label '%s' not found", endIter->first.m_jumpInfo.m_label.c_str());
+            }
+            else {
+                iter = labels.at(endIter->first.m_jumpInfo.m_label);
+                jumpBack = endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DALSEGNO;
+            }
+        }
+    }
+    return order.GetRefs();
 }
 
 //----------------------------------------------------------------------------
