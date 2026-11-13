@@ -1800,9 +1800,18 @@ void Doc::ExpandExpansions()
         return;
     }
 
+    // Each measure's place in the score as written, before the order moves any (the spans are judged by it)
+    std::map<std::string, int> writtenBars;
+    for (Object *measure : this->FindAllDescendantsByType(MEASURE)) {
+        writtenBars.emplace(measure->GetID(), (int)writtenBars.size());
+    }
+
     xsdAnyURI_List existingList; // list of xml:id strings of elements already in the document
     xsdAnyURI_List deletionList; // list of xml:id strings of elements not cloned and to be deleted at the end
     m_expansionMap.Expand(startExpansion, existingList, startExpansion, deletionList, true);
+
+    // Every tie, slur and line of the score as played, judged by the order of play (patch 60)
+    m_expansionMap.FollowSpansInOrder(this, writtenBars);
 
     // save original/notated expansion as element in expanded MEI
     // Expansion *originalExpansion = new Expansion();

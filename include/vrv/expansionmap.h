@@ -226,6 +226,19 @@ public:
     void GenerateExpansionFor(Score *score);
 
     /**
+     * Judges every spanning element of the score as it is played (once Expand has written it out) by the order of
+     * play, originals and copies alike. A copy is given its end when it is made (the latest copy of the end so far),
+     * or by a count of bars, which in the score as played counts played bars: across a jump that is another pass's
+     * note, or a note already played. [writtenBars] is each measure's place in the score as written, taken before
+     * Expand moved anything.
+     * What joins notes (a tie, a glissando, a beam across bars) holds in a pass only where the play goes from its
+     * start to its end within the bars it joins: its end is that copy, else it is taken out of that pass. What spans
+     * music covers the bars played from its start while the play stays within the bars it spans on the page: its end
+     * is the copy the play reaches there, else the last note, chord or rest it covers before the play leaves them.
+     */
+    void FollowSpansInOrder(Object *root, const std::map<std::string, int> &writtenBars);
+
+    /**
      * @name Setter and getter for the generating attempt flag
      */
     ///@{

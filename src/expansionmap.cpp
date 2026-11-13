@@ -22,7 +22,10 @@
 #include "dir.h"
 #include "editorial.h"
 #include "ending.h"
+#include "comparison.h"
 #include "expansion.h"
+#include "layer.h"
+#include "layerelement.h"
 #include "lem.h"
 #include "linkinginterface.h"
 #include "measure.h"
@@ -31,6 +34,7 @@
 #include "repeatmark.h"
 #include "score.h"
 #include "section.h"
+#include "staff.h"
 #include "timeinterface.h"
 #include "vrv.h"
 
@@ -327,6 +331,201 @@ bool ExpansionMap::UpdateIDs(Object *object)
         this->UpdateIDs(o);
     }
     return true;
+}
+
+//----------------------------------------------------------------------------
+// The spans of the score as played (patch 60; MuseNote's V3_2_0_37, root cause RC18)
+//----------------------------------------------------------------------------
+
+namespace {
+
+std::string WithoutHash(const std::string &ref)
+{
+    return (ref.rfind("#", 0) == 0) ? ref.substr(1) : ref;
+}
+
+// Every element with an id under [object], in score order
+void CollectWithIds(Object *object, std::vector<Object *> &found)
+{
+    for (Object *child : object->GetChildren()) {
+        if (!child->GetID().empty()) found.push_back(child);
+        CollectWithIds(child, found);
+    }
+}
+
+// What joins notes: it is there in a pass only where they are played one after the other
+bool JoinsNotes(const Object *element)
+{
+    return element->Is({ TIE, GLISS, BEAMSPAN });
+}
+
+// The last note, chord or rest of the layer [layerN] of the staff [staffN] in [measure], or of the staff's first layer
+// where [layerN] is 0 or not there. Null where the staff has none there.
+LayerElement *LastCovered(Measure *measure, int staffN, int layerN)
+{
+    AttNIntegerComparison isStaff(STAFF, staffN);
+    Object *staff = measure->FindDescendantByComparison(&isStaff, 1);
+    if (!staff) return NULL;
+    Object *layer = NULL;
+    if (layerN > 0) {
+        AttNIntegerComparison isLayer(LAYER, layerN);
+        layer = staff->FindDescendantByComparison(&isLayer, 1);
+    }
+    if (!layer) layer = staff->GetFirst(LAYER);
+    if (!layer) return NULL;
+    ClassIdsComparison isTime({ CHORD, NOTE, REST, MREST, MULTIREST, SPACE, MSPACE });
+    ListOfObjects elements;
+    layer->FindAllDescendantsByComparison(&elements, &isTime);
+    for (auto it = elements.rbegin(); it != elements.rend(); ++it) {
+        // A chord's note: the chord is what is played
+        if ((*it)->Is(NOTE) && (*it)->GetFirstAncestor(CHORD)) continue;
+        return vrv_cast<LayerElement *>(*it);
+    }
+    return NULL;
+}
+
+} // namespace
+
+void ExpansionMap::FollowSpansInOrder(Object *root, const std::map<std::string, int> &writtenBars)
+{
+    // The measures as played, each with the place in the score as written of the measure it is a copy of (-1: none)
+    std::vector<Measure *> played;
+    for (Object *object : root->FindAllDescendantsByType(MEASURE)) played.push_back(vrv_cast<Measure *>(object));
+    const int count = (int)played.size();
+    std::vector<int> written(count, -1);
+    // Every element by its id with the measure played it is in; the copies of each element of the score as written,
+    // by that measure; and the spanning elements
+    std::map<std::string, std::pair<Object *, int>> byId;
+    std::map<std::string, std::map<int, Object *>> copiesOf;
+    std::vector<std::pair<Object *, int>> spans;
+    for (int k = 0; k < count; ++k) {
+        const auto bar = writtenBars.find(this->GetExpansionIDsForElement(played[k]->GetID()).front());
+        if (bar != writtenBars.end()) written[k] = bar->second;
+        std::vector<Object *> elements;
+        CollectWithIds(played[k], elements);
+        for (Object *element : elements) {
+            byId[element->GetID()] = { element, k };
+            copiesOf[this->GetExpansionIDsForElement(element->GetID()).front()].emplace(k, element);
+            if (element->HasInterface(INTERFACE_TIME_SPANNING)) spans.push_back({ element, k });
+        }
+    }
+
+    std::vector<Object *> outOfPass;
+    for (const auto &[element, k] : spans) {
+        TimeSpanningInterface *span = element->GetTimeSpanningInterface();
+        assert(span);
+        // Where it starts: its start's measure, or its own where it starts at a time
+        int from = k;
+        Object *start = NULL;
+        if (span->HasStartid()) {
+            const auto found = byId.find(WithoutHash(span->GetStartid()));
+            if (found == byId.end()) continue;
+            start = found->second.first;
+            from = found->second.second;
+        }
+        // Where it ends in the score as written: the measure of its end, or the count of measures from its own
+        int endBar = -1;
+        std::string endWritten;
+        if (span->HasEndid()) {
+            const auto found = byId.find(WithoutHash(span->GetEndid()));
+            if (found == byId.end()) continue;
+            endWritten = this->GetExpansionIDsForElement(found->first).front();
+            endBar = written[found->second.second];
+        }
+        else if (span->HasTstamp2()) {
+            if (written[k] < 0) continue;
+            endBar = written[k] + span->GetTstamp2().first;
+        }
+        else {
+            continue;
+        }
+        const int startBar = written[from];
+        if ((startBar < 0) || (endBar < 0)) continue;
+        const int low = std::min(startBar, endBar);
+        const int high = std::max(startBar, endBar);
+
+        // The play from its start while it stays within the bars it spans, up to its end. Its start played again
+        // is the next pass's, with its own copy of it.
+        int reached = -1;
+        int last = from;
+        std::map<int, int> passed; // each measure as written, where the play passed it on the way
+        for (int q = from; q < count; ++q) {
+            if ((written[q] < low) || (written[q] > high)) break;
+            if ((q > from) && (written[q] == startBar)) break;
+            passed.emplace(written[q], q);
+            last = q;
+            if (written[q] == endBar) {
+                reached = q;
+                break;
+            }
+        }
+
+        if (reached >= 0) {
+            if (span->HasEndid()) {
+                const auto copies = copiesOf.find(endWritten);
+                if (copies == copiesOf.end()) continue;
+                const auto copy = copies->second.find(reached);
+                if (copy == copies->second.end()) continue;
+                span->SetEndid("#" + copy->second->GetID());
+            }
+            else {
+                span->SetTstamp2({ reached - k, span->GetTstamp2().second });
+            }
+            // The notes it lists (a beam across bars): the copies played on the way
+            if (element->HasInterface(INTERFACE_PLIST)) {
+                PlistInterface *plist = element->GetPlistInterface();
+                assert(plist);
+                xsdAnyURI_List refs;
+                for (const std::string &ref : plist->GetPlist()) {
+                    refs.push_back(ref);
+                    const auto found = byId.find(WithoutHash(ref));
+                    if (found == byId.end()) continue;
+                    const auto way = passed.find(written[found->second.second]);
+                    if (way == passed.end()) continue;
+                    const auto copies = copiesOf.find(this->GetExpansionIDsForElement(found->first).front());
+                    if (copies == copiesOf.end()) continue;
+                    const auto copy = copies->second.find(way->second);
+                    if (copy != copies->second.end()) refs.back() = "#" + copy->second->GetID();
+                }
+                plist->SetPlist(refs);
+            }
+            continue;
+        }
+
+        // Its end is not played in this pass
+        if (JoinsNotes(element)) {
+            outOfPass.push_back(element);
+            continue;
+        }
+        // It ends on the last note, chord or rest it covers before the play leaves its bars: on its start's staff and
+        // layer, or on the staff it is given
+        int staffN = 0;
+        int layerN = 0;
+        if (start && start->GetFirstAncestor(STAFF)) {
+            staffN = vrv_cast<Staff *>(start->GetFirstAncestor(STAFF))->GetN();
+            const Object *layer = start->GetFirstAncestor(LAYER);
+            if (layer) layerN = vrv_cast<const Layer *>(layer)->GetN();
+        }
+        else if (!span->GetStaff().empty()) {
+            staffN = span->GetStaff().front();
+        }
+        LayerElement *covered = (staffN > 0) ? LastCovered(played[last], staffN, layerN) : NULL;
+        if (!covered) {
+            LogWarning("ExpansionMap: %s %s is not played to its end in a pass, and has no note there to end on: it is "
+                       "taken out of that pass",
+                element->GetClassName().c_str(), element->GetID().c_str());
+            outOfPass.push_back(element);
+            continue;
+        }
+        span->SetEndid("#" + covered->GetID());
+        span->ResetTimestamp2Log();
+    }
+
+    for (Object *element : outOfPass) {
+        LogDebug("ExpansionMap: %s %s is not in this pass (its end is not played after its start)",
+            element->GetClassName().c_str(), element->GetID().c_str());
+        element->GetParent()->DeleteChild(element);
+    }
 }
 
 bool ExpansionMap::AddExpandedIDToExpansionMap(const std::string &origXmlId, std::string newXmlId)
