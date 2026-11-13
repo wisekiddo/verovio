@@ -64,6 +64,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 54 | 2026-11-12 | Tuplets: nested ratios multiply, every MusicXML tuplet level is read, ABC tuplets hold the notes ABC gives them (11e1428) | `src/layerelement.cpp`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, `src/ioabc.cpp`, `include/vrv/ioabc.h`, +348 / -129 | A tuplet inside a tuplet plays the product of the ratios (MEI's rule; the innermost alone was read): an MEI file, or a MusicXML file that numbers each level, with nested tuplets plays otherwise, and no score of the corpus has one. A nested MusicXML tuplet holds its own level's ratio (3 and 3 where the inner one said 9); two tuplets that start or stop on one note are both read. An ABC tuplet holds the notes ABC gives it: 13 of the 194 ABC files of the parity set change (180 tuplets built where 130 were, and the notes that went with the lost ones are back; their generated ids move). Every MusicXML, MEI, Humdrum and PAE output of the corpus is byte-identical | Not offered upstream |
 | 55 | 2026-11-12 | What a reader asks of the engine: no staff labels, the channels of staves; a text keeps its own spaces through MEI (d6caaaf); amended the same day by: The channels given to staves reach the document the MIDI is written from (bc4c9fe, tb.19) | `include/vrv/options.h`, `src/options.cpp`, `src/view_page.cpp`, `src/doc.cpp`, `src/iomei.cpp`, +43 / -4 | Two options, both off by default: `staffLabelsHidden` (labels are not drawn and leave no room) and `midiStaffChannels` (a listed staff plays on the channel given). With both off no page, MEI, timemap or pitch map of the corpus changes. The MEI reader keeps a space at the start or end of an element's text unless the run holds a line break: 92 MIDI files of the corpus change, in the spaces of 3,673 lyric texts and one track name (the MIDI is written from the document read back from its own MEI) | Not offered upstream |
 | 56 | 2026-11-13 | MusicXML: an ending is played in the passes its number names, also where plain bars stand between the endings of a repeat; after a jump back the last ending of the repeat is the one played (6bca52a) | `src/iomusxml.cpp`, +58 / -5 | **Changes the order of play of 272 scores of the corpus, by design.** `MusicXmlInput::CreateExpansion` played the bars of a repeat again whole, an ending among them too: with plain bars between a first ending and the bar that holds its repeat sign, the ending numbered 1 was played on pass 2 as well (and after a D.C. or D.S. although it is not the last). Their MIDI, timemap, pitch map and the `<expansion>` of their MEI change; no page and nothing else of any MEI does. One score (Song For Guy) no longer plays a first ending's bar at all, which only its jump-back pass reached | Not offered upstream |
+| 57 | 2026-11-13 | One rule for the order of play, for every format: the general rule (MEI, ABC, Humdrum and any score with no order of its own) reads endings and jumps as the MusicXML reader's does (aefcf4e) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h` | **Changes the order of play of scores that are not MusicXML and have endings, jumps, or measures inside sections, by design.** `ExpansionMap::GenerateExpansionFor` knew repeat signs only, and only measures standing directly in the one section: an ending was played in every pass, no jump was taken, and a score with its measures in endings or sub-sections played no repeat. No output of the corpus changes (21,743 outputs, 0 differ): MusicXML goes through the same code as before, and no bundled score of another format has an ending or a jump | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2977,6 +2978,60 @@ and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
+
+### 57. One rule for the order of play (tb.21)
+
+MuseNote's root cause RC15 (plan V3_2_0_34), found while preparing the
+rebuilt ABC reader: the engine worked the order of play out in two places.
+`MusicXmlInput::CreateExpansion` had the rule with endings and jumps
+(patches 46, 56); every other format went through
+`ExpansionMap::GenerateExpansionFor`, which knew repeat signs only and
+looked only at measures that stand directly in the score's one section.
+So an MEI, ABC or Humdrum score never played an ending in its pass and
+took no jump, and an MEI file whose measures stand inside `<ending>`s or
+sections of the section played no repeat at all (a trial: 95 notes of a
+song of 188).
+
+**The rule is one function**, `WriteOrderOfPlay(play::Sections &)` in
+`expansionmap.cpp`: the body of `CreateExpansion`, moved unchanged, over
+the score as a run of parts. The part types (`EndingInfo`, `RepeatInfo`,
+`JumpInfo`, `FineInfo`, `SectionInfo`) moved with it into namespace `play`
+(`expansionmap.h`); namespace `musicxml` names them by alias. The MusicXML
+reader gathers its parts while reading, as before, and asks the rule.
+
+**`GenerateExpansionFor` builds the parts from the score as it stands**:
+its measures in score order, through sections and endings; a new part
+where a container (a section, an ending) or a repeat starts, at a segno or
+a coda, and after a repeat end, a jump or a fine. Marks: a `repeatMark` by
+its `@func`, and a `dir` typed as the MusicXML reader types the jumps it
+reads (`dacapo`, `dalsegno`, `tocoda`, `fine`). Every part of an ending is
+the ending's (one a mark divides is played whole in its passes). MEI holds
+no repeat count and no labels: a repeat is played twice, a D.C. or D.S. is
+taken once, a to-coda on the second visit, the labels are "segno" and
+"coda". Each part gets the element the order names: the section or ending
+that holds just its measures where that is a child of the score's section,
+otherwise a new section there. A score with no repeat end, no ending and
+no jump is left as it stands. Still refused: editorial content, and more
+than one section directly under `<score>`. `CreateSection` is gone.
+
+**Cases:** `test_tb21_one_order_engine.cpp` in the monorepo
+(`corelib/verovio/test/native`): scores said in MusicXML and as MEI with
+no order of its own (the engine's MEI, its `<expansion>` removed), which
+must play the same; MEI as another program writes it; what the general
+rule played rightly before. 13 deliberate breaks, 11 caught, 2 showed
+conditions that could not matter, which were removed.
+
+**Measured:** tool/parity, tb.20 against this: 21,743 outputs, 0 differ
+(beside songs added to the corpus since). All songs' MEI with the order
+taken out, read again: 2,744 of 2,765 play note for note as the song.
+The 21: 13 files hold an ending stop at a repeat sign with no ending open,
+where the MusicXML reader drops the repeat and the MEI plays it (MuseNote
+finding W51); 5 give a jump by `<sound>` alone, which the MEI does not
+hold; 2 repeat three times; 1 has endings whose numbers disagree.
+
+**What changes for a user:** a score that is not MusicXML and has no
+`<expansion>` (an MEI or Humdrum file, a score made in an editor that
+writes MEI) plays its endings in their passes and takes its jumps.
 
 ### 56. An ending is played in its own pass (tb.20)
 
