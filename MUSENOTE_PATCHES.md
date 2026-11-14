@@ -69,6 +69,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 59 | 2026-11-14 | ABC: a file is told by its tunes, and its file header sets the defaults of every tune (8db7dda) | `src/toolkit.cpp`, `src/ioabc.cpp` | **Reads ABC files the engine refused or misread.** `IdentifyInputFrom` looked at an ABC file's first character only; a file that began with an empty line, a comment or a file header (ABC 2.1, 2.2) was taken for MEI, PAE or GABC. Of 1,055 hand-written files and tunes read by detection alone, 345 were read before, 1,055 now. No output of the corpus changes (21,743 outputs, 0 differ) | Not offered upstream |
 | 60 | 2026-11-14 | Expansion: every tie, slur and line of the score as played is judged by the order of play (b1b4318) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/doc.cpp`, +221 | **Changes what 192 scores of the corpus play, by design** (MuseNote root cause RC18, finding W53). A copy of a spanning element got its end when it was made, or as a count of played bars: the second time through or after a jump a tie ended on another pass's note, or on one already played (a note held for the wrong length, its end note attacked again, or a note held past the end). 227 MIDI outputs of 21,743 change (192 songs and 35 corrected files of the same songs); no page, MEI, timemap, pitch map or id | Not offered upstream |
 | 61 | 2026-11-14 | Order of play: a repeat sign on the page is played (58ac878) | `src/expansionmap.cpp`, `src/iomusxml.cpp`, +30 | **Changes the order of play of 26 scores of the corpus, by design** (MuseNote root causes RC19, RC20; findings W54, W51). A repeat sign at the end of the last ending of its group was never taken (the passes were those its endings name only), and at a barline that holds an ending's stop the MusicXML reader dropped the repeat's count. Their MEI `<expansion>`, MIDI, timemap and pitch map change (186 outputs of 21,743, with the ended originals and corrected copies of the same songs); no page and no note id | Not offered upstream |
+| 62 | 2026-11-14 | MusicXML: a tie joins a note to the next note of its voice (62fff07) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +125 / -32 | **Changes what 31 corpus files play, by design** (MuseNote root cause RC21, finding W55): 41 ties in 27 songs joined a note to a later note of its pitch, one to 79 notes on (the notes between not heard as written); a one-note tie silenced its note. Their MEI, page and MIDI change. The MEI of 287 more scores loses 3,022 ties that had a start and no end (empty groups on the page, never heard); nothing drawn or heard changes there. 1,303 outputs of 21,743 in all; no note id | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2982,6 +2983,53 @@ and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
+
+### 62. A tie joins a note to the next note of its voice (tb.26)
+
+Found by MuseNote's ABC gate and measured by its tie guard (plan V3_2_0_39;
+finding W55, root cause RC21). The MusicXML reader paired a tie by pitch and
+reading order, not by the notes it joins: a stop closed the last open tie of
+its pitch in its layer, or else, at the bar's end, any open tie of its pitch
+begun earlier; an open tie stayed open across bars, and across parts (the
+stack was never cleared between them). So a start whose next note did not stop
+it was ended by a later note of its pitch, one to 79 notes on (41 ties in 27
+songs: the notes between were not heard as written, an arc was drawn over
+them); a one-note tie (MusicXML 4.0: start and stop on one note, into a repeat)
+tied its note to itself and silenced it; a part's open tie could be ended by the
+next part's first note of its pitch.
+
+- Every note and drawn rest takes the next place of its voice as it is written
+  into it: a chord one place, a grace note none of its own (it stands with the
+  note it leads to), a rest not drawn and a `<forward>` none (gaps, not
+  notation). By places, not by the file's ticks: a `<backup>` inside one voice
+  (Angie) lets two notes begin together by the ticks that the engine writes
+  and plays one after the other.
+- A tie in its own voice ends on the note at the next place after its start;
+  into another voice, on a note that begins where its note ends by the ticks,
+  or at the next bar's start where its note ended at the bar line. Its own
+  voice first. A stop read before its start is matched at the bar's end by
+  the same rule.
+- A tie that ties nothing is left out, said in the log: its voice went past it,
+  or it waited one bar for its voice in vain, or its part ended.
+
+MusicXML: the start on one note, the stop on the next; MEI: notes "of the same
+pitch [that] form a single note with their combined rhythmic values". A rule by
+ticks alone would have dropped 8 ties the page rightly shows, where a file has
+an invisible `<forward>` between a tie's notes.
+
+Cases: `test_tb26_ties_next_note_engine.cpp` (the next note, over the bar line,
+in chords; a start its next note does not stop; over a rest; a one-note tie;
+into another voice at its end and not; an invisible gap and a hidden rest; a
+voice that skips a bar; a part's end; grace notes), and the case of
+`test_midi_document_engine.cpp` that pinned the old pairing on purpose,
+changed as its comment asked. Nine deliberate breaks, each caught; the suite
+under the address sanitizer. The guard (MuseNote's
+`tool/export_gate/ties_join_next_notes.py`): every tie of the 3,024 corpus files
+ends on the next note of its voice (45 did not); 1 tie into another voice,
+judged by hand. Parity tb.25 to tb.26: 1,303 of 21,743 outputs differ: the MEI,
+page and MIDI of the 31 files the guard named; and the MEI and page of 287
+more, which lose 3,022 ties with a start and no end, each an empty group
+(checked element by element: nothing else). Seeded ids 3,044 of 3,044.
 
 ### 61. A repeat sign on the page is played (tb.25)
 
