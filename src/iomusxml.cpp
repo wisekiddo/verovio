@@ -2658,17 +2658,20 @@ void MusicXmlInput::ReadMusicXmlDirection(
     // segno (MusicXML gives in a direction's type what it shows, in its sound what it does). It was the sign: the
     // score had a second coda or segno and no jump, kept only in the order of play, and every export of the score
     // wrote the sign (MuseNote RC34). Such a jump is typed as one given in words with the sign (and drawn so)
+    // (asked of a sign with no words that has a sound: a direction without one has nothing to ask)
     const char *jumpOfSign = NULL;
-    if (soundNode.attribute("tocoda")) {
-        jumpOfSign = "tocoda";
+    if (xmlJump && !containsWords && soundNode) {
+        if (soundNode.attribute("tocoda")) {
+            jumpOfSign = "tocoda";
+        }
+        else if (soundNode.attribute("dalsegno")) {
+            jumpOfSign = "dalsegno";
+        }
+        else if (HasAttributeWithValue(soundNode, "dacapo", "yes")) {
+            jumpOfSign = "dacapo";
+        }
     }
-    else if (soundNode.attribute("dalsegno")) {
-        jumpOfSign = "dalsegno";
-    }
-    else if (HasAttributeWithValue(soundNode, "dacapo", "yes")) {
-        jumpOfSign = "dacapo";
-    }
-    if (xmlJump && !containsWords && jumpOfSign) {
+    if (jumpOfSign) {
         Dir *dir = new Dir();
         dir->SetPlace(dir->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
         dir->SetTstamp(timeStamp);
