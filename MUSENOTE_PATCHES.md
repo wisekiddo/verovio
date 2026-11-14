@@ -72,6 +72,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 62 | 2026-11-14 | MusicXML: a tie joins a note to the next note of its voice (62fff07) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +125 / -32 | **Changes what 31 corpus files play, by design** (MuseNote root cause RC21, finding W55): 41 ties in 27 songs joined a note to a later note of its pitch, one to 79 notes on (the notes between not heard as written); a one-note tie silenced its note. Their MEI, page and MIDI change. The MEI of 287 more scores loses 3,022 ties that had a start and no end (empty groups on the page, never heard); nothing drawn or heard changes there. 1,303 outputs of 21,743 in all; no note id | Not offered upstream |
 | 63 | 2026-11-14 | Order of play: an ending is played in every pass its label names and its signs reach (7795a50, 3788b5f, f582922) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, +61 / -15 | **Changes the order of play of 7 scores of the corpus, by design** (MuseNote root causes RC26, RC27, RC29; finding W56). An ending's label was read as a list only where commas stood between its numbers ("1.2." the first pass alone, "1-5" passes 1 and -5); every pass a label named was played, as if a sign sent the play back for each; and a sign further on brought round an ending that has its own, passing its second time over. Their MEI `<expansion>`, MIDI, timemap and pitch map change (41 outputs of 21,743 with the locator copies); no page and no note id | Not offered upstream |
 | 64 | 2026-11-14 | Order of play: a jump is what its sound says, taken the times it names, as many as its barline holds (5533c67); amended the same day by: MusicXML: ask a sign's sound only where it has one (0e46341), tb.29 | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +165 / -59 | **Changes 13 scores of the corpus, by design** (MuseNote root causes RC34, RC35, RC36, RC38, RC39): a jump drawn as a sign alone is that jump in the score (Arriverderci Roma, Ein bißchen Frieden and its v2, Het Dorp, Mexican Hat Dance, Oblivion: their MEI, SVG and ids, no timing); the marks of the bars a multi-bar rest spans are read (Superstition jumps; 10,000 Reasons, I'm So Lonesome I Could Cry, Music to Watch Girls By and Sweet Hour of Prayer play their tempo; Afro Blue and My Tribute show their words). A jump's named times, two jumps at a barline and a repeat taken after the jump in endings change no corpus score: the corrected song files of MuseNote plan V3_2_0_44 use them | Not offered |
+| 65 | 2026-11-14 | The score keeps what its file says of its order of play (9dcdca2) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +175 / -31 | **Changes the MEI of 36 corpus scores, by design** (MuseNote root cause RC41): a mark keeps the label of its coda or segno (`@label`) and a jump its named times (`@type` token `times-2.3`), a repeat end its count and after-jump (`repeat-N`, `after-jump`), and a jump given by a sound alone gets a mark that draws nothing (6 scores; their ids move, the annotation locator re-anchors every mark: 0 failures). No order, timing or pitch changes; the page only by the labels' tooltips. The rule for a score with no order of its own reads them, so an MEI file plays as its MusicXML | Not offered |
 
 ### 1. PAE importer crashes
 
@@ -2983,6 +2984,43 @@ been written did nothing: the MIDI is written from a document made at the
 first of them, with the options of that moment. `Toolkit::RenderToMIDI`
 and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
+
+**Upstream status**: not offered.
+
+### 65. The score keeps what its file says of its order of play (tb.30)
+
+Found by MuseNote plan V3_2_0_45 (root cause RC41): the engine's MEI kept a
+jump's kind and a repeat's sign, not what the file says of them. The times a
+jump is taken, the label of the coda or segno it goes to (a coda's or segno's
+own), a repeat's count and whether it is taken after a jump lived only in the
+order of play (MEI's `<expansion>`); a jump given by a `<sound>` with no
+direction left no mark. Every export of the score, and the score read again
+without its order, played another order.
+
+- The MusicXML reader keeps on each mark what its sound says: `@label` where
+  the label is not "coda" or "segno"; a `@type` token `times-2.3` for a
+  jump's named times (dots between the numbers: the engine reads "1-3" as a
+  range). The measure of a repeat end keeps `repeat-N` for a count other than
+  two, and `after-jump`. A jump that no mark carries (a sound of the measure,
+  a direction's second jump, also in the bars of a multi-bar rest) gets a
+  `<dir>` of its kind with nothing to draw.
+- The rule for a score with no order of its own reads all of them: a mark by
+  the first token of its type, a coda or a segno given in words as one (only
+  the `repeatMark` signs were), and every jump a measure holds.
+- The tokens are written and read in one place (`vrv::order`).
+
+Cases: `test_tb30_order_in_the_score_engine.cpp` (each MusicXML score and its
+MEI twin played alike: a jump's times in a repeat and at a repeat's end; two
+labelled codas; a coda in words; a count of three; a repeat after the jump;
+a jump by a sound alone; a direction's second jump), each failing on tb.29.
+Breaks, all nine caught. Native suite 320 of 320; with asserts and the
+address sanitizer 320 of 320; the engine with asserts over every live song.
+Parity tb.29 to tb.30: of the outputs present in both (the corpus gained the
+49 files MuseNote published the same day), 495 differ, in 36 scores: their
+MEI by the attributes alone, their page by the labels' tooltips and, in the 5
+with a jump by a sound alone, an empty group; timing and pitches the same
+(three timemaps by ids only). Annotation locator: 0 failures. Seeded ids
+3,093 of 3,093. MuseSync's 24 songs: the same.
 
 **Upstream status**: not offered.
 
