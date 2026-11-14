@@ -71,6 +71,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 61 | 2026-11-14 | Order of play: a repeat sign on the page is played (58ac878) | `src/expansionmap.cpp`, `src/iomusxml.cpp`, +30 | **Changes the order of play of 26 scores of the corpus, by design** (MuseNote root causes RC19, RC20; findings W54, W51). A repeat sign at the end of the last ending of its group was never taken (the passes were those its endings name only), and at a barline that holds an ending's stop the MusicXML reader dropped the repeat's count. Their MEI `<expansion>`, MIDI, timemap and pitch map change (186 outputs of 21,743, with the ended originals and corrected copies of the same songs); no page and no note id | Not offered upstream |
 | 62 | 2026-11-14 | MusicXML: a tie joins a note to the next note of its voice (62fff07) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +125 / -32 | **Changes what 31 corpus files play, by design** (MuseNote root cause RC21, finding W55): 41 ties in 27 songs joined a note to a later note of its pitch, one to 79 notes on (the notes between not heard as written); a one-note tie silenced its note. Their MEI, page and MIDI change. The MEI of 287 more scores loses 3,022 ties that had a start and no end (empty groups on the page, never heard); nothing drawn or heard changes there. 1,303 outputs of 21,743 in all; no note id | Not offered upstream |
 | 63 | 2026-11-14 | Order of play: an ending is played in every pass its label names and its signs reach (7795a50, 3788b5f, f582922) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, +61 / -15 | **Changes the order of play of 7 scores of the corpus, by design** (MuseNote root causes RC26, RC27, RC29; finding W56). An ending's label was read as a list only where commas stood between its numbers ("1.2." the first pass alone, "1-5" passes 1 and -5); every pass a label named was played, as if a sign sent the play back for each; and a sign further on brought round an ending that has its own, passing its second time over. Their MEI `<expansion>`, MIDI, timemap and pitch map change (41 outputs of 21,743 with the locator copies); no page and no note id | Not offered upstream |
+| 64 | 2026-11-14 | Order of play: a jump is what its sound says, taken the times it names, as many as its barline holds (5533c67) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +165 / -59 | **Changes 13 scores of the corpus, by design** (MuseNote root causes RC34, RC35, RC36, RC38, RC39): a jump drawn as a sign alone is that jump in the score (Arriverderci Roma, Ein bißchen Frieden and its v2, Het Dorp, Mexican Hat Dance, Oblivion: their MEI, SVG and ids, no timing); the marks of the bars a multi-bar rest spans are read (Superstition jumps; 10,000 Reasons, I'm So Lonesome I Could Cry, Music to Watch Girls By and Sweet Hour of Prayer play their tempo; Afro Blue and My Tribute show their words). A jump's named times, two jumps at a barline and a repeat taken after the jump in endings change no corpus score: the corrected song files of MuseNote plan V3_2_0_44 use them | Not offered |
 
 ### 1. PAE importer crashes
 
@@ -2982,6 +2983,56 @@ been written did nothing: the MIDI is written from a document made at the
 first of them, with the options of that moment. `Toolkit::RenderToMIDI`
 and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
+
+**Upstream status**: not offered.
+
+### 64. A jump is what its sound says, taken the times it names, as many as its barline holds (tb.28)
+
+Found by MuseNote plan V3_2_0_44 (every song played in full; root causes RC34,
+RC35, RC36, RC38, RC39), each shown on a small correctly marked file before it
+was changed:
+
+- MusicXML (RC34): a direction that shows a coda sign or a segno and no words,
+  whose sound is a jump (`tocoda`, `dalsegno`, `dacapo="yes"`), is that jump: a
+  `<dir>` typed by its sound holding the sign as a symbol, as words with a sign
+  are. It was a `repeatMark` of the sign: the score held a second coda or segno
+  and no jump, which lived only in the order of play, so every export wrote the
+  sign. A sign whose sound is a sign stays a `repeatMark`.
+- Order of play (RC35): a jump that names its times (`time-only`, "which times
+  through the repeated section the sound applies") is taken the time its part is
+  played that it names, every time counted, its repeat's passes too, and as soon
+  as that time comes: in a pass of a repeat the rest of it is not played. Only
+  the returns to the part were counted, so a To Coda "3rd time" in a passage
+  played twice by its repeat and once after the D.S. was never taken, nor a To
+  Coda "2nd time" in a repeat. A jump that names no times keeps its meaning (a
+  D.C. or D.S. the first time, a To Coda the time after the jump back).
+- Order of play (RC36): a part holds every jump its barline is given (MusicXML
+  lets a barline hold a To Coda for the second time and another for the third);
+  the rule takes the first whose time it is. The reader kept the last.
+- Order of play (RC38): a repeat whose closing sign says `after-jump="yes"`
+  plays its passes and endings after the jump as the first time. Where the sign
+  closed an ending only the last ending was played; the mark was read on a plain
+  repeat alone.
+- MusicXML (RC39): the bar that begins a multi-bar rest is read on after its
+  attributes for its directions and sounds, and so are the bars the rest spans,
+  into the rest's measure (a start at its start, a jump at its end, as its
+  barlines are its last bar's); also where another part begins the rest. A
+  segno, a To Coda, a D.S., a tempo or words there were lost.
+
+Cases: `test_tb28_jump_times_engine.cpp` (the three signs drawn for jumps, in
+the order, the MEI and the MEI played without its order; times through a repeat
+and a return, in a repeat, at a repeat's end, by the returns alone, and none
+named; two jumps at one barline, as two directions and as a sound of its own; a
+repeat taken after the jump with endings, and without the mark; a segno and a
+D.S. in multi-bar rests; another part's words in one), each failing on tb.27.
+Breaks, each caught, but one that cannot change an order (a named-times jump
+judged by its returns as well: it is taken by its plays first). Native suite 315
+of 315, also under the address sanitizer. Parity tb.27 to tb.28: 81 of 21,743
+outputs differ, in the 13 scores above, each judged against its file: the six
+signs (MEI, SVG and ids; timemap and pitch map the same but for ids), the seven
+rests (the marks added; notes played the same but Superstition's, 151 to 245 by
+its jumps; four tempos read). Annotation locator: 0 failures. Seeded ids 3,044
+of 3,044. MuseSync's 24 songs: the same order and MEI.
 
 **Upstream status**: not offered.
 
