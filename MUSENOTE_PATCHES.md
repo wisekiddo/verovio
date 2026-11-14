@@ -71,7 +71,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 61 | 2026-11-14 | Order of play: a repeat sign on the page is played (58ac878) | `src/expansionmap.cpp`, `src/iomusxml.cpp`, +30 | **Changes the order of play of 26 scores of the corpus, by design** (MuseNote root causes RC19, RC20; findings W54, W51). A repeat sign at the end of the last ending of its group was never taken (the passes were those its endings name only), and at a barline that holds an ending's stop the MusicXML reader dropped the repeat's count. Their MEI `<expansion>`, MIDI, timemap and pitch map change (186 outputs of 21,743, with the ended originals and corrected copies of the same songs); no page and no note id | Not offered upstream |
 | 62 | 2026-11-14 | MusicXML: a tie joins a note to the next note of its voice (62fff07) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +125 / -32 | **Changes what 31 corpus files play, by design** (MuseNote root cause RC21, finding W55): 41 ties in 27 songs joined a note to a later note of its pitch, one to 79 notes on (the notes between not heard as written); a one-note tie silenced its note. Their MEI, page and MIDI change. The MEI of 287 more scores loses 3,022 ties that had a start and no end (empty groups on the page, never heard); nothing drawn or heard changes there. 1,303 outputs of 21,743 in all; no note id | Not offered upstream |
 | 63 | 2026-11-14 | Order of play: an ending is played in every pass its label names and its signs reach (7795a50, 3788b5f, f582922) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, +61 / -15 | **Changes the order of play of 7 scores of the corpus, by design** (MuseNote root causes RC26, RC27, RC29; finding W56). An ending's label was read as a list only where commas stood between its numbers ("1.2." the first pass alone, "1-5" passes 1 and -5); every pass a label named was played, as if a sign sent the play back for each; and a sign further on brought round an ending that has its own, passing its second time over. Their MEI `<expansion>`, MIDI, timemap and pitch map change (41 outputs of 21,743 with the locator copies); no page and no note id | Not offered upstream |
-| 64 | 2026-11-14 | Order of play: a jump is what its sound says, taken the times it names, as many as its barline holds (5533c67) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +165 / -59 | **Changes 13 scores of the corpus, by design** (MuseNote root causes RC34, RC35, RC36, RC38, RC39): a jump drawn as a sign alone is that jump in the score (Arriverderci Roma, Ein bißchen Frieden and its v2, Het Dorp, Mexican Hat Dance, Oblivion: their MEI, SVG and ids, no timing); the marks of the bars a multi-bar rest spans are read (Superstition jumps; 10,000 Reasons, I'm So Lonesome I Could Cry, Music to Watch Girls By and Sweet Hour of Prayer play their tempo; Afro Blue and My Tribute show their words). A jump's named times, two jumps at a barline and a repeat taken after the jump in endings change no corpus score: the corrected song files of MuseNote plan V3_2_0_44 use them | Not offered |
+| 64 | 2026-11-14 | Order of play: a jump is what its sound says, taken the times it names, as many as its barline holds (5533c67); amended the same day by: MusicXML: ask a sign's sound only where it has one (0e46341), tb.29 | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +165 / -59 | **Changes 13 scores of the corpus, by design** (MuseNote root causes RC34, RC35, RC36, RC38, RC39): a jump drawn as a sign alone is that jump in the score (Arriverderci Roma, Ein bißchen Frieden and its v2, Het Dorp, Mexican Hat Dance, Oblivion: their MEI, SVG and ids, no timing); the marks of the bars a multi-bar rest spans are read (Superstition jumps; 10,000 Reasons, I'm So Lonesome I Could Cry, Music to Watch Girls By and Sweet Hour of Prayer play their tempo; Afro Blue and My Tribute show their words). A jump's named times, two jumps at a barline and a repeat taken after the jump in endings change no corpus score: the corrected song files of MuseNote plan V3_2_0_44 use them | Not offered |
 
 ### 1. PAE importer crashes
 
@@ -3033,6 +3033,17 @@ signs (MEI, SVG and ids; timemap and pitch map the same but for ids), the seven
 rests (the marks added; notes played the same but Superstition's, 151 to 245 by
 its jumps; four tempos read). Annotation locator: 0 failures. Seeded ids 3,044
 of 3,044. MuseSync's 24 songs: the same order and MEI.
+
+**Amended (tb.29, the same day):** the reader asked every direction's sound
+whether it is a D.C. through `HasAttributeWithValue`, which asserts its node,
+and a direction with no `<sound>` has none: a build with asserts ended on every
+MusicXML file with such a direction (MuseNote root cause RC40, found by
+MuseNote's check in its debug app; a release build read it as before, and
+every check above was a release build). The sound is asked only of a sign with
+no words that has one. Checked since with asserts on: the native suite under
+the address sanitizer, and the engine over every corpus song and MuseNote's
+corrected files (load, every page, MIDI, timemap, MEI). Parity tb.28 to tb.29:
+no output differs.
 
 **Upstream status**: not offered.
 
