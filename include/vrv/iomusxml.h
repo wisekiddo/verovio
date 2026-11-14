@@ -334,6 +334,21 @@ private:
      */
     void MarkJumpsOfSound(
         const pugi::xml_node sound, const std::string &measureNum, const std::string &carried, double tstamp);
+    /**
+     * The jump or sign the words of a direction with no <sound> for one are (MuseNote RC42): its kind (dacapo,
+     * dalsegno, tocoda, fine, coda, segno) and the label of its segno or coda, when the whole text is one phrase of
+     * the vocabulary MuseScore's importer reads; none otherwise
+     */
+    static std::optional<std::pair<std::string, std::string>> JumpOfWords(const std::string &text);
+    /** What a jump or sign read from its words or its sign does to the order of play, as its <sound> would */
+    void PlayJumpOfWords(const std::string &kind, const std::string &label);
+    /**
+     * Whether a <sound> anywhere in the score of [node] gives a jump or sign of [kind] (a measure's own, or a
+     * direction's): then the score gives that kind's playback, and its words and signs of the kind are its print
+     */
+    static bool SoundOfScoreGives(const pugi::xml_node node, const std::string &kind);
+    /** Whether [measure] holds a To Coda: by a <sound>, or in its words */
+    static bool MeasureHoldsToCoda(const pugi::xml_node measure);
     bool ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord);
     /**
      * Opens a tuplet level for [tupletStart] with its own ratio (MEI's rule: the ratios of nested tuplets multiply):

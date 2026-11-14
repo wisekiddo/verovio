@@ -995,11 +995,20 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
     const auto isTime = [](const play::JumpInfo &jump, int time) {
         return std::find(jump.m_times.begin(), jump.m_times.end(), time) != jump.m_times.end();
     };
-    // Where [jump] sends the play: the beginning, or the segno or the coda it names (none where it is not found)
+    // Where [jump] sends the play: the beginning, or the segno or the coda it names (none where it is not found). A
+    // jump naming its target by no label of its own (the kind's default: its words, "D.S.", name none) goes to the
+    // first target of its kind where none has that label (MuseNote RC42: a D.S. in words, its segno given by a sound
+    // labelled by its bar, "34"; MuseScore's importer labels every segno alike). One naming another is not taken.
     const auto targetOf = [&sections, &segnos, &codas](const play::JumpInfo &jump) -> std::optional<decltype(iter)> {
         if (jump.m_jump == play::JumpInfo::DACAPO) return sections.begin();
-        const auto &labels = (jump.m_jump == play::JumpInfo::DALSEGNO) ? segnos : codas;
+        const bool toSegno = (jump.m_jump == play::JumpInfo::DALSEGNO);
+        const auto &labels = toSegno ? segnos : codas;
         if (!labels.contains(jump.m_label)) {
+            if (jump.m_label == (toSegno ? "segno" : "coda")) {
+                for (auto it = sections.begin(); it != sections.end(); ++it) {
+                    if (!(toSegno ? it->first.m_segnoLabel : it->first.m_codaLabel).empty()) return it;
+                }
+            }
             LogWarning("Order of play: Segno/Coda label '%s' not found", jump.m_label.c_str());
             return std::nullopt;
         }
