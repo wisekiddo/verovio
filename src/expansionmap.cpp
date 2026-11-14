@@ -967,6 +967,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             // brackets); otherwise it is the pass after the last: a blank number (MusicXML: there is an ending, the
             // writer could not tell which), or a pass the repeat before it has left
             std::map<int, std::vector<decltype(iter)>> endings;
+            std::vector<decltype(iter)> group; // the endings' parts in score order
             auto begIter = iter;
             std::optional<decltype(iter)> rptNestedIter;
             while (iter != sections.end() && iter->first.m_classId == ENDING) {
@@ -989,6 +990,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                     const int last = endings.empty() ? 0 : endings.rbegin()->first;
                     endings[(last < INT_MAX) ? last + 1 : last].push_back(iter);
                 }
+                group.push_back(iter);
                 endIter = iter++;
 
                 // remember a nested repeat start
@@ -1033,6 +1035,10 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             }
 
             const int passAtEndings = pass; // (the pass the first of these endings is played in)
+            const auto placeOf = [&group](decltype(iter) part) {
+                return std::distance(group.begin(), std::find(group.begin(), group.end(), part));
+            };
+            bool isLeft = false; // the repeat left at an ending that nothing sends back from
             // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
             // skip section first time because it was already added in the SECTION block
             for (auto ending = endings.begin(); isFollowed && (ending != endings.end()); ++ending) {
@@ -1040,6 +1046,22 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                     // one ending for several passes comes round by the repeat sign at its end. Where that sign stands
                     // further on, after plain bars, it brings the ending round itself, in the passes it names
                     if ((ending->second == std::prev(ending)->second) && signFollows) continue;
+                    // The play goes back for this pass only where something sends it: a repeat sign at the end of
+                    // the ending just played, or an ending further on still to be played (a file that leaves out
+                    // the sign before its next ending). Otherwise the repeat is left there, and what the endings
+                    // name after it is played after a jump back, as their last ending. (Every pass they named was
+                    // played, as if a sign sent the play back for each: a last ending "2.3." with no sign after it,
+                    // its third time after the D.C., was played a third time through. MuseNote RC27)
+                    const auto played = std::prev(ending)->second.back();
+                    const data_BARRENDITION right = played->second.back()->GetRight();
+                    bool isSentBack = (right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth);
+                    for (auto later = ending; !isSentBack && (later != endings.end()); ++later) {
+                        for (auto part : later->second) isSentBack = isSentBack || (placeOf(part) > placeOf(played));
+                    }
+                    if (!isSentBack) {
+                        isLeft = true;
+                        break;
+                    }
                     ++pass;
                     for (auto it = rptIter; isFollowed && (it != std::next(secIter)); ++it) {
                         if (!isPlayed(it)) continue;
@@ -1058,7 +1080,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             // and go on after the endings. A first ending closed by a repeat sign, with the second time through
             // unmarked, is played once and then left out. (Only the passes the endings name were played: such a
             // repeat was never taken. W54) Passes the endings leave out between their numbers are not made up.
-            if (!jumpBack && !endings.empty()) {
+            if (!jumpBack && !isLeft && !endings.empty()) {
                 const auto last = std::prev(endings.end());
                 const auto lastPart = last->second.back();
                 const data_BARRENDITION right = lastPart->second.back()->GetRight();
