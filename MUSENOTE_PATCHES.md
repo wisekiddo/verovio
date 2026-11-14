@@ -68,6 +68,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 58 | 2026-11-14 | ABC: the reader rebuilt on the standard, in two halves: the text read into tunes, each tune written into the score (882ff86) | `src/ioabc.cpp`, `include/vrv/ioabc.h`, `src/expansionmap.cpp`, `include/vrv/expansionmap.h` | **Changes how ABC is read, by design** (MuseNote root cause RC6). Replaces patches 7, 13, 22, 31, 41 and 49's work in the reader. No output of the corpus moves but the ABC inputs' MEI (194 of 21,743). MuseNote's ABC export of 2,765 songs read back: 2,359 play the same in every aspect (56 before); 1,037 hand-written tunes against abc2midi: 984 the same (603). A stored ABC score's notes keep their locator where the old reader read them rightly: 99.6% (hand-written tunes), 93% (MuseNote's exports) | Not offered upstream |
 | 59 | 2026-11-14 | ABC: a file is told by its tunes, and its file header sets the defaults of every tune (8db7dda) | `src/toolkit.cpp`, `src/ioabc.cpp` | **Reads ABC files the engine refused or misread.** `IdentifyInputFrom` looked at an ABC file's first character only; a file that began with an empty line, a comment or a file header (ABC 2.1, 2.2) was taken for MEI, PAE or GABC. Of 1,055 hand-written files and tunes read by detection alone, 345 were read before, 1,055 now. No output of the corpus changes (21,743 outputs, 0 differ) | Not offered upstream |
 | 60 | 2026-11-14 | Expansion: every tie, slur and line of the score as played is judged by the order of play (b1b4318) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/doc.cpp`, +221 | **Changes what 192 scores of the corpus play, by design** (MuseNote root cause RC18, finding W53). A copy of a spanning element got its end when it was made, or as a count of played bars: the second time through or after a jump a tie ended on another pass's note, or on one already played (a note held for the wrong length, its end note attacked again, or a note held past the end). 227 MIDI outputs of 21,743 change (192 songs and 35 corrected files of the same songs); no page, MEI, timemap, pitch map or id | Not offered upstream |
+| 61 | 2026-11-14 | Order of play: a repeat sign on the page is played (58ac878) | `src/expansionmap.cpp`, `src/iomusxml.cpp`, +30 | **Changes the order of play of 26 scores of the corpus, by design** (MuseNote root causes RC19, RC20; findings W54, W51). A repeat sign at the end of the last ending of its group was never taken (the passes were those its endings name only), and at a barline that holds an ending's stop the MusicXML reader dropped the repeat's count. Their MEI `<expansion>`, MIDI, timemap and pitch map change (186 outputs of 21,743, with the ended originals and corrected copies of the same songs); no page and no note id | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2981,6 +2982,44 @@ and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
+
+### 61. A repeat sign on the page is played (tb.25)
+
+Found by MuseNote's order gates (plan V3_2_0_38; findings W54 and W51, root
+causes RC19 and RC20). Two causes behind one symptom, a repeat sign on the
+page that the order of play never took (26 songs):
+
+- `WriteOrderOfPlay` took a repeat's passes from the pass numbers its endings
+  name, and nothing else. A repeat sign at the end of the last ending of its
+  group (a first ending closed by a repeat sign with the second time through
+  unmarked, Anastasia's shape; or one standing alone before plain bars) sent
+  the play back on the page and never in the music. Now the passes after that
+  ending's, up to the repeat's count, play the repeat's music and go on after
+  the endings. The count is taken from the pass the repeat is in when it
+  reaches the endings: a repeat that has played its passes by endings before
+  (a second "1." after "1." and "2.") is not taken again. Passes the endings
+  skip between their numbers (a "1." then a "3.") are not made up: nothing in
+  such a file says what the missing pass plays.
+- At a barline that holds an ending's stop and a repeat sign, the MusicXML
+  reader gathered both into one section stop and, where it was an ending's,
+  kept the ending's number and dropped the repeat: the part's count fell to
+  once. Where no ending began (a stray stop, the file's fault: El Choclo,
+  Help!, Without You) the repeat was not played at all; where the sign closes
+  an ending its times were lost. The count is now kept with the ending.
+
+Cases: `test_tb25_repeat_signs_engine.cpp` (MusicXML and MEI with no order of
+its own: a lone first ending closed by a repeat sign, after plain bars, a lone
+"2", no repeat start, `times="3"`, stray stops, and what must not move:
+`[1 :| [2`, `[1 :| [3`, three passes, a repeat that has played its passes, a
+D.C.), four deliberate breaks each caught, the suite under the address
+sanitizer. The guard (MuseNote's `tool/export_gate/repeat_signs_played.py`):
+every repeat sign of the 3,024 corpus files is played, or is explained (an
+ending's sign whose repeat has played its passes; 8 signs in a coda, found with
+it and left for their own plan: the rule keeps "after a jump" for the rest of
+the score, W60). Parity tb.24 to tb.25: 186 of 21,743 outputs differ, MEI
+`<expansion>`, MIDI, timemap and pitch map of those songs only; seeded ids
+3,044 of 3,044. Hand-written ABC tunes: 984 to 988 of 1,037 play as abc2midi
+plays them, none worse.
 
 ### 60. Every tie, slur and line of the score as played is judged by the order of play (tb.24)
 
