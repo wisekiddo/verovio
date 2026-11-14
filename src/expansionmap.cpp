@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <climits>
 #include <optional>
 #include <set>
@@ -857,20 +858,40 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
 // The order of play
 //----------------------------------------------------------------------------
 
-// vibe-coded on Claude AI using prompt:
-//
-// in C++, write a concise function to parse a string of comma separated ints with optional spaces into a list (array or
-// vector) of ints
-//
-// verified at https://onlinegdb.com/blxCanxpAW
+// Every number [str] names, and every range, whatever stands between them: "1, 2", "1.2.", "2.3.", "1-5", "1–5" (an en
+// dash), as the files write the passes of an ending. (A list was read only when commas stood between its numbers:
+// "1.2." was the first pass alone, "1-5" passes 1 and -5. MuseNote plan V3_2_0_42, root cause RC26.) A range past any
+// sense is its first number, as the ABC reader reads one; a number an int does not hold names nothing.
 std::list<int> parseInts(const std::string &str)
 {
+    static const std::string enDash = "\xE2\x80\x93";
     std::list<int> result;
-    std::stringstream ss(str);
-    int num;
-    while (ss >> num) {
-        result.push_back(num);
-        if (ss.peek() == ',') ss.ignore();
+    bool isRange = false; // a dash after a number, spaces aside: the next number ends a range
+    for (size_t i = 0; i < str.size();) {
+        if (std::isdigit(static_cast<unsigned char>(str[i]))) {
+            long long value = 0;
+            for (; (i < str.size()) && std::isdigit(static_cast<unsigned char>(str[i])); ++i) {
+                if (value <= INT_MAX) value = value * 10 + (str[i] - '0');
+            }
+            if (value <= INT_MAX) {
+                const int number = static_cast<int>(value);
+                if (!isRange) {
+                    result.push_back(number);
+                }
+                else if ((result.back() >= 1) && (number > result.back()) && (number - result.back() <= 32)) {
+                    for (int n = result.back() + 1; n <= number; ++n) result.push_back(n);
+                }
+            }
+            isRange = false;
+        }
+        else if (str[i] == '-' || str.compare(i, enDash.size(), enDash) == 0) {
+            isRange = !result.empty();
+            i += (str[i] == '-') ? 1 : enDash.size();
+        }
+        else {
+            if (str[i] != ' ') isRange = false;
+            ++i;
+        }
     }
     return result;
 }

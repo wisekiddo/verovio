@@ -182,7 +182,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections);
 void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &repeatTimes,
     const std::vector<std::pair<const Measure *, const Measure *>> &playlist);
 
-/** The numbers in a list like "1, 2" (an ending's passes, the times a jump is taken) */
+/** The numbers and ranges in a list like "1, 2", "1.2." or "1-3" (an ending's passes, the times a jump is taken) */
 std::list<int> parseInts(const std::string &str);
 
 class ExpansionMap {
