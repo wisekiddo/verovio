@@ -73,6 +73,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 63 | 2026-11-14 | Order of play: an ending is played in every pass its label names and its signs reach (7795a50, 3788b5f, f582922) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, +61 / -15 | **Changes the order of play of 7 scores of the corpus, by design** (MuseNote root causes RC26, RC27, RC29; finding W56). An ending's label was read as a list only where commas stood between its numbers ("1.2." the first pass alone, "1-5" passes 1 and -5); every pass a label named was played, as if a sign sent the play back for each; and a sign further on brought round an ending that has its own, passing its second time over. Their MEI `<expansion>`, MIDI, timemap and pitch map change (41 outputs of 21,743 with the locator copies); no page and no note id | Not offered upstream |
 | 64 | 2026-11-14 | Order of play: a jump is what its sound says, taken the times it names, as many as its barline holds (5533c67); amended the same day by: MusicXML: ask a sign's sound only where it has one (0e46341), tb.29 | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +165 / -59 | **Changes 13 scores of the corpus, by design** (MuseNote root causes RC34, RC35, RC36, RC38, RC39): a jump drawn as a sign alone is that jump in the score (Arriverderci Roma, Ein bißchen Frieden and its v2, Het Dorp, Mexican Hat Dance, Oblivion: their MEI, SVG and ids, no timing); the marks of the bars a multi-bar rest spans are read (Superstition jumps; 10,000 Reasons, I'm So Lonesome I Could Cry, Music to Watch Girls By and Sweet Hour of Prayer play their tempo; Afro Blue and My Tribute show their words). A jump's named times, two jumps at a barline and a repeat taken after the jump in endings change no corpus score: the corrected song files of MuseNote plan V3_2_0_44 use them | Not offered |
 | 65 | 2026-11-14 | The score keeps what its file says of its order of play (9dcdca2) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +175 / -31 | **Changes the MEI of 36 corpus scores, by design** (MuseNote root cause RC41): a mark keeps the label of its coda or segno (`@label`) and a jump its named times (`@type` token `times-2.3`), a repeat end its count and after-jump (`repeat-N`, `after-jump`), and a jump given by a sound alone gets a mark that draws nothing (6 scores; their ids move, the annotation locator re-anchors every mark: 0 failures). No order, timing or pitch changes; the page only by the labels' tooltips. The rule for a score with no order of its own reads them, so an MEI file plays as its MusicXML | Not offered |
+| 66 | 2026-11-14 | A jump written as its words, or a target as its sign, is played (a371841) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, `src/expansionmap.cpp`, +148 / -8 | **Changes the order of play of 49 live songs and 7 superseded versions, by design** (MuseNote root cause RC42): the MusicXML reader reads a jump written as the words of MuseScore's vocabulary and a target written as its sign, where no `<sound>` gives its kind; a kind the score's sounds give is played by them, its words and signs print (an untyped `<dir>`, above the staff where unplaced); a coda sign in a To Coda's measure is that To Coda's; the order of play takes a jump naming its kind's default label to the first target of its kind. The MEI and page of 85 more change (words typed, signs print); ids move where a sign becomes print (annotation locator: 0 failures) | Not offered |
 
 ### 1. PAE importer crashes
 
@@ -2984,6 +2985,67 @@ been written did nothing: the MIDI is written from a document made at the
 first of them, with the options of that moment. `Toolkit::RenderToMIDI`
 and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
+
+**Upstream status**: not offered.
+
+### 66. A jump written as its words, or a target as its sign, is played (tb.31)
+
+Found by MuseNote plan V3_2_0_46 (root cause RC42): the MusicXML reader read a
+jump only from a `<sound>`. Many exporters write a jump as its words alone
+("D.S. al Coda", "To Coda", "Fine") and a segno or coda as its sign alone
+(MuseScore 0.9, Sibelius 4 and 5, Finale 2006 to 2012: 134 of MuseNote's
+songs), and such a song played straight through. MuseScore's own importer
+(`importmusicxmlpass2.cpp`, `handleRepeats`) honours a direction's `<sound>`
+always, and reads its words only where it has none, by a fixed vocabulary
+(`matchRepeat`).
+
+- Words are a jump when the whole text, lowered and its spaces removed, is
+  one phrase of that vocabulary: D.C., Da Capo, D.C. al Fine, D.C. al Coda,
+  D.S., Dal Segno, D.S. al Fine, D.S. al Coda, Fine, Segno, To Coda, Coda;
+  a roman numeral, or D.S.S., names a second segno or coda (`@label`
+  `segnoii`, `codaii`). Text that is no such phrase is no jump ("D.S. and
+  fade", "voice tacet on D.S."). The direction is typed by its jump, so the
+  score and its exports hold it.
+- A segno or coda sign alone is its target.
+- A score whose `<sound>`s give a kind of jump or target (a direction's, or
+  a measure's own, which MuseScore does not read) plays that kind by them:
+  its words and signs of the kind are print. (Chi Mai v2: "Fine" written at
+  the end of bar 36 beside the final bar's `<sound fine>`; read as a second
+  Fine, the play stopped a bar early.) A sign that is print is drawn in an
+  untyped `<dir>`: as a repeat mark it would be a target in the MEI, and
+  every export would play to it. A sign drawn in a `<dir>` (print, or a jump
+  drawn as its sign, patch 64) is drawn above the staff where its file places
+  it nowhere, as a repeat mark is (a direction's own default is below:
+  Beautiful's sign moved under the staff).
+- A coda sign in a measure that holds a To Coda is that To Coda's sign ("To
+  Coda ⊕"): a To Coda never lands in its own bar. MuseScore keeps one coda
+  mark in a measure (`measureHasCoda`); here no `<sound>` is overridden.
+- Order of play, for every format: a jump that names its target by the
+  default label of its kind ("segno", "coda": words name none) goes to the
+  first target of its kind where none has that label. (Eight songs give
+  their segno by a sound labelled with its bar, `segno="34"`, and the D.S.
+  in words; MuseScore labels every segno alike.) One naming another label
+  is not taken.
+- Changed with it: tb.28's case "a sign that is a sign stays one" expected
+  a second segno with only an empty `<sound/>` to stay a repeat mark; it is
+  print now, so the MEI no longer holds a target the file does not play.
+
+Cases: `test_tb31_jumps_in_words_engine.cpp` (each MusicXML score and its MEI
+twin played alike: every phrase, spacing and case, a sign alone, numerals,
+D.S.S., a sound winning, phrases that are none; the kinds a score's sounds
+give; a print sign; a To Coda's sign; a print sign placed above; a D.S. and a To Coda in words to
+targets labelled by their bars; a label that names another), each failing on
+tb.30. Breaks: each caught (one inert: dropping the check that the whole text
+is the phrase, which `regex_match` already holds). Native suite 324 of 324; with asserts and
+the address sanitizer 324 of 324; the engine with asserts over every live song
+(2,765 of 2,765). Log-format audit: 0 calls. Parity tb.30 to tb.31: 736 of 22,086 outputs differ, in 141
+scores: 49 live songs play otherwise by design (each judged against its marks:
+18 now play their jumps, 31 play their marks as written and their files are
+wrong), and 7 superseded versions likewise; the other 85 change in their MEI
+and page only (words typed, signs print), timing and pitch the same. Where a
+sign becomes print its song's generated ids move (383 of 477,334 notes);
+annotation locator: 0 failures. Seeded ids 3,093 of 3,093.
+MuseSync's 33 songs: the same order.
 
 **Upstream status**: not offered.
 
