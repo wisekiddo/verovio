@@ -70,6 +70,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 60 | 2026-11-14 | Expansion: every tie, slur and line of the score as played is judged by the order of play (b1b4318) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/doc.cpp`, +221 | **Changes what 192 scores of the corpus play, by design** (MuseNote root cause RC18, finding W53). A copy of a spanning element got its end when it was made, or as a count of played bars: the second time through or after a jump a tie ended on another pass's note, or on one already played (a note held for the wrong length, its end note attacked again, or a note held past the end). 227 MIDI outputs of 21,743 change (192 songs and 35 corrected files of the same songs); no page, MEI, timemap, pitch map or id | Not offered upstream |
 | 61 | 2026-11-14 | Order of play: a repeat sign on the page is played (58ac878) | `src/expansionmap.cpp`, `src/iomusxml.cpp`, +30 | **Changes the order of play of 26 scores of the corpus, by design** (MuseNote root causes RC19, RC20; findings W54, W51). A repeat sign at the end of the last ending of its group was never taken (the passes were those its endings name only), and at a barline that holds an ending's stop the MusicXML reader dropped the repeat's count. Their MEI `<expansion>`, MIDI, timemap and pitch map change (186 outputs of 21,743, with the ended originals and corrected copies of the same songs); no page and no note id | Not offered upstream |
 | 62 | 2026-11-14 | MusicXML: a tie joins a note to the next note of its voice (62fff07) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +125 / -32 | **Changes what 31 corpus files play, by design** (MuseNote root cause RC21, finding W55): 41 ties in 27 songs joined a note to a later note of its pitch, one to 79 notes on (the notes between not heard as written); a one-note tie silenced its note. Their MEI, page and MIDI change. The MEI of 287 more scores loses 3,022 ties that had a start and no end (empty groups on the page, never heard); nothing drawn or heard changes there. 1,303 outputs of 21,743 in all; no note id | Not offered upstream |
+| 63 | 2026-11-14 | Order of play: an ending is played in every pass its label names and its signs reach (7795a50, 3788b5f, f582922) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, +61 / -15 | **Changes the order of play of 7 scores of the corpus, by design** (MuseNote root causes RC26, RC27, RC29; finding W56). An ending's label was read as a list only where commas stood between its numbers ("1.2." the first pass alone, "1-5" passes 1 and -5); every pass a label named was played, as if a sign sent the play back for each; and a sign further on brought round an ending that has its own, passing its second time over. Their MEI `<expansion>`, MIDI, timemap and pitch map change (41 outputs of 21,743 with the locator copies); no page and no note id | Not offered upstream |
 
 ### 1. PAE importer crashes
 
@@ -2981,6 +2982,47 @@ been written did nothing: the MIDI is written from a document made at the
 first of them, with the options of that moment. `Toolkit::RenderToMIDI`
 and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
+
+**Upstream status**: not offered.
+
+### 63. An ending is played in every pass its label names and its signs reach (tb.27)
+
+Found by MuseNote's ABC export gate (plan V3_2_0_42; finding W56, root causes
+RC26, RC27 and RC29), all three in `WriteOrderOfPlay` and its `parseInts`:
+
+- `parseInts` read a list only where commas stood between its numbers: an
+  ending labelled "1.2." was played in the first pass alone, "2.3." in the
+  second, "1-5" in passes 1 and -5. It now reads every number and every range
+  whatever stands between them ("1, 2", "1.2.", "6.", "1-5", "1–5"); a range
+  past any sense is its first number, as the ABC reader reads one, and a number
+  an int does not hold names nothing (it ended the list).
+- Read right, "2.3." showed what the misreading hid: the rule played every pass
+  the endings name, as if a sign sent the play back for each. Where one ending is
+  played in two passes in a row, the play now goes back only for a repeat sign at
+  the end of the ending just played, a sign further on, or an ending further on
+  still to be played (a file that leaves out the sign before its next ending, as
+  before). Otherwise the repeat is left there, and what the endings name after it
+  is the time after a jump back, played as their last ending (I Wanna Be Loved By
+  You: "2.3." with the Fine in it, its third time after the D.C.; She Will Be
+  Loved: "2, 3", wrong since patch 56). The sign at the end of a last ending
+  (patch 61) is not followed once the repeat is left.
+- A sign further on, after plain bars, brought round an ending for several passes
+  even where that ending closes with a sign of its own: its second time was passed
+  over and the next ending played in its place (Vaya Con Dios, Happy Together).
+  Only an ending with no sign of its own is now brought round so.
+
+Cases: `test_tb27_ending_labels_engine.cpp` (each form of label, in MusicXML and
+as MEI with no order of its own; ABC ranges and lists; a last ending for two
+passes with a jump, without one, and closed by a sign; a file that leaves out
+the sign before its next ending; a repeat left there and an earlier ending's
+count; an ending with its own sign and a stray one further on). Native suite 310
+of 310, also under the address sanitizer. Parity tb.26 to tb.27: 41 of 21,743
+outputs differ, the MEI, MIDI, timemap and pitch map (and locator copies) of A
+quoi ça sert l'amour, Chan Chan, It's My Party, Please Help Me I'm Falling,
+She Will Be Loved, Vaya Con Dios and Happy Together, each judged against its page;
+no page and no note id. Seeded ids 3,044 of 3,044. The guard
+`tool/export_gate/returns_by_signs.py` (MuseNote): the play goes back only where
+a sign sends it, in every corpus score (tb.26: She Will Be Loved).
 
 **Upstream status**: not offered.
 
