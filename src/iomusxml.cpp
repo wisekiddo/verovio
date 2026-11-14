@@ -817,20 +817,53 @@ void MusicXmlInput::GenerateID(pugi::xml_node node)
 //////////////////////////////////////////////////////////////////////////////
 // Tie and slurs stack management
 
-void MusicXmlInput::OpenTie(Note *note, Tie *tie, int layerNum)
+void MusicXmlInput::OpenTie(Note *note, Tie *tie, int layerNum, int position, const Measure *measure, int end)
 {
     tie->SetStartid("#" + note->GetID());
-    m_tieStack.push_back(musicxml::OpenTie(tie, note, layerNum));
+    m_tieStack.push_back(musicxml::OpenTie(tie, note, layerNum, position, measure, end));
 }
 
-void MusicXmlInput::CloseTie(Note *note, int layerNum)
+void MusicXmlInput::CloseTie(Note *note, int layerNum, int position, int onset)
 {
-    // add all notes with identical pitch/oct to m_tieStopStack
-    for (const musicxml::OpenTie &tie : m_tieStack) {
-        if (note->IsEnharmonicWith(tie.m_note)) {
-            m_tieStopStack.push_back(musicxml::CloseTie(note, layerNum));
+    // a stop no open tie ends where it is read: its start may be read after it (in a voice read later), matched at
+    // the measure's end
+    m_tieStopStack.push_back(musicxml::CloseTie(note, layerNum, position, onset));
+}
+
+void MusicXmlInput::PassTies(int layerNum, int position)
+{
+    for (musicxml::OpenTie &tie : m_tieStack) {
+        if ((tie.m_layerNum != layerNum) || (position <= tie.m_position)) continue;
+        if (tie.m_nextPosition < 0) {
+            tie.m_nextPosition = position;
+        }
+        else if (tie.m_nextPosition != position) {
+            tie.m_passed = true;
         }
     }
+}
+
+bool MusicXmlInput::EndsAt(
+    const musicxml::OpenTie &tie, int layerNum, int position, const Measure *measure, int onset)
+{
+    // A tie joins a note to the next note of its voice (MusicXML: the start on one note, the stop on the next; a gap
+    // no note or rest fills is no notation), or to a note of another voice that begins where it ends. (Any later
+    // stop of its pitch closed it, however many notes on, or in another part: W55)
+    if (tie.m_layerNum == layerNum) {
+        return !tie.m_passed && (tie.m_nextPosition == position);
+    }
+    if (measure == tie.m_measure) return !tie.m_carried && (tie.m_end == onset);
+    return tie.m_atBarLine && (onset == 0);
+}
+
+void MusicXmlInput::DropOpenTie(std::vector<musicxml::OpenTie>::iterator tie, const std::string &measureNum)
+{
+    LogWarning("MusicXML import: a tie in measure %s that no note of its pitch continues is left out",
+        measureNum.c_str());
+    Tie *dropped = tie->m_tie;
+    std::erase_if(m_controlElements, [dropped](const auto &element) { return element.second == dropped; });
+    delete dropped;
+    m_tieStack.erase(tie);
 }
 
 void MusicXmlInput::OpenSlur(Measure *measure, short int number, Slur *slur, curvature_CURVEDIR dir)
@@ -1991,6 +2024,10 @@ bool MusicXmlInput::ReadMusicXmlPart(pugi::xml_node node, Section *section, shor
         LogWarning("MusicXML import: There are %d hairpins left open", m_hairpinStack.size());
         m_hairpinStack.clear();
     }
+    // A tie still open at the end of its part ties nothing (left on the stack, the next part's notes of its pitch
+    // ended it)
+    while (!m_tieStack.empty()) this->DropOpenTie(m_tieStack.begin(), "the last");
+    m_tieStopStack.clear();
     // An octave line still waiting for its first note has none in this part. Left on the stack, the first note of
     // the next part was taken for its start
     for (Octave *octave : m_octaveStack) {
@@ -2138,10 +2175,24 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
         measure->SetMetcon(BOOLEAN_false);
     }
 
-    this->MatchTies(true);
-    if (!m_tieStack.empty()) this->MatchTies(false);
-    for (auto openTie : m_tieStack) {
-        openTie.m_note->SetScoreTimeOnset(-1); // make scoreTimeOnset small for next measure
+    this->MatchTies(measure);
+    // A tie whose voice went on without it, and that no other voice ended, is left out (it ties nothing: it was
+    // drawn and played to a later note of its pitch). One whose voice has nothing more in this measure waits for
+    // the next measure's first notes, once.
+    int barTime = m_durTotal;
+    for (const auto &[layer, end] : m_layerEndTimes) {
+        if (layer->GetFirstAncestor(MEASURE) == measure) barTime = std::max(barTime, end);
+    }
+    for (auto openTie = m_tieStack.begin(); openTie != m_tieStack.end();) {
+        if (!openTie->m_carried && (openTie->m_nextPosition < 0)) {
+            openTie->m_carried = true;
+            openTie->m_atBarLine = (openTie->m_measure == measure) && (openTie->m_end >= barTime);
+            ++openTie;
+            continue;
+        }
+        const size_t at = openTie - m_tieStack.begin();
+        this->DropOpenTie(openTie, measureNum);
+        openTie = m_tieStack.begin() + at;
     }
 
     // clear stop stacks after each measure
@@ -2173,7 +2224,7 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
     return true;
 }
 
-void MusicXmlInput::MatchTies(bool matchLayers)
+void MusicXmlInput::MatchTies(const Measure *measure)
 {
     // match open ties with close ties
     std::vector<musicxml::OpenTie>::iterator iter = m_tieStack.begin();
@@ -2181,11 +2232,9 @@ void MusicXmlInput::MatchTies(bool matchLayers)
         bool tieMatched = false;
         std::vector<musicxml::CloseTie>::iterator jter;
         for (jter = m_tieStopStack.begin(); jter != m_tieStopStack.end(); ++jter) {
-            // match tie stop with pitch/oct identity, with start note earlier than end note,
-            // and with earliest end note.
+            // match tie stop with pitch/oct identity, ending its tie (EndsAt)
             if ((iter->m_note->IsEnharmonicWith(jter->m_note))
-                && (iter->m_note->GetScoreTimeOnset() < jter->m_note->GetScoreTimeOnset())
-                && (!matchLayers || (iter->m_layerNum == jter->m_layerNum))) {
+                && EndsAt(*iter, jter->m_layerNum, jter->m_position, measure, jter->m_onset)) {
                 iter->m_tie->SetEndid("#" + jter->m_note->GetID());
                 tieMatched = true;
                 break;
@@ -3245,6 +3294,14 @@ void MusicXmlInput::ReadMusicXmlNote(
     }
     const int noteStaffNum = node.child("staff").text().as_int();
     const pugi::xml_node rest = node.child("rest");
+    // A note or a rest that is drawn takes the next place of its voice, the next for the ties before it (a chord
+    // takes one; a grace note stands with the note it leads to; a rest not drawn is a gap, as a <forward> is)
+    const int onsetTicks = m_durTotal;
+    int voicePosition = m_voicePositions[layer->GetN()];
+    if (!rest || !HasAttributeWithValue(node, "print-object", "no")) {
+        if (!isChord && !node.child("grace")) voicePosition = ++m_voicePositions[layer->GetN()];
+        this->PassTies(layer->GetN(), voicePosition);
+    }
     if (m_ppq < 0 && duration && !typeStr.empty()) {
         // if divisions are missing, try to calculate
         m_ppq = (double)duration * pow(2, ConvertTypeToDur(typeStr) - 2) / 4;
@@ -3756,7 +3813,7 @@ void MusicXmlInput::ReadMusicXmlNote(
         }
 
         // ties
-        this->ReadMusicXmlTies(node, layer, note, measureNum);
+        this->ReadMusicXmlTies(node, layer, note, measure, measureNum, voicePosition, onsetTicks, duration);
 
         // articulation
         std::list<Artic *> artics;
@@ -4596,8 +4653,8 @@ void MusicXmlInput::ReadMusicXmlBeamStart(const pugi::xml_node &node, const pugi
     m_elementStackMap.at(layer).push_back(beam);
 }
 
-void MusicXmlInput::ReadMusicXmlTies(
-    const pugi::xml_node &node, Layer *layer, Note *note, const std::string &measureNum)
+void MusicXmlInput::ReadMusicXmlTies(const pugi::xml_node &node, Layer *layer, Note *note, const Measure *measure,
+    const std::string &measureNum, int position, int onset, int duration)
 {
     pugi::xpath_node_set xmlTies = node.select_nodes("notations/tied");
     for (pugi::xpath_node_set::const_iterator it = xmlTies.begin(); it != xmlTies.end(); ++it) {
@@ -4607,14 +4664,19 @@ void MusicXmlInput::ReadMusicXmlTies(
         if (tieType.empty()) {
             continue;
         }
-        else if (tieType == "stop") { // add to stack if (endTie) or if pitch/oct match to open tie on m_tieStack
-            if (!m_tieStack.empty() && note->IsEnharmonicWith(m_tieStack.back().m_note)
-                && (m_tieStack.back().m_layerNum == layer->GetN())) {
-                m_tieStack.back().m_tie->SetEndid("#" + note->GetID());
-                m_tieStack.pop_back();
+        else if (tieType == "stop") {
+            // the open tie of this pitch this note ends (EndsAt), one of this note's own voice first
+            auto open = m_tieStack.end();
+            for (auto it = m_tieStack.begin(); it != m_tieStack.end(); ++it) {
+                if (!note->IsEnharmonicWith(it->m_note) || !EndsAt(*it, layer->GetN(), position, measure, onset)) continue;
+                if ((open == m_tieStack.end()) || (it->m_layerNum == layer->GetN())) open = it;
+            }
+            if (open != m_tieStack.end()) {
+                open->m_tie->SetEndid("#" + note->GetID());
+                m_tieStack.erase(open);
             }
             else {
-                this->CloseTie(note, layer->GetN());
+                this->CloseTie(note, layer->GetN(), position, onset);
             }
         }
         // if we have start attribute - start new tie
@@ -4628,7 +4690,7 @@ void MusicXmlInput::ReadMusicXmlTies(
             if (xmlTie.attribute("id")) tie->SetID(xmlTie.attribute("id").as_string());
             // add it to the stack
             m_controlElements.push_back({ measureNum, tie });
-            this->OpenTie(note, tie, layer->GetN());
+            this->OpenTie(note, tie, layer->GetN(), position, measure, onset + duration);
         }
         // or add lv element if let-ring attribute present
         else if (tieType == "let-ring") {

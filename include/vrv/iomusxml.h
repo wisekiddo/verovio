@@ -158,27 +158,46 @@ namespace musicxml {
     };
 
     struct OpenTie {
-        OpenTie(Tie *tie, Note *note, int layerNum)
+        OpenTie(Tie *tie, Note *note, int layerNum, int position, const Measure *measure, int end)
         {
             m_tie = tie;
             m_note = note;
             m_layerNum = layerNum;
+            m_position = position;
+            m_measure = measure;
+            m_end = end;
         }
 
         Tie *m_tie = NULL;
         Note *m_note = NULL;
         int m_layerNum = 0;
+        // its note's place among the notes and rests of its voice; its measure, and where it ends in it
+        int m_position = 0;
+        const Measure *m_measure = NULL;
+        int m_end = 0;
+        // the place of the next note or rest of its voice (none yet: -1), and whether its voice went on past it
+        int m_nextPosition = -1;
+        bool m_passed = false;
+        // its voice had nothing more in its measure: it waits for the next measure's; and whether its note ended at
+        // the bar line (another voice may then end it at the next measure's start)
+        bool m_carried = false;
+        bool m_atBarLine = false;
     };
 
     struct CloseTie {
-        CloseTie(Note *note, int layerNum)
+        CloseTie(Note *note, int layerNum, int position, int onset)
         {
             m_note = note;
             m_layerNum = layerNum;
+            m_position = position;
+            m_onset = onset;
         }
 
         Note *m_note = NULL;
         int m_layerNum = 0;
+        // its note's place among the notes and rests of its voice, and where it begins in its measure
+        int m_position = 0;
+        int m_onset = 0;
     };
 
     /**
@@ -329,7 +348,8 @@ private:
     void CloseTuplet(Layer *layer, const std::string &measureNum, const std::string &number);
     void ReadMusicXmlBeamStart(const pugi::xml_node &node, const pugi::xml_node &beamStart, Layer *layer);
     void ReadMusicXMLMeterSig(const pugi::xml_node &node, Object *parent);
-    void ReadMusicXmlTies(const pugi::xml_node &node, Layer *layer, Note *note, const std::string &measureNum);
+    void ReadMusicXmlTies(const pugi::xml_node &node, Layer *layer, Note *note, const Measure *measure,
+        const std::string &measureNum, int position, int onset, int duration);
     ///@}
 
     /**
@@ -441,12 +461,20 @@ private:
      * Slur starts and ends are matched based on its number.
      */
     ///@{
-    void OpenTie(Note *note, Tie *tie, int layerNum);
-    void CloseTie(Note *note, int layerNum);
+    void OpenTie(Note *note, Tie *tie, int layerNum, int position, const Measure *measure, int end);
+    void CloseTie(Note *note, int layerNum, int position, int onset);
+    /** A note or rest at the place [position] of the layer [layerNum]: the next of its voice for the ties before it */
+    void PassTies(int layerNum, int position);
+    /** Whether [tie] is ended by the note at the place [position] of the layer [layerNum], beginning at [onset] in
+     * [measure] */
+    static bool EndsAt(
+        const musicxml::OpenTie &tie, int layerNum, int position, const Measure *measure, int onset);
+    /** Leaves out the open tie at [tie], which no note continues */
+    void DropOpenTie(std::vector<musicxml::OpenTie>::iterator tie, const std::string &measureNum);
     void OpenSlur(Measure *measure, short int number, Slur *slur, curvature_CURVEDIR dir);
     void CloseSlur(Measure *measure, short int number, LayerElement *element, curvature_CURVEDIR dir);
     void CloseBeamSpan(Staff *staff, Layer *layer, LayerElement *element);
-    void MatchTies(bool matchLayers);
+    void MatchTies(const Measure *measure);
     ///@}
 
     /**
@@ -655,6 +683,9 @@ private:
     std::vector<std::pair<LayerElement *, musicxml::CloseSlur>> m_slurStopStack;
     /* The stack for open ties */
     std::vector<musicxml::OpenTie> m_tieStack;
+    // the notes and drawn rests of each layer of the part so far (a chord counts once, a grace note not): the place
+    // of a note in its voice, by which a tie finds the next note of its voice
+    std::map<int, int> m_voicePositions;
     /* The stack for tie stops that might come before that tie was opened */
     std::vector<musicxml::CloseTie> m_tieStopStack;
     /* The stack for hairpins */
