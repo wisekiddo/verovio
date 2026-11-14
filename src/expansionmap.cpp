@@ -1043,18 +1043,21 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             // skip section first time because it was already added in the SECTION block
             for (auto ending = endings.begin(); isFollowed && (ending != endings.end()); ++ending) {
                 if (ending != endings.begin()) {
+                    const auto played = std::prev(ending)->second.back();
+                    const data_BARRENDITION right = played->second.back()->GetRight();
+                    const bool hasOwnSign = (right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth);
                     // one ending for several passes comes round by the repeat sign at its end. Where that sign stands
-                    // further on, after plain bars, it brings the ending round itself, in the passes it names
-                    if ((ending->second == std::prev(ending)->second) && signFollows) continue;
+                    // further on, after plain bars, it brings the ending round itself, in the passes it names. (Not
+                    // where the ending has a sign of its own: the one further on is another repeat's. It passed the
+                    // ending's second time over, and the next ending was played in its place. MuseNote RC29)
+                    if ((ending->second == std::prev(ending)->second) && signFollows && !hasOwnSign) continue;
                     // The play goes back for this pass only where something sends it: a repeat sign at the end of
                     // the ending just played, or an ending further on still to be played (a file that leaves out
                     // the sign before its next ending). Otherwise the repeat is left there, and what the endings
                     // name after it is played after a jump back, as their last ending. (Every pass they named was
                     // played, as if a sign sent the play back for each: a last ending "2.3." with no sign after it,
                     // its third time after the D.C., was played a third time through. MuseNote RC27)
-                    const auto played = std::prev(ending)->second.back();
-                    const data_BARRENDITION right = played->second.back()->GetRight();
-                    bool isSentBack = (right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth);
+                    bool isSentBack = hasOwnSign;
                     for (auto later = ending; !isSentBack && (later != endings.end()); ++later) {
                         for (auto part : later->second) isSentBack = isSentBack || (placeOf(part) > placeOf(played));
                     }
