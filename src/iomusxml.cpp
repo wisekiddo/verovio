@@ -442,6 +442,10 @@ void MusicXmlInput::AddMeasure(Section *section, Measure *measure, int i)
         if (m_sectionStop && !m_sections.empty()) {
             if (m_sectionStop->m_classId == ENDING) {
                 m_sections.back().first.m_endingInfo = m_sectionStop->m_endingInfo;
+                // A repeat sign on the barline that ends it is played as written: its count is kept. (It was
+                // dropped: the count fell to once, and a repeat whose barline also holds an ending's stop was not
+                // played, nor its times kept where it closes an ending: W51, W54)
+                m_sections.back().first.m_repeatInfo = m_sectionStop->m_repeatInfo;
             }
             else {
                 m_sections.back().first.m_repeatInfo = m_sectionStop->m_repeatInfo;

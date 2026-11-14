@@ -1011,6 +1011,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 }
             }
 
+            const int passAtEndings = pass; // (the pass the first of these endings is played in)
             // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
             // skip section first time because it was already added in the SECTION block
             for (auto ending = endings.begin(); isFollowed && (ending != endings.end()); ++ending) {
@@ -1028,6 +1029,31 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 for (auto it = ending->second.begin(); isFollowed && (it != ending->second.end()); ++it) {
                     std::string endref = "#" + (*it)->first.m_target->GetID();
                     isFollowed = order.Add(endref);
+                }
+            }
+
+            // A repeat sign at the end of the last of these endings brings the play round too: the passes after the
+            // last ending's, up to the count of the repeat (twice, or the times written), play the repeat's music
+            // and go on after the endings. A first ending closed by a repeat sign, with the second time through
+            // unmarked, is played once and then left out. (Only the passes the endings name were played: such a
+            // repeat was never taken. W54) Passes the endings leave out between their numbers are not made up.
+            if (!jumpBack && !endings.empty()) {
+                const auto last = std::prev(endings.end());
+                const auto lastPart = last->second.back();
+                const data_BARRENDITION right = lastPart->second.back()->GetRight();
+                if ((right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth)) {
+                    // (counted from the pass the repeat is in: a repeat that has played its passes by the endings
+                    // before these is not taken again by a sign at their end)
+                    const int times = std::max(2, lastPart->first.m_repeatInfo.m_times);
+                    const int lastPass = endings.begin()->first + times - passAtEndings;
+                    for (int p = last->first + 1; isFollowed && (p <= lastPass); ++p) {
+                        ++pass;
+                        for (auto it = rptIter; isFollowed && (it != std::next(secIter)); ++it) {
+                            if (!isPlayed(it)) continue;
+                            std::string ref = "#" + it->first.m_target->GetID();
+                            isFollowed = order.Add(ref);
+                        }
+                    }
                 }
             }
 
