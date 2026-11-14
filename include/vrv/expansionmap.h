@@ -89,22 +89,28 @@ struct JumpInfo {
     typedef enum { NONE = 0, DALSEGNO, DACAPO, TOCODA } JUMPTYPE;
 
     JumpInfo() { m_jump = NONE; }
-    JumpInfo(JUMPTYPE jump, const std::string &label, const std::list<int> &times)
+    JumpInfo(JUMPTYPE jump, const std::string &label, const std::list<int> &times, bool timesGiven = false)
     {
         m_label = label;
         m_jump = jump;
         m_times = times;
+        m_timesGiven = timesGiven;
     }
-    JumpInfo(JUMPTYPE jump, const std::list<int> &times)
+    JumpInfo(JUMPTYPE jump, const std::list<int> &times, bool timesGiven = false)
     {
         m_jump = jump;
         m_times = times;
+        m_timesGiven = timesGiven;
     }
     JumpInfo(JUMPTYPE jump) { m_jump = jump; }
 
     std::string m_label;
     JUMPTYPE m_jump;
     std::list<int> m_times;
+    // Whether the score names the times (MusicXML time-only): they are counted by every time the part is played,
+    // its repeat's passes too. Times it does not name are what the jump means without them, counted by the returns
+    // to the part: a D.C. or a D.S. the first time, a To Coda the time after the jump back
+    bool m_timesGiven = false;
 };
 
 struct FineInfo {
@@ -118,6 +124,7 @@ struct SectionInfo {
     SectionInfo(bool repeatStart = false)
     {
         m_visited = 0;
+        m_played = 0;
         m_classId = SECTION;
         m_target = NULL;
         m_repeatStart = repeatStart;
@@ -125,6 +132,7 @@ struct SectionInfo {
     SectionInfo(const EndingInfo &endingInfo)
     {
         m_visited = 0;
+        m_played = 0;
         m_classId = ENDING;
         m_target = NULL;
         m_endingInfo = endingInfo;
@@ -133,6 +141,7 @@ struct SectionInfo {
     SectionInfo(const RepeatInfo &repeatInfo)
     {
         m_visited = 0;
+        m_played = 0;
         m_classId = SECTION;
         m_target = NULL;
         m_repeatInfo = repeatInfo;
@@ -154,9 +163,13 @@ struct SectionInfo {
     EndingInfo m_endingInfo;
     RepeatInfo m_repeatInfo;
     bool m_repeatStart;
-    JumpInfo m_jumpInfo;
+    // the jumps at its end, each for its times: a barline can hold several (MusicXML: a To Coda the second time,
+    // another the third). One was kept, the last read (MuseNote RC36)
+    std::vector<JumpInfo> m_jumps;
     FineInfo m_fineInfo;
+    // the returns to the part (the order's visits), and every time it is played (its repeat's passes too)
     int m_visited;
+    int m_played;
 };
 
 /** The parts in score order, each with its measures */

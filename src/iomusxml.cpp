@@ -432,8 +432,8 @@ void MusicXmlInput::AddMeasure(Section *section, Measure *measure, int i)
             m_sections.back().second.push_back(contentMeasure);
         }
         // jump and fine info
-        if (m_jumpInfo && !m_sections.empty()) {
-            m_sections.back().first.m_jumpInfo = *m_jumpInfo;
+        if (!m_jumps.empty() && !m_sections.empty()) {
+            m_sections.back().first.m_jumps = m_jumps;
         }
         if (m_fineInfo && !m_sections.empty()) {
             m_sections.back().first.m_fineInfo = *m_fineInfo;
@@ -455,7 +455,7 @@ void MusicXmlInput::AddMeasure(Section *section, Measure *measure, int i)
     }
     m_sectionStart.reset();
     m_sectionStop.reset();
-    m_jumpInfo.reset();
+    m_jumps.clear();
     m_fineInfo.reset();
 }
 
@@ -2102,6 +2102,11 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
     const auto mrestPositonIter = m_multiRests.find(index);
     bool isMRestInOtherSystem = (mrestPositonIter != m_multiRests.end());
     int multiRestStaffNumber = 1;
+    // (a rest another part begins: this part's marks of the bars it stands for are read as that part's are)
+    if (isMRestInOtherSystem) {
+        this->ReadMultiRestMarks(node.first_child(), node, mrestPositonIter->second - mrestPositonIter->first + 1,
+            measure, measureNum, staffOffset, section);
+    }
 
     // read the content of the measure
     for (pugi::xml_node child : node) {
@@ -2123,6 +2128,14 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
             this->AddLayerElement(layer, multiRest);
             m_multiRests[index] = index + multiRestLength - 1;
             this->ReadMusicXmlAttributes(child, section, measure, measureNum);
+            // The marks of the bars the rest stands for are its own. (This bar was left here, and the bars after it
+            // were read for their barlines alone: a segno, a To Coda or a D.S. in them was lost and the jump never
+            // taken, and a tempo or words with them. MuseNote RC39)
+            // (read already where another part began the rest)
+            if (!isMRestInOtherSystem) {
+                this->ReadMultiRestMarks(
+                    child.next_sibling(), node, multiRestLength, measure, measureNum, staffOffset, section);
+            }
             break;
         }
         else if (isMRestInOtherSystem) {
@@ -2641,7 +2654,36 @@ void MusicXmlInput::ReadMusicXmlDirection(
 
     // Coda & Segno
     pugi::xpath_node xmlJump = typeNode.select_node("coda|segno");
-    if (xmlJump && !containsWords) {
+    // A sign drawn for a jump is the jump its sound says: a To Coda drawn as the coda sign alone, a D.S. as the
+    // segno (MusicXML gives in a direction's type what it shows, in its sound what it does). It was the sign: the
+    // score had a second coda or segno and no jump, kept only in the order of play, and every export of the score
+    // wrote the sign (MuseNote RC34). Such a jump is typed as one given in words with the sign (and drawn so)
+    const char *jumpOfSign = NULL;
+    if (soundNode.attribute("tocoda")) {
+        jumpOfSign = "tocoda";
+    }
+    else if (soundNode.attribute("dalsegno")) {
+        jumpOfSign = "dalsegno";
+    }
+    else if (HasAttributeWithValue(soundNode, "dacapo", "yes")) {
+        jumpOfSign = "dacapo";
+    }
+    if (xmlJump && !containsWords && jumpOfSign) {
+        Dir *dir = new Dir();
+        dir->SetPlace(dir->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
+        dir->SetTstamp(timeStamp);
+        dir->SetType(jumpOfSign);
+        dir->SetStaff(dir->AttStaffIdent::StrToXsdPositiveIntegerList("1"));
+        Symbol *symbol = new Symbol();
+        symbol->SetGlyphAuth("smufl");
+        symbol->SetColor(xmlJump.node().attribute("color").as_string());
+        symbol->SetGlyphName(xmlJump.node().attribute("smufl") ? xmlJump.node().attribute("smufl").as_string()
+                                                               : xmlJump.node().name());
+        dir->AddChild(symbol);
+        if (xmlJump.node().attribute("id")) dir->SetID(xmlJump.node().attribute("id").as_string());
+        m_controlElements.push_back({ measureNum, dir });
+    }
+    else if (xmlJump && !containsWords) {
         RepeatMark *mark = new RepeatMark();
         mark->SetPlace(mark->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
         mark->SetTstamp(timeStamp);
@@ -4484,11 +4526,15 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
         if (!m_sectionStart) m_sectionStart = musicxml::SectionInfo();
     }
 
+    // The times a jump is taken: those the sound names (time-only), or what the jump means without them
+    const pugi::xml_attribute timeOnly = node.attribute("time-only");
+    const auto timesOf = [&timeOnly](const char *meant) { return parseInts(timeOnly ? timeOnly.as_string() : meant); };
+    const bool timesGiven = !timeOnly.empty();
+
     // dacapo
     if (HasAttributeWithValue(node, "dacapo", "yes")) {
         if (!m_sectionStop) m_sectionStop = musicxml::SectionInfo();
-        m_jumpInfo
-            = musicxml::JumpInfo(musicxml::JumpInfo::DACAPO, parseInts(node.attribute("time-only").as_string("1")));
+        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::DACAPO, timesOf("1"), timesGiven));
     }
 
     // dalsegno
@@ -4496,8 +4542,7 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
         if (!m_sectionStop) m_sectionStop = musicxml::SectionInfo();
         std::string label = node.attribute("dalsegno").as_string();
         if (label.empty()) label = "segno";
-        m_jumpInfo = musicxml::JumpInfo(
-            musicxml::JumpInfo::DALSEGNO, label, parseInts(node.attribute("time-only").as_string("1")));
+        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::DALSEGNO, label, timesOf("1"), timesGiven));
     }
 
     // tocoda
@@ -4505,14 +4550,28 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
         if (!m_sectionStop) m_sectionStop = musicxml::SectionInfo();
         std::string label = node.attribute("tocoda").as_string();
         if (label.empty()) label = "coda";
-        m_jumpInfo = musicxml::JumpInfo(
-            musicxml::JumpInfo::TOCODA, label, parseInts(node.attribute("time-only").as_string("2")));
+        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::TOCODA, label, timesOf("2"), timesGiven));
     }
 
     // fine
     if (node.attribute("fine")) {
         if (!m_sectionStop) m_sectionStop = musicxml::SectionInfo();
         m_fineInfo = musicxml::FineInfo(true);
+    }
+}
+
+void MusicXmlInput::ReadMultiRestMarks(pugi::xml_node from, pugi::xml_node bar, int bars, Measure *measure,
+    const std::string &measureNum, const short int staffOffset, Section *section)
+{
+    for (int b = 0; (b < bars) && bar; ++b, bar = bar.next_sibling("measure")) {
+        for (pugi::xml_node mark = (b == 0) ? from : bar.first_child(); mark; mark = mark.next_sibling()) {
+            if (IsElement(mark, "direction")) {
+                this->ReadMusicXmlDirection(mark, measure, measureNum, staffOffset, section);
+            }
+            else if (IsElement(mark, "sound")) {
+                this->ReadMusicXmlSound(mark, measure, section);
+            }
+        }
     }
 }
 

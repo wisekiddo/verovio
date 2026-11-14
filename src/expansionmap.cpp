@@ -769,13 +769,13 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
             startsPart = true;
         }
         if (marks.m_jump == play::JumpInfo::DACAPO) {
-            part.m_jumpInfo = play::JumpInfo(play::JumpInfo::DACAPO, std::list<int>{ 1 });
+            part.m_jumps = { play::JumpInfo(play::JumpInfo::DACAPO, std::list<int>{ 1 }) };
         }
         else if (marks.m_jump == play::JumpInfo::DALSEGNO) {
-            part.m_jumpInfo = play::JumpInfo(play::JumpInfo::DALSEGNO, "segno", std::list<int>{ 1 });
+            part.m_jumps = { play::JumpInfo(play::JumpInfo::DALSEGNO, "segno", std::list<int>{ 1 }) };
         }
         else if (marks.m_jump == play::JumpInfo::TOCODA) {
-            part.m_jumpInfo = play::JumpInfo(play::JumpInfo::TOCODA, "coda", std::list<int>{ 2 });
+            part.m_jumps = { play::JumpInfo(play::JumpInfo::TOCODA, "coda", std::list<int>{ 2 }) };
         }
         if (marks.m_fine) part.m_fineInfo = play::FineInfo(true);
         // (the end of an ending needs no word here: what follows it stands in another container)
@@ -929,6 +929,38 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
         const std::list<int> numbers = parseInts(it->first.m_endingInfo.m_number);
         return numbers.empty() || (std::find(numbers.begin(), numbers.end(), pass) != numbers.end());
     };
+    const auto isTime = [](const play::JumpInfo &jump, int time) {
+        return std::find(jump.m_times.begin(), jump.m_times.end(), time) != jump.m_times.end();
+    };
+    // Where [jump] sends the play: the beginning, or the segno or the coda it names (none where it is not found)
+    const auto targetOf = [&sections, &segnos, &codas](const play::JumpInfo &jump) -> std::optional<decltype(iter)> {
+        if (jump.m_jump == play::JumpInfo::DACAPO) return sections.begin();
+        const auto &labels = (jump.m_jump == play::JumpInfo::DALSEGNO) ? segnos : codas;
+        if (!labels.contains(jump.m_label)) {
+            LogWarning("Order of play: Segno/Coda label '%s' not found", jump.m_label.c_str());
+            return std::nullopt;
+        }
+        return labels.at(jump.m_label);
+    };
+    // A jump that names its times (MusicXML time-only: "which times through the repeated section the sound
+    // applies") is taken the time its part is played that it names, every time counted, its repeat's passes too,
+    // and when that time comes: in a pass of a repeat, the rest of the pass and of the repeat is not played. (Only
+    // the returns to the part were counted: a To Coda "3rd time" in a passage played twice by its repeat and once
+    // after the D.S. was never taken, nor a To Coda "2nd time" in a repeat. MuseNote RC35) Where it sends the play,
+    // and whether back:
+    std::optional<std::pair<decltype(iter), bool>> sent;
+    const auto add = [&](decltype(iter) it) {
+        isFollowed = order.Add("#" + it->first.m_target->GetID());
+        ++it->first.m_played;
+        for (const play::JumpInfo &jump : it->first.m_jumps) {
+            if (!jump.m_timesGiven || !isTime(jump, it->first.m_played)) continue;
+            if (const auto target = targetOf(jump)) {
+                sent = { *target, jump.m_jump != play::JumpInfo::TOCODA };
+                break;
+            }
+        }
+    };
+    const auto goesOn = [&isFollowed, &sent]() { return isFollowed && !sent; };
     while (isFollowed && (iter != sections.end())) {
         // increment visited count
         iter->first.m_visited++;
@@ -942,17 +974,15 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
         // handle section
         if (iter->first.m_classId == SECTION) {
             // add the section
-            std::string ref = "#" + iter->first.m_target->GetID();
-            isFollowed = order.Add(ref);
+            add(iter);
 
             // repeat the sections, beginning with the repeat start
             int times = (jumpBack && !iter->first.m_repeatInfo.m_afterJump) ? 1 : iter->first.m_repeatInfo.m_times;
-            for (int t = 2; isFollowed && (t <= times); ++t) {
+            for (int t = 2; goesOn() && (t <= times); ++t) {
                 ++pass;
-                for (auto it = rptIter; isFollowed && (it != std::next(iter)); ++it) {
+                for (auto it = rptIter; goesOn() && (it != std::next(iter)); ++it) {
                     if (!isPlayed(it)) continue;
-                    std::string ref = "#" + it->first.m_target->GetID();
-                    isFollowed = order.Add(ref);
+                    add(it);
                 }
             }
 
@@ -1000,10 +1030,17 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 if (endIter != begIter) endIter->first.m_visited++;
             }
 
+            // A repeat marked to be taken after the jump (MusicXML after-jump, on the sign that closes an ending)
+            // plays its passes and its endings then as the first time. (Only the last ending was played: the mark
+            // was read on a plain repeat alone. MuseNote RC38)
+            bool isTakenAfterJump = false;
+            for (auto part : group) isTakenAfterJump = isTakenAfterJump || part->first.m_repeatInfo.m_afterJump;
+            const bool isAfterJump = jumpBack && !isTakenAfterJump;
+
             // when jumping back, keep only last ending: the last of its repeat. That one may stand further on, after
             // plain bars: an ending whose numbers go on from these (a "2" after this "1"). Then none of these is
             // played. One that starts its numbers again belongs to another repeat.
-            if (jumpBack && endings.size() > 0) {
+            if (isAfterJump && endings.size() > 0) {
                 bool isLast = true;
                 for (auto it = iter; it != sections.end(); ++it) {
                     if (it->first.m_classId == ENDING) {
@@ -1041,7 +1078,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             bool isLeft = false; // the repeat left at an ending that nothing sends back from
             // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
             // skip section first time because it was already added in the SECTION block
-            for (auto ending = endings.begin(); isFollowed && (ending != endings.end()); ++ending) {
+            for (auto ending = endings.begin(); goesOn() && (ending != endings.end()); ++ending) {
                 if (ending != endings.begin()) {
                     const auto played = std::prev(ending)->second.back();
                     const data_BARRENDITION right = played->second.back()->GetRight();
@@ -1066,15 +1103,13 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                         break;
                     }
                     ++pass;
-                    for (auto it = rptIter; isFollowed && (it != std::next(secIter)); ++it) {
+                    for (auto it = rptIter; goesOn() && (it != std::next(secIter)); ++it) {
                         if (!isPlayed(it)) continue;
-                        std::string ref = "#" + it->first.m_target->GetID();
-                        isFollowed = order.Add(ref);
+                        add(it);
                     }
                 }
-                for (auto it = ending->second.begin(); isFollowed && (it != ending->second.end()); ++it) {
-                    std::string endref = "#" + (*it)->first.m_target->GetID();
-                    isFollowed = order.Add(endref);
+                for (auto it = ending->second.begin(); goesOn() && (it != ending->second.end()); ++it) {
+                    add(*it);
                 }
             }
 
@@ -1083,7 +1118,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             // and go on after the endings. A first ending closed by a repeat sign, with the second time through
             // unmarked, is played once and then left out. (Only the passes the endings name were played: such a
             // repeat was never taken. W54) Passes the endings leave out between their numbers are not made up.
-            if (!jumpBack && !isLeft && !endings.empty()) {
+            if (!isAfterJump && !isLeft && !sent && !endings.empty()) {
                 const auto last = std::prev(endings.end());
                 const auto lastPart = last->second.back();
                 const data_BARRENDITION right = lastPart->second.back()->GetRight();
@@ -1092,12 +1127,11 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                     // before these is not taken again by a sign at their end)
                     const int times = std::max(2, lastPart->first.m_repeatInfo.m_times);
                     const int lastPass = endings.begin()->first + times - passAtEndings;
-                    for (int p = last->first + 1; isFollowed && (p <= lastPass); ++p) {
+                    for (int p = last->first + 1; goesOn() && (p <= lastPass); ++p) {
                         ++pass;
-                        for (auto it = rptIter; isFollowed && (it != std::next(secIter)); ++it) {
+                        for (auto it = rptIter; goesOn() && (it != std::next(secIter)); ++it) {
                             if (!isPlayed(it)) continue;
-                            std::string ref = "#" + it->first.m_target->GetID();
-                            isFollowed = order.Add(ref);
+                            add(it);
                         }
                     }
                 }
@@ -1110,34 +1144,27 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             }
         }
 
+        // a jump that names its times, taken when its time came
+        if (sent) {
+            iter = sent->first;
+            jumpBack = sent->second;
+            sent.reset();
+            continue;
+        }
+
         // fine
         if (jumpBack && endIter->first.m_fineInfo.m_fine) {
             break;
         }
 
-        // dacapo
-        if (endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DACAPO
-            && endIter->first.m_jumpInfo.m_times.end()
-                != std::find(endIter->first.m_jumpInfo.m_times.begin(), endIter->first.m_jumpInfo.m_times.end(),
-                    endIter->first.m_visited)) {
-            iter = sections.begin();
-            jumpBack = true;
-        }
-
-        // dalsegno / tocoda
-        if ((endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DALSEGNO
-                || endIter->first.m_jumpInfo.m_jump == play::JumpInfo::TOCODA)
-            && endIter->first.m_jumpInfo.m_times.end()
-                != std::find(endIter->first.m_jumpInfo.m_times.begin(), endIter->first.m_jumpInfo.m_times.end(),
-                    endIter->first.m_visited)) {
-            const auto &labels = (endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DALSEGNO) ? segnos : codas;
-            if (!labels.contains(endIter->first.m_jumpInfo.m_label)) {
-                LogWarning(
-                    "Order of play: Segno/Coda label '%s' not found", endIter->first.m_jumpInfo.m_label.c_str());
-            }
-            else {
-                iter = labels.at(endIter->first.m_jumpInfo.m_label);
-                jumpBack = endIter->first.m_jumpInfo.m_jump == play::JumpInfo::DALSEGNO;
+        // the jumps that name no times, by the returns to the part: the first whose time it is (dacapo, dalsegno,
+        // tocoda)
+        for (const play::JumpInfo &jump : endIter->first.m_jumps) {
+            if (jump.m_timesGiven || !isTime(jump, endIter->first.m_visited)) continue;
+            if (const auto target = targetOf(jump)) {
+                iter = *target;
+                jumpBack = (jump.m_jump != play::JumpInfo::TOCODA);
+                break;
             }
         }
     }

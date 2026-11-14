@@ -316,6 +316,12 @@ private:
         pugi::xml_node, Measure *measure, const std::string &measureNum, const short int staffOffset, Section *section);
     void ReadMusicXmlPrint(pugi::xml_node, Section *section);
     void ReadMusicXmlSound(pugi::xml_node, Measure *measure, Section *section);
+    /**
+     * The directions and sounds of the [bars] bars a multi-bar rest stands for, from [from] in the first, [bar], on:
+     * read into [measure], the rest's (a start at its start, a jump at its end, as its barlines are its last bar's)
+     */
+    void ReadMultiRestMarks(pugi::xml_node from, pugi::xml_node bar, int bars, Measure *measure,
+        const std::string &measureNum, const short int staffOffset, Section *section);
     bool ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord);
     /**
      * Opens a tuplet level for [tupletStart] with its own ratio (MEI's rule: the ratios of nested tuplets multiply):
@@ -700,7 +706,8 @@ private:
     /* Current section/ending info for start/stop */
     std::optional<musicxml::SectionInfo> m_sectionStart;
     std::optional<musicxml::SectionInfo> m_sectionStop;
-    std::optional<musicxml::JumpInfo> m_jumpInfo;
+    /* The jumps of the measure being read, each for its times: a barline can hold several (MuseNote RC36) */
+    std::vector<musicxml::JumpInfo> m_jumps;
     std::optional<musicxml::FineInfo> m_fineInfo;
     /* The list of sections/endings to be inserted at the end of XML import */
     std::vector<std::pair<musicxml::SectionInfo, std::vector<Measure *>>> m_sections;
