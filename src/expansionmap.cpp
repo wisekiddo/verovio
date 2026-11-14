@@ -607,12 +607,13 @@ void ExpansionMap::ToJson(std::string &output)
 
 namespace {
 
-    /** What the marks in a measure say of the order of play */
+    /** What the marks in a measure say of the order of play: its segno's and its coda's labels (none where it has
+     * none), its fine, its jumps */
     struct PlayMarks {
-        bool m_segno = false;
-        bool m_coda = false;
+        std::string m_segno;
+        std::string m_coda;
         bool m_fine = false;
-        play::JumpInfo::JUMPTYPE m_jump = play::JumpInfo::NONE;
+        std::vector<play::JumpInfo> m_jumps;
     };
 
     /**
@@ -622,27 +623,52 @@ namespace {
     PlayMarks MarksOf(const Measure *measure)
     {
         PlayMarks marks;
+        // A mark's label, or the one the rule takes without one; its times, where it names them (MuseNote RC41)
+        const auto labelOf = [](const ControlElement *mark, const std::string &unlabelled) {
+            return mark->HasLabel() ? mark->GetLabel() : unlabelled;
+        };
+        const auto jump = [&marks](play::JumpInfo::JUMPTYPE type, const std::string &label,
+                              const std::vector<std::string> &tokens) {
+            std::list<int> times{ (type == play::JumpInfo::TOCODA) ? 2 : 1 };
+            bool timesGiven = false;
+            for (const std::string &token : tokens) {
+                if (const auto named = order::TimesOf(token)) {
+                    times = *named;
+                    timesGiven = true;
+                }
+            }
+            marks.m_jumps.push_back(play::JumpInfo(type, label, times, timesGiven));
+        };
         for (const Object *child : measure->GetChildren()) {
             if (child->Is(REPEATMARK)) {
-                switch (vrv_cast<const RepeatMark *>(child)->GetFunc()) {
-                    case repeatMarkLog_FUNC_segno: marks.m_segno = true; break;
-                    case repeatMarkLog_FUNC_coda: marks.m_coda = true; break;
+                const RepeatMark *mark = vrv_cast<const RepeatMark *>(child);
+                switch (mark->GetFunc()) {
+                    case repeatMarkLog_FUNC_segno: marks.m_segno = labelOf(mark, "segno"); break;
+                    case repeatMarkLog_FUNC_coda: marks.m_coda = labelOf(mark, "coda"); break;
                     case repeatMarkLog_FUNC_fine: marks.m_fine = true; break;
                     case repeatMarkLog_FUNC_daCapo:
                     case repeatMarkLog_FUNC_daCapoAlFine:
-                    case repeatMarkLog_FUNC_daCapoAlCoda: marks.m_jump = play::JumpInfo::DACAPO; break;
+                    case repeatMarkLog_FUNC_daCapoAlCoda: jump(play::JumpInfo::DACAPO, "", {}); break;
                     case repeatMarkLog_FUNC_dalSegno:
                     case repeatMarkLog_FUNC_dalSegnoAlFine:
-                    case repeatMarkLog_FUNC_dalSegnoAlCoda: marks.m_jump = play::JumpInfo::DALSEGNO; break;
+                    case repeatMarkLog_FUNC_dalSegnoAlCoda:
+                        jump(play::JumpInfo::DALSEGNO, labelOf(mark, "segno"), {});
+                        break;
                     default: break;
                 }
             }
             else if (child->Is(DIR)) {
-                const std::string type = vrv_cast<const Dir *>(child)->GetType();
-                if (type == "dacapo") marks.m_jump = play::JumpInfo::DACAPO;
-                if (type == "dalsegno") marks.m_jump = play::JumpInfo::DALSEGNO;
-                if (type == "tocoda") marks.m_jump = play::JumpInfo::TOCODA;
-                if (type == "fine") marks.m_fine = true;
+                // a direction typed as the MusicXML reader types the jumps and signs it reads: its kind is the first
+                // token of its type (a coda or a segno given in words is one too)
+                const Dir *dir = vrv_cast<const Dir *>(child);
+                const std::vector<std::string> tokens = order::TokensOf(dir->GetType());
+                const std::string kind = tokens.empty() ? "" : tokens.front();
+                if (kind == "dacapo") jump(play::JumpInfo::DACAPO, "", tokens);
+                if (kind == "dalsegno") jump(play::JumpInfo::DALSEGNO, labelOf(dir, "segno"), tokens);
+                if (kind == "tocoda") jump(play::JumpInfo::TOCODA, labelOf(dir, "coda"), tokens);
+                if (kind == "fine") marks.m_fine = true;
+                if (kind == "coda") marks.m_coda = labelOf(dir, "coda");
+                if (kind == "segno") marks.m_segno = labelOf(dir, "segno");
             }
         }
         return marks;
@@ -743,14 +769,14 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
         const bool isNewContainer = (i == 0) || (measures[i - 1].m_parent != current.m_parent);
         const bool isRepeatStart = startsRepeat || ExpansionMap::IsRepeatStart(measure);
         const bool afterListedEnd = (i > 0) && listedEnds.contains(measures[i - 1].m_measure);
-        if (startsPart || isNewContainer || isRepeatStart || marks.m_segno || marks.m_coda || listed.contains(measure)
-            || afterListedEnd) {
+        if (startsPart || isNewContainer || isRepeatStart || !marks.m_segno.empty() || !marks.m_coda.empty()
+            || listed.contains(measure) || afterListedEnd) {
             play::SectionInfo info(isRepeatStart);
             // Every part of an ending is the ending's (one that a mark or a repeat start divides is played whole
             // in its passes, as one ending written as two brackets is)
             if (current.m_ending) info.merge(play::EndingInfo(current.m_ending->GetN(), "", ""));
-            if (marks.m_segno) info.m_segnoLabel = "segno";
-            if (marks.m_coda) info.m_codaLabel = "coda";
+            info.m_segnoLabel = marks.m_segno;
+            info.m_codaLabel = marks.m_coda;
             parts.push_back({ info, {} });
         }
         parts.back().second.push_back(measure);
@@ -765,24 +791,23 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
             // (in an ending the rule goes by the endings' numbers, not by this.) Twice, unless the reader knows
             // of more: the score itself has no place for how often
             const auto said = repeatTimes.find(measure);
-            part.m_repeatInfo = play::RepeatInfo((said == repeatTimes.end()) ? 2 : std::clamp(said->second, 1, 100), false);
+            int times = (said == repeatTimes.end()) ? 2 : said->second;
+            // what the score keeps of the file's repeat: its count, and whether it is taken after a jump (RC41)
+            bool afterJump = false;
+            for (const std::string &token : order::TokensOf(measure->GetType())) {
+                if (const auto count = order::RepeatOf(token)) times = *count;
+                afterJump = afterJump || (token == order::kAfterJump);
+            }
+            part.m_repeatInfo = play::RepeatInfo(std::clamp(times, 1, 100), afterJump);
             startsPart = true;
         }
-        if (marks.m_jump == play::JumpInfo::DACAPO) {
-            part.m_jumps = { play::JumpInfo(play::JumpInfo::DACAPO, std::list<int>{ 1 }) };
-        }
-        else if (marks.m_jump == play::JumpInfo::DALSEGNO) {
-            part.m_jumps = { play::JumpInfo(play::JumpInfo::DALSEGNO, "segno", std::list<int>{ 1 }) };
-        }
-        else if (marks.m_jump == play::JumpInfo::TOCODA) {
-            part.m_jumps = { play::JumpInfo(play::JumpInfo::TOCODA, "coda", std::list<int>{ 2 }) };
-        }
+        part.m_jumps.insert(part.m_jumps.end(), marks.m_jumps.begin(), marks.m_jumps.end());
         if (marks.m_fine) part.m_fineInfo = play::FineInfo(true);
         // (the end of an ending needs no word here: what follows it stands in another container)
-        if ((marks.m_jump != play::JumpInfo::NONE) || marks.m_fine) startsPart = true;
+        if (!marks.m_jumps.empty() || marks.m_fine) startsPart = true;
         startsRepeat = ExpansionMap::IsNextRepeatStart(measure);
 
-        isOrdered = isOrdered || isRepeatEnd || current.m_ending || (marks.m_jump != play::JumpInfo::NONE);
+        isOrdered = isOrdered || isRepeatEnd || current.m_ending || !marks.m_jumps.empty();
     }
     // Nothing to follow: the score is left as it stands
     if (!isOrdered) return;
@@ -895,6 +920,44 @@ std::list<int> parseInts(const std::string &str)
     }
     return result;
 }
+
+namespace order {
+
+    std::string TimesToken(const std::list<int> &times)
+    {
+        std::string token = "times-";
+        for (int time : times) token += ((token.size() > 6) ? "." : "") + std::to_string(time);
+        return token;
+    }
+
+    std::string RepeatToken(int times)
+    {
+        return "repeat-" + std::to_string(times);
+    }
+
+    std::vector<std::string> TokensOf(const std::string &type)
+    {
+        std::vector<std::string> tokens;
+        std::istringstream words(type);
+        for (std::string token; words >> token;) tokens.push_back(token);
+        return tokens;
+    }
+
+    std::optional<std::list<int>> TimesOf(const std::string &token)
+    {
+        if (token.rfind("times-", 0) != 0) return std::nullopt;
+        return parseInts(token.substr(6));
+    }
+
+    std::optional<int> RepeatOf(const std::string &token)
+    {
+        if (token.rfind("repeat-", 0) != 0) return std::nullopt;
+        const std::list<int> count = parseInts(token.substr(7));
+        if (count.size() != 1) return std::nullopt;
+        return count.front();
+    }
+
+} // namespace order
 
 xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
 {

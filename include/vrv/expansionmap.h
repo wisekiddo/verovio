@@ -10,6 +10,7 @@
 
 #include <list>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -197,6 +198,25 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
 
 /** The numbers and ranges in a list like "1, 2", "1.2." or "1-3" (an ending's passes, the times a jump is taken) */
 std::list<int> parseInts(const std::string &str);
+
+/**
+ * What a score keeps of its file's order of play beyond its marks (MuseNote RC41), as tokens of MEI's @type, after a
+ * mark's own kind: the times a jump is taken ("times-2.3") on its mark; a repeat's count other than two ("repeat-3")
+ * and a repeat taken after a jump ("after-jump") on the measure its end stands in. The label of a jump's coda or segno,
+ * and a coda's or segno's own, is the mark's @label. They are written where the file says them and read by the rule
+ * for a score with no order of its own, so the score plays so without its order, and its exports can say it.
+ */
+namespace order {
+    std::string TimesToken(const std::list<int> &times);
+    std::string RepeatToken(int times);
+    inline const std::string kAfterJump = "after-jump";
+    /** The tokens of an @type, in order */
+    std::vector<std::string> TokensOf(const std::string &type);
+    /** The times a token names, or none */
+    std::optional<std::list<int>> TimesOf(const std::string &token);
+    /** The count a token names, or none */
+    std::optional<int> RepeatOf(const std::string &token);
+} // namespace order
 
 class ExpansionMap {
 

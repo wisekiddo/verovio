@@ -2161,6 +2161,8 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
         }
         else if (IsElement(child, "sound")) {
             this->ReadMusicXmlSound(child, measure, section);
+            this->MarkJumpsOfSound(
+                child, measureNum, "", (double)m_durTotal * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0);
         }
         else if (IsElement(child, "figured-bass")) {
             this->ReadMusicXmlFigures(child, measure, measureNum);
@@ -2408,6 +2410,14 @@ void MusicXmlInput::ReadMusicXmlBarLine(pugi::xml_node node, Measure *measure, c
     }
     if (measure->GetRight() == BARRENDITION_rptend) {
         m_sectionStop = musicxml::SectionInfo(musicxml::RepeatInfo(repeatTimes, repeatAfterJump));
+        // kept on the measure, where the file says more than "twice" (MuseNote RC41)
+        if (repeat) {
+            std::string type = measure->GetType();
+            const auto add = [&type](const std::string &token) { type += (type.empty() ? "" : " ") + token; };
+            if (repeatTimes != 2) add(order::RepeatToken(repeatTimes));
+            if (repeatAfterJump) add(order::kAfterJump);
+            if (!type.empty()) measure->SetType(type);
+        }
     }
 
     // parse endings (prima volta, seconda volta...)
@@ -2482,6 +2492,8 @@ void MusicXmlInput::ReadMusicXmlDirection(
     const pugi::xml_node soundNode = node.child("sound");
 
     const double timeStamp = (double)(m_durTotal + offset) * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0;
+    // the jump or sign of the sound that this direction's own mark carries (another the sound gives is marked apart)
+    std::string carried;
 
     if (voice) m_prevLayer = SelectLayer(node, measure);
 
@@ -2611,7 +2623,10 @@ void MusicXmlInput::ReadMusicXmlDirection(
             }
             dir->SetPlace(dir->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
             dir->SetTstamp(timeStamp);
-            dir->SetType(soundNode.first_attribute().name());
+            const std::string kind = soundNode.first_attribute().name();
+            dir->SetType(kind);
+            this->KeepWhatTheSoundSays(dir, soundNode, kind);
+            carried = kind;
             if (staffNode) {
                 dir->SetStaff(dir->AttStaffIdent::StrToXsdPositiveIntegerList(
                     std::to_string(staffNode.text().as_int() + staffOffset)));
@@ -2676,6 +2691,8 @@ void MusicXmlInput::ReadMusicXmlDirection(
         dir->SetPlace(dir->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
         dir->SetTstamp(timeStamp);
         dir->SetType(jumpOfSign);
+        this->KeepWhatTheSoundSays(dir, soundNode, jumpOfSign);
+        carried = jumpOfSign;
         dir->SetStaff(dir->AttStaffIdent::StrToXsdPositiveIntegerList("1"));
         Symbol *symbol = new Symbol();
         symbol->SetGlyphAuth("smufl");
@@ -2691,6 +2708,7 @@ void MusicXmlInput::ReadMusicXmlDirection(
         mark->SetPlace(mark->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
         mark->SetTstamp(timeStamp);
         mark->SetFunc(ConvertJumpType(xmlJump.node().name()));
+        if (soundNode) this->KeepWhatTheSoundSays(mark, soundNode, xmlJump.node().name());
         mark->SetStaff(mark->AttStaffIdent::StrToXsdPositiveIntegerList("1"));
         if (xmlJump.node().attribute("smufl")) {
             mark->SetGlyphAuth("smufl");
@@ -3104,6 +3122,7 @@ void MusicXmlInput::ReadMusicXmlDirection(
     pugi::xml_node xmlSound = node.child("sound");
     if (xmlSound) {
         ReadMusicXmlSound(xmlSound, measure, section);
+        this->MarkJumpsOfSound(xmlSound, measureNum, carried, timeStamp);
     }
 }
 
@@ -4563,6 +4582,35 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
     }
 }
 
+void MusicXmlInput::KeepWhatTheSoundSays(ControlElement *mark, const pugi::xml_node sound, const std::string &kind) const
+{
+    static const std::map<std::string, std::string> unlabelled{
+        { "tocoda", "coda" }, { "coda", "coda" }, { "dalsegno", "segno" }, { "segno", "segno" }
+    };
+    if (const auto it = unlabelled.find(kind); it != unlabelled.end()) {
+        const std::string label = sound.attribute(kind.c_str()).as_string();
+        if (!label.empty() && (label != it->second)) mark->SetLabel(label);
+    }
+    if (((kind == "tocoda") || (kind == "dalsegno") || (kind == "dacapo")) && sound.attribute("time-only")) {
+        mark->SetType(mark->GetType() + " " + order::TimesToken(parseInts(sound.attribute("time-only").as_string())));
+    }
+}
+
+void MusicXmlInput::MarkJumpsOfSound(
+    const pugi::xml_node sound, const std::string &measureNum, const std::string &carried, double tstamp)
+{
+    for (const std::string kind : { "dacapo", "dalsegno", "tocoda", "fine" }) {
+        if (!sound.attribute(kind.c_str()) || (kind == carried)) continue;
+        if ((kind == "dacapo") && !HasAttributeWithValue(sound, "dacapo", "yes")) continue;
+        Dir *dir = new Dir();
+        dir->SetTstamp(tstamp);
+        dir->SetType(kind);
+        this->KeepWhatTheSoundSays(dir, sound, kind);
+        dir->SetStaff(dir->AttStaffIdent::StrToXsdPositiveIntegerList("1"));
+        m_controlElements.push_back({ measureNum, dir });
+    }
+}
+
 void MusicXmlInput::ReadMultiRestMarks(pugi::xml_node from, pugi::xml_node bar, int bars, Measure *measure,
     const std::string &measureNum, const short int staffOffset, Section *section)
 {
@@ -4573,6 +4621,7 @@ void MusicXmlInput::ReadMultiRestMarks(pugi::xml_node from, pugi::xml_node bar, 
             }
             else if (IsElement(mark, "sound")) {
                 this->ReadMusicXmlSound(mark, measure, section);
+                this->MarkJumpsOfSound(mark, measureNum, "", 1.0);
             }
         }
     }

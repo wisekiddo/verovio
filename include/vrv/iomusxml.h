@@ -322,6 +322,18 @@ private:
      */
     void ReadMultiRestMarks(pugi::xml_node from, pugi::xml_node bar, int bars, Measure *measure,
         const std::string &measureNum, const short int staffOffset, Section *section);
+    /**
+     * What [sound] says of the jump or sign of [kind] that [mark] is, kept on the mark (MuseNote RC41): the label of
+     * its coda or segno, or its own, where it is not the one the rule takes without one; the times it is taken, where
+     * the file names them
+     */
+    void KeepWhatTheSoundSays(ControlElement *mark, const pugi::xml_node sound, const std::string &kind) const;
+    /**
+     * A mark for each jump [sound] gives that no mark carries ([carried] is the kind the direction's own mark is): a
+     * direction of its kind with nothing to draw, at [tstamp] of [measure] (MuseNote RC41)
+     */
+    void MarkJumpsOfSound(
+        const pugi::xml_node sound, const std::string &measureNum, const std::string &carried, double tstamp);
     bool ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord);
     /**
      * Opens a tuplet level for [tupletStart] with its own ratio (MEI's rule: the ratios of nested tuplets multiply):
