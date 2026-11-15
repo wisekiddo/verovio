@@ -419,6 +419,14 @@ private:
     /** The bar of the score that the bar [read] went into: none where it was dropped, or is not a bar read */
     Measure *ContentMeasureOf(const Measure *read) const;
 
+    /**
+     * Where [beat] of [bar] falls, for a time stamp past the bar's end (an offset that reaches past it): the
+     * following bar and beat its time is in; past the last bar, the last bar's right barline. Before the bar's start
+     * (MEI's 0), the earlier bar it is in; before the first bar, its left barline (MuseNote RC55)
+     */
+    std::pair<Measure *, double> WhereItsTimeFalls(Section *section, Measure *bar, double beat) const;
+    /** [element] of [bar], placed where its time falls (RC55): the bar it goes into */
+    Measure *PlaceByItsTime(Section *section, Measure *bar, ControlElement *element) const;
     /*
      * Add a Layer element to the layer or to the LayerElement at the top of m_elementStack.
      */
@@ -766,6 +774,9 @@ private:
     /* stack of new arpeggios that get more notes added. */
     std::vector<std::pair<Arpeg *, musicxml::OpenArpeggio>> m_ArpeggioStack;
     /* a map for the measure counts storing the index of each measure created */
+    /* each bar of the score, its right barline as a time stamp (the last time its notes reach) and the unit of its
+     * meter: a mark whose time stamp is past it falls in a following bar (MuseNote RC55) */
+    std::map<const Measure *, std::pair<double, int>> m_barEnds;
     std::map<Measure *, int> m_measureCounts;
     /* measure rests */
     std::map<int, int> m_multiRests;

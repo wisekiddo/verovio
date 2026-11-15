@@ -373,6 +373,76 @@ void MusicXmlInput::InsertClefIntoObject(Object *parent, Clef *clef, Object *lay
     }
 }
 
+std::pair<Measure *, double> MusicXmlInput::WhereItsTimeFalls(Section *section, Measure *bar, double beat) const
+{
+    // Before the bar's start (a negative offset), past MEI's left barline, 0: in an earlier bar; before the first,
+    // at its left barline
+    while (bar && (beat < -1e-6)) {
+        const auto own = m_barEnds.find(bar);
+        Measure *previous = vrv_cast<Measure *>(section->GetPrevious(bar, MEASURE));
+        const auto preceding = previous ? m_barEnds.find(previous) : m_barEnds.end();
+        if ((own == m_barEnds.end()) || (preceding == m_barEnds.end())) return { bar, 0.0 };
+        // the quarters before this bar's start, as a beat counted back from the previous bar's end
+        const double quarters = (1.0 - beat) * 4.0 / (double)own->second.second;
+        bar = previous;
+        beat = preceding->second.first - quarters * (double)preceding->second.second / 4.0;
+    }
+    while (bar) {
+        const auto own = m_barEnds.find(bar);
+        if ((own == m_barEnds.end()) || (beat <= own->second.first + 1e-6)) break;
+        Measure *next = vrv_cast<Measure *>(section->GetNext(bar, MEASURE));
+        const auto followed = next ? m_barEnds.find(next) : m_barEnds.end();
+        if (followed == m_barEnds.end()) return { bar, own->second.first };
+        // the quarters past this bar's end, as a beat of the next bar's meter
+        const double quarters = (beat - own->second.first) * 4.0 / (double)own->second.second;
+        bar = next;
+        beat = quarters * (double)followed->second.second / 4.0 + 1.0;
+    }
+    return { bar, beat };
+}
+
+Measure *MusicXmlInput::PlaceByItsTime(Section *section, Measure *bar, ControlElement *element) const
+{
+    // A mark placed by its offset past its bar's end was given a time stamp past the bar (MEI's are from the left
+    // barline, 0, to the right one): the engine moved the bar's end to it, and the bar played its notes and then
+    // waited (MuseNote RC55). The reader times a mark inside its bar by its offset; past the barline its time is
+    // in a following bar, and it is placed there (one placed before its bar's start, in an earlier bar). A jump or a sign stays in its own bar, at its right barline: its
+    // sound takes effect where the file gives it, and the order of play reads it in that bar.
+    TimePointInterface *point = element->GetTimePointInterface();
+    if (!point || !point->HasTstamp() || point->HasStartid()) return bar;
+    const auto own = m_barEnds.find(bar);
+    if (own == m_barEnds.end()) return bar;
+    if ((point->GetTstamp() <= own->second.first + 1e-6) && (point->GetTstamp() >= -1e-6)) return bar;
+    const Dir *dir = element->Is(DIR) ? vrv_cast<const Dir *>(element) : NULL;
+    static const std::set<std::string> jumps = { "dacapo", "dalsegno", "tocoda", "fine", "coda", "segno" };
+    if (element->Is(REPEATMARK) || (dir && jumps.count(dir->GetType()))) {
+        point->SetTstamp((point->GetTstamp() < 0.0) ? 0.0 : own->second.first);
+        return bar;
+    }
+    const auto [startBar, startBeat] = this->WhereItsTimeFalls(section, bar, point->GetTstamp());
+    // A mark that spans keeps its end: counted in bars from the one it now starts in
+    TimeSpanningInterface *span = element->GetTimeSpanningInterface();
+    if (span && span->HasTstamp2()) {
+        Measure *endBar = bar;
+        for (int k = 0; (k < span->GetTstamp2().first) && endBar; ++k) {
+            endBar = vrv_cast<Measure *>(section->GetNext(endBar, MEASURE));
+        }
+        if (endBar) {
+            const auto [end, endBeat] = this->WhereItsTimeFalls(section, endBar, span->GetTstamp2().second);
+            int bars = 0;
+            const Measure *at = startBar;
+            while (at && (at != end)) {
+                at = vrv_cast<const Measure *>(section->GetNext(at, MEASURE));
+                ++bars;
+            }
+            // (an end before the start it now has, which no file's offsets give: in its start's bar)
+            span->SetTstamp2({ at ? bars : 0, endBeat });
+        }
+    }
+    point->SetTstamp(startBeat);
+    return startBar;
+}
+
 Measure *MusicXmlInput::ContentMeasureOf(const Measure *read) const
 {
     const auto iter = m_contentMeasures.find(read);
@@ -1440,6 +1510,7 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
             delete iter.second;
             continue;
         }
+        measure = this->PlaceByItsTime(section, measure, iter.second);
         measure->AddChild(iter.second);
     }
 
@@ -2205,6 +2276,10 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
     int barTime = m_durTotal;
     for (const auto &[layer, end] : m_layerEndTimes) {
         if (layer->GetFirstAncestor(MEASURE) == measure) barTime = std::max(barTime, end);
+    }
+    // Its right barline, as the time stamp of a mark there (MuseNote RC55)
+    if ((m_ppq > 0) && (m_meterUnit > 0)) {
+        m_barEnds[measure] = { (double)barTime * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0, m_meterUnit };
     }
     for (auto openTie = m_tieStack.begin(); openTie != m_tieStack.end();) {
         if (!openTie->m_carried && (openTie->m_nextPosition < 0)) {
