@@ -20,22 +20,28 @@
 
 //----------------------------------------------------------------------------
 
+#include "clef.h"
 #include "dir.h"
 #include "editorial.h"
 #include "ending.h"
 #include "comparison.h"
 #include "expansion.h"
+#include "keysig.h"
 #include "layer.h"
 #include "layerelement.h"
 #include "lem.h"
 #include "linkinginterface.h"
 #include "measure.h"
+#include "metersig.h"
 #include "plistinterface.h"
 #include "rdg.h"
 #include "repeatmark.h"
 #include "score.h"
+#include "scoredef.h"
 #include "section.h"
 #include "staff.h"
+#include "staffdef.h"
+#include "staffgrp.h"
 #include "timeinterface.h"
 #include "vrv.h"
 
@@ -69,6 +75,187 @@ void ExpansionMap::Reset()
 {
     m_map.clear();
     m_isProcessed = false;
+    this->ClearWrittenContexts();
+}
+
+namespace {
+
+    // An element as what it says: its kind and its attributes, its id left out (two that say the same are the same)
+    std::string ValueOf(const Object *object)
+    {
+        if (!object) return "";
+        ArrayOfStrAttr attributes;
+        object->GetAttributes(&attributes);
+        std::sort(attributes.begin(), attributes.end());
+        std::string value = object->GetClassName();
+        for (const auto &[name, text] : attributes) {
+            if (name != "xml:id") value += " " + name + "=" + text;
+        }
+        return value;
+    }
+
+    // A staff's transposition as a staffDef last said it: none is 0 and 0
+    std::pair<int, int> TranspositionOf(const Object *object)
+    {
+        const StaffDef *staffDef = object ? vrv_cast<const StaffDef *>(object) : NULL;
+        if (!staffDef) return { 0, 0 };
+        return { staffDef->HasTransSemi() ? staffDef->GetTransSemi() : 0,
+            staffDef->HasTransDiat() ? staffDef->GetTransDiat() : 0 };
+    }
+
+    // What a score definition [object] says, into [context]: its time signature and key, and its staffDefs' clefs
+    // and transpositions. A clef, key or time signature written in a layer says it from where it stands
+    void ApplyDefinitions(const Object *object, WrittenContext &context)
+    {
+        if (object->Is({ SCOREDEF, STAFFDEF })) {
+            const ScoreDefElement *def = vrv_cast<const ScoreDefElement *>(object);
+            if (def->HasMeterSigInfo()) context.meterSig = def->GetMeterSig();
+            if (def->HasKeySigInfo()) context.keySig = def->GetKeySig();
+            if (object->Is(STAFFDEF)) {
+                const StaffDef *staffDef = vrv_cast<const StaffDef *>(object);
+                if (def->HasClefInfo()) context.clefs[staffDef->GetN()] = def->GetClef();
+                if (staffDef->HasTransSemi() || staffDef->HasTransDiat()) {
+                    context.transpositions[staffDef->GetN()] = staffDef;
+                }
+            }
+            for (const Object *child : object->GetChildren()) {
+                if (child->Is({ STAFFGRP, STAFFDEF })) ApplyDefinitions(child, context);
+            }
+        }
+        else if (object->Is(STAFFGRP)) {
+            for (const Object *child : object->GetChildren()) ApplyDefinitions(child, context);
+        }
+        else if (object->Is({ CLEF, KEYSIG, METERSIG }) && !object->GetFirstAncestor(SCOREDEF)
+            && !object->GetFirstAncestor(STAFFDEF)) {
+            if (object->Is(KEYSIG)) context.keySig = object;
+            if (object->Is(METERSIG)) context.meterSig = object;
+            const Staff *staff = vrv_cast<const Staff *>(object->GetFirstAncestor(STAFF));
+            if (object->Is(CLEF) && staff) context.clefs[staff->GetN()] = object;
+        }
+    }
+
+    // A copy of [object], its own as [id] and its descendants' as [id]-1, [id]-2... in order
+    Object *CopyAs(const Object *object, const std::string &id)
+    {
+        Object *copy = object->Clone();
+        copy->CloneReset();
+        copy->SetID(id);
+        return copy;
+    }
+
+} // namespace
+
+void ExpansionMap::ClearWrittenContexts()
+{
+    m_startContexts.clear();
+    m_endContexts.clear();
+    m_copyOf.clear();
+}
+
+void ExpansionMap::RecordWrittenContexts(const Object *root)
+{
+    this->ClearWrittenContexts();
+    WrittenContext context;
+    // (a score's own first score definition stands apart from its children)
+    if (root->Is(SCORE)) {
+        const ScoreDef *first = vrv_cast<const Score *>(root)->GetScoreDef();
+        if (first) ApplyDefinitions(first, context);
+    }
+    this->RecordWrittenContexts(root, context);
+}
+
+void ExpansionMap::RecordWrittenContexts(const Object *object, WrittenContext &context)
+{
+    const bool part = object->Is({ SECTION, ENDING, MEASURE }) || object->IsEditorialElement();
+    if (part) m_startContexts[object->GetID()] = context;
+    if (object->Is({ SCOREDEF, STAFFDEF, STAFFGRP })) {
+        ApplyDefinitions(object, context);
+        return;
+    }
+    ApplyDefinitions(object, context);
+    for (const Object *child : object->GetChildren()) this->RecordWrittenContexts(child, context);
+    if (part) m_endContexts[object->GetID()] = context;
+}
+
+void ExpansionMap::RestateWrittenContext(Object *previous, Object *part)
+{
+    // The order places a copy of a part (or the part itself) after what was played before it. What the score
+    // definitions in effect there say is what the bar before it in the play ended with, and not the part's own when
+    // it was written after another bar: a time signature written before the part, or at the score's start, was lost
+    // on its later passes (MuseNote RC58). What of its own differs is said again just before it
+    if (!previous || !part || previous->Is(EXPANSION) || !part->GetParent()) return;
+    const auto writtenOf = [this](const Object *object) {
+        const auto copy = m_copyOf.find(object->GetID());
+        return (copy != m_copyOf.end()) ? copy->second : object->GetID();
+    };
+    const auto end = m_endContexts.find(writtenOf(previous));
+    const auto start = m_startContexts.find(writtenOf(part));
+    if ((end == m_endContexts.end()) || (start == m_startContexts.end())) return;
+    WrittenContext inEffect = end->second;
+    Object *parent = part->GetParent();
+    // and what the score definitions standing between them say (one written just before the part, the first time)
+    if (previous->GetParent() == parent) {
+        for (int i = previous->GetIdx() + 1; i < part->GetIdx(); ++i) {
+            const Object *between = parent->GetChild(i);
+            if (between->Is({ SCOREDEF, STAFFDEF })) ApplyDefinitions(between, inEffect);
+        }
+    }
+    const WrittenContext &own = start->second;
+    const std::string id = part->GetID() + "-def";
+    ScoreDef *restated = NULL;
+    int ids = 0;
+    const auto add = [&](Object *parentOf, const Object *element) {
+        if (!restated) {
+            restated = new ScoreDef();
+            restated->SetID(id);
+        }
+        Object *copy = CopyAs(element, id + "-" + std::to_string(++ids));
+        (parentOf ? parentOf : restated)->AddChild(copy);
+        return copy;
+    };
+    if (own.meterSig && (ValueOf(own.meterSig) != ValueOf(inEffect.meterSig))) add(NULL, own.meterSig);
+    if (own.keySig && (ValueOf(own.keySig) != ValueOf(inEffect.keySig))) add(NULL, own.keySig);
+    std::map<int, StaffDef *> staffDefs;
+    StaffGrp *staffGrp = NULL;
+    const auto staffDefOf = [&](int n) {
+        auto found = staffDefs.find(n);
+        if (found != staffDefs.end()) return found->second;
+        if (!restated) {
+            restated = new ScoreDef();
+            restated->SetID(id);
+        }
+        if (!staffGrp) {
+            staffGrp = new StaffGrp();
+            staffGrp->SetID(id + "-" + std::to_string(++ids));
+            restated->AddChild(staffGrp);
+        }
+        StaffDef *staffDef = new StaffDef();
+        staffDef->SetID(id + "-" + std::to_string(++ids));
+        staffDef->SetN(n);
+        staffGrp->AddChild(staffDef);
+        staffDefs[n] = staffDef;
+        return staffDef;
+    };
+    for (const auto &[n, clef] : own.clefs) {
+        const auto there = inEffect.clefs.find(n);
+        if ((there != inEffect.clefs.end()) && (ValueOf(there->second) == ValueOf(clef))) continue;
+        add(staffDefOf(n), clef);
+    }
+    std::set<int> transposed;
+    for (const auto &[n, staffDef] : own.transpositions) transposed.insert(n);
+    for (const auto &[n, staffDef] : inEffect.transpositions) transposed.insert(n);
+    for (const int n : transposed) {
+        const auto ownIter = own.transpositions.find(n);
+        const auto thereIter = inEffect.transpositions.find(n);
+        const std::pair<int, int> wanted = TranspositionOf((ownIter != own.transpositions.end()) ? ownIter->second : NULL);
+        const std::pair<int, int> there
+            = TranspositionOf((thereIter != inEffect.transpositions.end()) ? thereIter->second : NULL);
+        if (wanted == there) continue;
+        StaffDef *staffDef = staffDefOf(n);
+        staffDef->SetTransSemi(wanted.first);
+        staffDef->SetTransDiat(wanted.second);
+    }
+    if (restated) parent->InsertBefore(part, restated);
 }
 
 Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList, Object *prevSect,
@@ -199,6 +386,9 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
                 else {
                     prevSect->GetParent()->InsertAfter(prevSect, clonedObject); // or add after previous section
                 }
+                // played under its own score definitions (MuseNote RC58)
+                m_copyOf[clonedObject->GetID()] = currSect->GetID();
+                this->RestateWrittenContext(prevSect, clonedObject);
 
                 prevSect = clonedObject;
                 existingList.push_back(clonedObject->GetID());
@@ -235,6 +425,8 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
                 else {
                     LogDebug("Leaving existing element %s", currSect->GetID().c_str());
                 }
+                // played under its own score definitions (MuseNote RC58)
+                this->RestateWrittenContext(prevSect, currSect);
 
                 prevSect = currSect;
                 existingList.push_back(id);

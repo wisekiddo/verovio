@@ -1808,7 +1808,11 @@ void Doc::ExpandExpansions()
 
     xsdAnyURI_List existingList; // list of xml:id strings of elements already in the document
     xsdAnyURI_List deletionList; // list of xml:id strings of elements not cloned and to be deleted at the end
+    // What the score definitions say at each part as written, before the order moves or copies any (MuseNote RC58)
+    m_expansionMap.RecordWrittenContexts(startExpansion->GetFirstAncestor(SCORE) ? startExpansion->GetFirstAncestor(SCORE)
+                                                                                 : static_cast<Object *>(this));
     m_expansionMap.Expand(startExpansion, existingList, startExpansion, deletionList, true);
+    m_expansionMap.ClearWrittenContexts();
 
     // Every tie, slur and line of the score as played, judged by the order of play (patch 60)
     m_expansionMap.FollowSpansInOrder(this, writtenBars);

@@ -26,6 +26,22 @@ class Object;
 class Score;
 class Section;
 
+//----------------------------------------------------------------------------
+// WrittenContext
+//----------------------------------------------------------------------------
+
+/**
+ * What the score definitions in effect say at a point of the score as written: the time signature, the key, each
+ * staff's clef and transposition, as the elements that said them last. A part played after another bar than the one
+ * written before it is played under its own (MuseNote RC58)
+ */
+struct WrittenContext {
+    const Object *meterSig = NULL;
+    const Object *keySig = NULL;
+    std::map<int, const Object *> clefs;
+    std::map<int, const Object *> transpositions;
+};
+
 /**
  * An order of play while it is written, and the least that following it can cost: each section by the times it is
  * named, squared (it holds one element at the least; the count itself is in Doc::ExpandExpansions). Whoever writes
@@ -272,6 +288,13 @@ public:
     void FollowSpansInOrder(Object *root, const std::map<std::string, int> &writtenBars);
 
     /**
+     * The score definitions in effect at the start and the end of each part an order can play (a section, an ending,
+     * a measure, an editorial element) in [root] as written, read before it is expanded; cleared after (MuseNote RC58)
+     */
+    void RecordWrittenContexts(const Object *root);
+    void ClearWrittenContexts();
+
+    /**
      * @name Setter and getter for the generating attempt flag
      */
     ///@{
@@ -299,6 +322,10 @@ private:
     void GetIDList(Object *object, std::vector<std::string> &idList);
 
     void GeneratePredictableIDs(Object *source, Object *target);
+    /** Where [part] is placed after [previous], what of its own score definitions differs from those in effect there
+     * is said again just before it (MuseNote RC58) */
+    void RestateWrittenContext(Object *previous, Object *part);
+    void RecordWrittenContexts(const Object *object, WrittenContext &context);
 
     /** Ads an id string to an original/notated id */
     bool AddExpandedIDToExpansionMap(const std::string &origXmlId, std::string newXmlId);
@@ -309,6 +336,11 @@ public:
 
 private:
     /** A flag indicating that the generation processed has been run even if the expansion map is empty  */
+    /* the score definitions in effect at the start and the end of each part as written, by its id (RC58) */
+    std::map<std::string, WrittenContext> m_startContexts;
+    std::map<std::string, WrittenContext> m_endContexts;
+    /* each copy the expansion made, by its id: the id of the part it copies (RC58) */
+    std::map<std::string, std::string> m_copyOf;
     bool m_isProcessed;
     /** The expansions that Expand is in, outermost first, but for the one it expands now */
     std::vector<const Expansion *> m_expanding;
