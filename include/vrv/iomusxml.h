@@ -69,28 +69,29 @@ class Trill;
 
 namespace musicxml {
 
+    // A slur's start or stop, by the bar it was read in (a bar's number may repeat in a part: MuseNote RC54)
     struct OpenSlur {
-        OpenSlur(const std::string &measureNum, short int number, curvature_CURVEDIR curvedir)
+        OpenSlur(const Measure *measure, short int number, curvature_CURVEDIR curvedir)
         {
-            m_measureNum = measureNum;
+            m_measure = measure;
             m_number = number;
             m_curvedir = curvedir;
         }
 
-        std::string m_measureNum;
+        const Measure *m_measure;
         short int m_number;
         curvature_CURVEDIR m_curvedir;
     };
 
     struct CloseSlur {
-        CloseSlur(const std::string &measureNum, short int number, curvature_CURVEDIR curvedir)
+        CloseSlur(const Measure *measure, short int number, curvature_CURVEDIR curvedir)
         {
-            m_measureNum = measureNum;
+            m_measure = measure;
             m_number = number;
             m_curvedir = curvedir;
         }
 
-        std::string m_measureNum;
+        const Measure *m_measure;
         short int m_number;
         curvature_CURVEDIR m_curvedir;
     };
@@ -124,11 +125,12 @@ namespace musicxml {
     using FineInfo = play::FineInfo;
     using SectionInfo = play::SectionInfo;
 
+    // A clef change, by the bar it was read in (MuseNote RC54)
     struct ClefChange {
-        ClefChange(const std::string &measureNum, Staff *staff, Layer *layer, Clef *clef, const int &scoreOnset,
+        ClefChange(const Measure *measure, Staff *staff, Layer *layer, Clef *clef, const int &scoreOnset,
             bool afterBarline)
         {
-            m_measureNum = measureNum;
+            m_measure = measure;
             m_staff = staff;
             m_layer = layer;
             m_clef = clef;
@@ -136,7 +138,7 @@ namespace musicxml {
             m_afterBarline = afterBarline;
         }
 
-        std::string m_measureNum;
+        const Measure *m_measure;
         Staff *m_staff;
         Layer *m_layer;
         Clef *m_clef;
@@ -332,8 +334,7 @@ private:
      * A mark for each jump [sound] gives that no mark carries ([carried] is the kind the direction's own mark is): a
      * direction of its kind with nothing to draw, at [tstamp] of [measure] (MuseNote RC41)
      */
-    void MarkJumpsOfSound(
-        const pugi::xml_node sound, const std::string &measureNum, const std::string &carried, double tstamp);
+    void MarkJumpsOfSound(const pugi::xml_node sound, const Measure *measure, const std::string &carried, double tstamp);
     /**
      * The jump or sign the words of a direction with no <sound> for one are (MuseNote RC42): its kind (dacapo,
      * dalsegno, tocoda, fine, coda, segno) and the label of its segno or coda, when the whole text is one phrase of
@@ -415,6 +416,8 @@ private:
      * The measure can contain only staves. Other elements must be stacked on m_floatingElements.
      */
     void AddMeasure(Section *section, Measure *measure, int i);
+    /** The bar of the score that the bar [read] went into: none where it was dropped, or is not a bar read */
+    Measure *ContentMeasureOf(const Measure *read) const;
 
     /*
      * Add a Layer element to the layer or to the LayerElement at the top of m_elementStack.
@@ -750,9 +753,14 @@ private:
     std::vector<Tempo *> m_tempoStack;
     /*
      * The stack of floating elements (tie, slur, etc.) to be added at the
-     * end of each measure
+     * end of each measure: each by the bar it was read in, which m_contentMeasures resolves to the bar of the score.
+     * (By its number it went into the first bar with that number, and a bar's number may repeat in a part: MuseNote
+     * RC54)
      */
-    std::vector<std::pair<std::string, ControlElement *>> m_controlElements;
+    std::vector<std::pair<const Measure *, ControlElement *>> m_controlElements;
+    /* each bar read, the bar of the score its content went into: itself, the bar of the first part it was merged
+     * into, or none where it was dropped (a later part's bar is kept in m_garbage until the end, so it stays a key) */
+    std::map<const Measure *, Measure *> m_contentMeasures;
     /* stack of clef changes to be inserted to all layers of a given staff */
     std::deque<musicxml::ClefChange> m_clefChangeQueue;
     /* stack of new arpeggios that get more notes added. */
