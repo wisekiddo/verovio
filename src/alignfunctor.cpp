@@ -268,7 +268,8 @@ FunctorCode AlignHorizontallyFunctor::VisitLayerElement(LayerElement *layerEleme
         }
         type = ALIGNMENT_PROPORT;
     }
-    else if (layerElement->Is({ MULTIREST, MREST, MRPT })) {
+    else if (layerElement->Is({ MULTIREST, MREST, MSPACE, MRPT })) {
+        // (an mSpace fills its measure as an mRest does: MuseNote RC57)
         type = ALIGNMENT_FULLMEASURE;
     }
     else if (layerElement->Is({ MRPT2, MULTIRPT })) {

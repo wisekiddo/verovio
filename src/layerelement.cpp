@@ -754,7 +754,9 @@ Fraction LayerElement::GetAlignmentDuration(
     }
     // We align all full measure element to the current time signature, even the ones that last longer than one measure
     // If metcon is false, then the duration will remain 0 because it cannot be determined
-    else if (params.metcon && this->Is({ HALFMRPT, MREST, MULTIREST, MRPT, MRPT2, MULTIRPT })) {
+    // (An mSpace is one of them: MEI's events that completely fill a measure are mRest, mSpace and their kin. Left
+    // out, a bar of empty space was played for no time: MuseNote RC57)
+    else if (params.metcon && this->Is({ HALFMRPT, MREST, MSPACE, MULTIREST, MRPT, MRPT2, MULTIRPT })) {
         data_DURATION meterUnit = DURATION_4;
         int meterCount = 4;
         if (params.meterSig && params.meterSig->HasUnit()) meterUnit = params.meterSig->GetUnitAsDur();
