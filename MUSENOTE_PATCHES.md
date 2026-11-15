@@ -2989,6 +2989,94 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 72. A part played again plays under its own score definitions (tb.34)
+
+Found by MuseNote plan V3_2_0_52 (root cause RC58, finding W61). The expansion
+(`ExpansionMap::Expand`, every format) copies a section or an ending after the
+bar the play comes from; a score definition written before the part, outside
+it, or at the score's start, was not copied with it, so a part played again kept
+the time signature (or key, clef, transposition) it arrived with: a whole-bar
+rest written in 4/4 before an ending played two beats on its later passes (Those
+Were the Days v2), a 3/4 first bar reached again from a 4/4 bar played four
+(Caresse sur l'océan). Before expanding, the definitions in effect at the start
+and the end of each part as written are recorded (the score's own first
+definition included, with every scoreDef, staffDef and clef, key or time
+signature in a layer); where the order places a part after another bar than the
+one written before it, what of its own differs from what is in effect there is
+said again just before it, in a score definition whose ids are the part's with
+`-def` and `-def-N`. The played-out score shows the change where it happens.
+
+### 71. A bar of empty space plays its meter (tb.34)
+
+Found by MuseNote plan V3_2_0_52 (root cause RC57, finding W61). The engine
+timed the whole-bar elements by the meter and left `mSpace` out, so a bar of
+empty space (the MusicXML reader's form of a hidden whole-bar rest) was played
+for no time (Green Onions, Fatback). MEI's events that completely fill a
+measure are `mRest`, `mSpace` and their kin: an `mSpace` is timed and aligned
+as an `mRest` (`layerelement.cpp`, `alignfunctor.cpp`).
+
+### 70. A rest with no type is a whole-bar rest only where its ticks fill its bar (tb.34)
+
+Found by MuseNote plan V3_2_0_52 (root cause RC56, finding W61). The MusicXML
+reader read a rest with no `<type>` as a whole-bar rest even where its ticks did
+not fill its bar; in a bar shorter than its meter the engine plays a whole-bar
+rest for no time (What Makes You Beautiful, bar 38). Now it is a whole-bar rest
+only where its ticks are its bar's by the meter (as `measure="yes"`); otherwise
+a rest of the value its ticks make, or, where no value makes them, the longest
+value under them in a tuplet that shows nothing for the ratio left. A hidden one
+that does not fill its bar is a gap of its ticks.
+
+### 69. A mark placed past its bar's end is placed where its time falls (tb.34)
+
+Found by MuseNote plan V3_2_0_52 (root cause RC55, finding W61). The MusicXML
+reader gave a direction or chord symbol whose `<offset>` takes it past its bar's
+end a time stamp past the bar (MEI's are from 0, the left barline, to the right
+one), and the engine moved the bar's end to it (`MeasureAligner::GetAlignmentAtTime`
+→ `SetMaxTime`): the bar played its notes and then waited (Wave: eight bars,
+about 63 beats of silence; Breathless v2, I Know Where I'm Going, Petit Papa
+Noël). The reader records each bar's right barline as a time stamp and the unit
+of its meter; at placement a mark past its bar's end goes into the following
+bar its time falls in, at its beat, as it already times a mark inside its bar
+by its offset; past the last bar, at its right barline. One placed before its
+bar's start (a negative offset) goes back to the earlier bar its time is in;
+before the first bar, at its left barline. A jump or a sign stays in its own
+bar at its barline: its sound takes effect where the file gives it. A mark
+that spans keeps its end, counted from the bar it now starts in.
+
+Cases (all four patches): `test_tb34_bar_lengths_engine.cpp`: a chord symbol
+past its bar, mid-score, in the last bar, and from a 4/4 bar into a 6/8 one;
+words bars past their own, and before their bar's start, and before the first
+bar; a jump past its bar (the score and its MEI twin alike); a rest with no type
+of two beats, of one beat before a dotted half, of five beats (no value makes
+them), hidden, and one that fills its bar (must not change); a bar of empty
+space in 4/4 and 3/4; a 3/4 bar repeated after a 4/4 one, Those Were the Days'
+shape (the restated meters in order, 2/4 4/4 2/4 4/4, none where the 4/4 is
+written), a clef restated before a repeated bar. Each failing on tb.33. Breaks,
+each caught: no placement by time; a jump carried; the next bar's meter
+ignored; no carry back before a bar's start; a typeless rest whole-bar again;
+a hidden one a bar of space; no ratio for ticks no value makes; mSpace timed
+for nothing; nothing restated; the score's first definition unread; the
+definitions between two parts not counted; copies not traced to their part.
+Native suite 342 of 342; with asserts and the address sanitizer 342 of 342;
+the engine with asserts over every live song and the cases (2,768 of 2,768).
+Log-format audit: 0 calls. Parity tb.33 to tb.34: 88 of 22,086 outputs differ,
+in 42 scores, each judged: the songs of RC55 to RC58 and their superseded
+versions play their bars at their files' lengths (Wave, Breathless and v2, I
+Know Where I'm Going, Petit Papa Noël, What Makes You Beautiful, Green Onions,
+Fatback, Those Were the Days and v2, Caresse sur l'océan); 24 scores add a time
+signature to their MIDI where a part played again changes meter (their notes
+the same); marks before their bar's start move into it or an earlier bar
+(Always Look On The Bright Side Of Life, Non, je ne regrette rien and v2);
+bars of empty space are laid out as whole bars (All Through the Night's last
+chord symbol, drawn past the final barline, now stands in its bar; Goldfinger
+and v2 and an MEI fixture pixel-identical, the drawing's own generated ids of
+systems and their clefs moved). The annotation locator: 0 failures, every note
+id kept (477,334). Seeded ids 3,093 of 3,093. MuseSync's songs: every note the
+same, all 33. MuseNote's guard `bar_times.py`: over list 9, rules 1 to 3 name
+56 songs on tb.32 and none on tb.34; its census names 44 (finding W73, open).
+
+**Upstream status**: not offered (patches 69 to 72).
+
 ### 68. A bar is the bar it was read in, not its number (tb.33)
 
 Found by MuseNote plan V3_2_0_51 (root cause RC54, finding W59). A MusicXML bar's
