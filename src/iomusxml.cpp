@@ -3524,6 +3524,20 @@ void MusicXmlInput::ReadMusicXmlNote(
                     }
                 }
             }
+            else if (!this->TicksFillTheBar(duration)) {
+                // A hidden rest with no value that does not fill its bar is a gap of its ticks (an mSpace fills its
+                // bar: MuseNote RC56)
+                Space *space = new Space();
+                element = space;
+                space->SetDur(DURATION_4);
+                space->SetDurPpq(duration);
+                if (!noteID.empty()) space->SetID(noteID);
+                if (noteStaffNum > 0 && noteStaffNum + staffOffset != staff->GetN())
+                    space->SetStaff(
+                        space->AttStaffIdent::StrToXsdPositiveIntegerList(std::to_string(noteStaffNum + staffOffset)));
+                this->AddLayerElement(layer, space, duration);
+                m_inexactGaps.push_back({ { space }, duration, m_ppq, this->OpenTupletRatio(layer) });
+            }
             else {
                 MSpace *mSpace = new MSpace();
                 if (!noteID.empty()) {
@@ -3532,8 +3546,10 @@ void MusicXmlInput::ReadMusicXmlNote(
                 this->AddLayerElement(layer, mSpace);
             }
         }
-        // we assume /note without /type or with duration of an entire bar to be mRest
-        else if (typeStr.empty() || rest.attribute("measure").as_bool()
+        // we assume /note with the duration of an entire bar, or without /type where its ticks fill its bar, to be
+        // mRest. (Without a type and shorter than its bar it was one too, and in a bar its meter does not fill the
+        // engine plays a whole-bar rest for no time: MuseNote RC56)
+        else if ((typeStr.empty() && this->TicksFillTheBar(duration)) || rest.attribute("measure").as_bool()
             || this->FillsItsBarOtherwise(node, layer, typeStr, dots, duration)) {
             if (m_slash) {
                 MeterSig tmpMeterSig;
@@ -3575,6 +3591,8 @@ void MusicXmlInput::ReadMusicXmlNote(
                 rest->SetDur(ConvertTypeToDur(typeStr));
                 rest->SetDurPpq(duration);
                 if (dots > 0) rest->SetDots(dots);
+                // one that says no value has the value its ticks make (MuseNote RC56)
+                if (typeStr.empty()) this->WriteItsTicks(rest, layer, duration);
                 // the value its ticks play, when the file writes another: the page shows what plays
                 data_DURATION played = DURATION_NONE;
                 int playedDots = 0;
@@ -6120,6 +6138,38 @@ bool MusicXmlInput::ValueOfItsTicks(const pugi::xml_node &node, Layer *layer, co
         }
     }
     return false;
+}
+
+bool MusicXmlInput::TicksFillTheBar(int ticks) const
+{
+    int steps = 0;
+    for (const int count : m_meterCount) steps += count;
+    // (a rest whose time cannot be measured against a meter keeps the whole-bar reading)
+    if ((ticks <= 0) || (m_ppq <= 0) || (steps <= 0) || (m_meterUnit <= 0)) return true;
+    return Fraction(ticks, 4 * m_ppq) == Fraction(steps, m_meterUnit);
+}
+
+void MusicXmlInput::WriteItsTicks(Rest *rest, Layer *layer, int ticks)
+{
+    if ((ticks <= 0) || (m_ppq <= 0)) return;
+    // what is written for its ticks where it stands, in the tuplets open around it
+    const Fraction written = Fraction(ticks, 4 * m_ppq) * this->OpenTupletRatio(layer);
+    for (int value = DURATION_long; value <= DURATION_2048; ++value) {
+        for (int k = 0; k <= 2; ++k) {
+            if (Fraction(static_cast<data_DURATION>(value)) * Fraction((1 << (k + 1)) - 1, 1 << k) == written) {
+                rest->SetDur(static_cast<data_DURATION>(value));
+                if (k > 0) rest->SetDots(k);
+                return;
+            }
+        }
+    }
+    // No value makes them: the longest under them, in a tuplet that shows nothing for the ratio left (as for a
+    // note timed by a ratio no bracket shows)
+    int value = DURATION_long;
+    while ((value < DURATION_2048) && (Fraction(static_cast<data_DURATION>(value)) > written)) ++value;
+    rest->SetDur(static_cast<data_DURATION>(value));
+    const Fraction ratio = Fraction(static_cast<data_DURATION>(value)) / written;
+    m_unbracketedRatios.push_back({ rest, ratio.GetNumerator(), ratio.GetDenominator() });
 }
 
 bool MusicXmlInput::FillsItsBarOtherwise(

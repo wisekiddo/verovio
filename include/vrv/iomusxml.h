@@ -53,6 +53,7 @@ class Measure;
 class MeterSigGrp;
 class Octave;
 class Pedal;
+class Rest;
 class ScoreDef;
 class Section;
 class Slur;
@@ -418,7 +419,6 @@ private:
     void AddMeasure(Section *section, Measure *measure, int i);
     /** The bar of the score that the bar [read] went into: none where it was dropped, or is not a bar read */
     Measure *ContentMeasureOf(const Measure *read) const;
-
     /**
      * Where [beat] of [bar] falls, for a time stamp past the bar's end (an offset that reaches past it): the
      * following bar and beat its time is in; past the last bar, the last bar's right barline. Before the bar's start
@@ -427,6 +427,7 @@ private:
     std::pair<Measure *, double> WhereItsTimeFalls(Section *section, Measure *bar, double beat) const;
     /** [element] of [bar], placed where its time falls (RC55): the bar it goes into */
     Measure *PlaceByItsTime(Section *section, Measure *bar, ControlElement *element) const;
+
     /*
      * Add a Layer element to the layer or to the LayerElement at the top of m_elementStack.
      */
@@ -549,6 +550,10 @@ private:
      * Whether a rest written [typeStr] and [dots], [ticks] long, fills its whole bar with another time than it is
      * written for (a whole rest in a bar of 3/4): it is the bar's rest.
      */
+    /** Whether [ticks] are its bar's time by the meter (MuseNote RC56) */
+    bool TicksFillTheBar(int ticks) const;
+    /** A rest that says no value: the value its [ticks] make where it stands (MuseNote RC56) */
+    void WriteItsTicks(Rest *rest, Layer *layer, int ticks);
     bool FillsItsBarOtherwise(const pugi::xml_node &node, Layer *layer, const std::string &typeStr, int dots, int ticks);
 
     /*
@@ -769,14 +774,14 @@ private:
     /* each bar read, the bar of the score its content went into: itself, the bar of the first part it was merged
      * into, or none where it was dropped (a later part's bar is kept in m_garbage until the end, so it stays a key) */
     std::map<const Measure *, Measure *> m_contentMeasures;
+    /* each bar of the score, its right barline as a time stamp (the last time its notes reach) and the unit of its
+     * meter: a mark whose time stamp is past it falls in a following bar (MuseNote RC55) */
+    std::map<const Measure *, std::pair<double, int>> m_barEnds;
     /* stack of clef changes to be inserted to all layers of a given staff */
     std::deque<musicxml::ClefChange> m_clefChangeQueue;
     /* stack of new arpeggios that get more notes added. */
     std::vector<std::pair<Arpeg *, musicxml::OpenArpeggio>> m_ArpeggioStack;
     /* a map for the measure counts storing the index of each measure created */
-    /* each bar of the score, its right barline as a time stamp (the last time its notes reach) and the unit of its
-     * meter: a mark whose time stamp is past it falls in a following bar (MuseNote RC55) */
-    std::map<const Measure *, std::pair<double, int>> m_barEnds;
     std::map<Measure *, int> m_measureCounts;
     /* measure rests */
     std::map<int, int> m_multiRests;
