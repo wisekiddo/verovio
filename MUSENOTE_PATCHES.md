@@ -2989,6 +2989,45 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 68. A bar is the bar it was read in, not its number (tb.33)
+
+Found by MuseNote plan V3_2_0_51 (root cause RC54, finding W59). A MusicXML bar's
+number is a token, and it may repeat in a part (MusicXML 2.0 files from Sibelius 6
+number a section from 0 or 1 again). The MusicXML reader filed every control
+element (chord symbols, words, dynamics, ties, slurs, fermatas, ornaments, pedals,
+octave lines, tempos, rehearsal marks, figured bass, the jumps a `<sound>` gives:
+31 filing sites) under its bar's number, and placed each into the first bar with
+that number; clef changes, a slur stop read before its start and the dynamic that
+dashes extend were matched by number too, and a multi-bar rest's closing barline
+was filed under its 0-based position. Now each element is filed under the bar
+being read (`m_controlElements` holds `const Measure *`, so the compiler refuses a
+site that passes a number); `AddMeasure` records which bar of the score each bar
+read went into (itself; the first part's bar a later part's bar was merged into;
+none where "Mismatching measure number" drops it), and placement, the clef queue,
+the slur match and the dashes' search go through that record. The multi-bar
+rest's barline is filed under the rest's own bar. Bar numbers stay the bars'
+labels (`@n`) and the numbers in warnings; objects are built in the same order.
+
+Cases: `test_tb33_bars_numbered_alike_engine.cpp` (bars numbered 1 2 1 2: a chord
+symbol, words and a tie in the second 1; dashes there that extend no dynamic of
+the first; a slur stop in the first 1 that does not end the second's slur; clef
+changes mid-bar and at the bar's start; a Fine given by a sound, the play ending
+there, the score and its MEI twin alike; a later part's chord symbol on its staff;
+a fermata on a multi-bar rest's closing barline), each failing on tb.32. Breaks,
+each caught: placement by number, the clef queue by number, the slur match by
+number, the dashes by number, a later part's bar not resolved, the multi-bar
+rest's barline by its position. Native suite 335 of 335; with asserts and the
+address sanitizer 335 of 335; the engine with asserts over every live song (2,767
+of 2,767). Log-format audit: 0 calls. Parity tb.32 to tb.33: 14 of 22,086 outputs
+differ, all of the three scores numbered alike (A Ghost Of A Chance and
+Overprotected: their MEI and page; the Star Trek: The Next Generation theme: its
+MEI, page, MIDI, pitches and timemap: its ties tie their own notes and its
+opening bars play their file's lengths); the annotation locator: 0 failures,
+every generated id kept. Seeded ids 3,093 of 3,093. MuseSync's songs: every note
+the same, all 33.
+
+**Upstream status**: not offered.
+
 ### 67. A repeat played after the jump plays as the first time, and its Fine or To Coda is taken (tb.32)
 
 Found by MuseNote plan V3_2_0_48 (root cause RC47). A Fine (or a To Coda) in a
