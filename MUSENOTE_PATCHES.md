@@ -74,6 +74,7 @@ file is unmodified upstream Verovio, under the same LGPL-3.0 licence.
 | 64 | 2026-11-14 | Order of play: a jump is what its sound says, taken the times it names, as many as its barline holds (5533c67); amended the same day by: MusicXML: ask a sign's sound only where it has one (0e46341), tb.29 | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +165 / -59 | **Changes 13 scores of the corpus, by design** (MuseNote root causes RC34, RC35, RC36, RC38, RC39): a jump drawn as a sign alone is that jump in the score (Arriverderci Roma, Ein bißchen Frieden and its v2, Het Dorp, Mexican Hat Dance, Oblivion: their MEI, SVG and ids, no timing); the marks of the bars a multi-bar rest spans are read (Superstition jumps; 10,000 Reasons, I'm So Lonesome I Could Cry, Music to Watch Girls By and Sweet Hour of Prayer play their tempo; Afro Blue and My Tribute show their words). A jump's named times, two jumps at a barline and a repeat taken after the jump in endings change no corpus score: the corrected song files of MuseNote plan V3_2_0_44 use them | Not offered |
 | 65 | 2026-11-14 | The score keeps what its file says of its order of play (9dcdca2) | `src/expansionmap.cpp`, `include/vrv/expansionmap.h`, `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, +175 / -31 | **Changes the MEI of 36 corpus scores, by design** (MuseNote root cause RC41): a mark keeps the label of its coda or segno (`@label`) and a jump its named times (`@type` token `times-2.3`), a repeat end its count and after-jump (`repeat-N`, `after-jump`), and a jump given by a sound alone gets a mark that draws nothing (6 scores; their ids move, the annotation locator re-anchors every mark: 0 failures). No order, timing or pitch changes; the page only by the labels' tooltips. The rule for a score with no order of its own reads them, so an MEI file plays as its MusicXML | Not offered |
 | 66 | 2026-11-14 | A jump written as its words, or a target as its sign, is played (a371841) | `src/iomusxml.cpp`, `include/vrv/iomusxml.h`, `src/expansionmap.cpp`, +148 / -8 | **Changes the order of play of 49 live songs and 7 superseded versions, by design** (MuseNote root cause RC42): the MusicXML reader reads a jump written as the words of MuseScore's vocabulary and a target written as its sign, where no `<sound>` gives its kind; a kind the score's sounds give is played by them, its words and signs print (an untyped `<dir>`, above the staff where unplaced); a coda sign in a To Coda's measure is that To Coda's; the order of play takes a jump naming its kind's default label to the first target of its kind. The MEI and page of 85 more change (words typed, signs print); ids move where a sign becomes print (annotation locator: 0 failures) | Not offered |
+| 67 | 2026-11-15 | Order of play: a repeat played after the jump plays as the first time, and its Fine or To Coda is taken (6616db0) | `src/expansionmap.cpp`, +42 / -3 | **Mends a crash and an order for files that mark a repeat after-jump** (MuseNote root cause RC47): where a jump lands, the repeat it lands in starts at the last repeat start at or before it, or the score's beginning (Maple Leaf Rag so marked ended the process); after a jump back an ending's Fine or To Coda is taken the last time that ending is played. Of the corpus as published, one score plays otherwise by design (The Fool On The Hill); no id moves | Not offered |
 
 ### 1. PAE importer crashes
 
@@ -2985,6 +2986,41 @@ been written did nothing: the MIDI is written from a document made at the
 first of them, with the options of that moment. `Toolkit::RenderToMIDI`
 and `RenderToMIDIFile` pass the channels on to it each time. One more
 subcase (it fails on tb.18); no output of the parity set changes.
+
+**Upstream status**: not offered.
+
+### 67. A repeat played after the jump plays as the first time, and its Fine or To Coda is taken (tb.32)
+
+Found by MuseNote plan V3_2_0_48 (root cause RC47). A Fine (or a To Coda) in a
+first ending is reached after a D.C. or a D.S. only where the repeat is played
+again after the jump: MusicXML marks that on the repeat sign, `after-jump="yes"`
+(its default is no: after the jump the last ending is played, as MuseScore plays
+it too). Files so marked were played wrong by the one order-of-play rule
+(`WriteOrderOfPlay`, every format):
+
+- Where a jump landed, the repeat start last met was kept: a D.C. into a repeat
+  with no start sign, played again after the jump, began its passes at a later
+  repeat's start and ran off the end of the parts (Maple Leaf Rag so marked
+  ended the process). Now the repeat a jump lands in starts at the last repeat
+  start at or before where it lands, or at the score's beginning, as a repeat
+  end with no start goes back; its passes are counted from there.
+- After a jump back, a Fine or a To Coda in an ending was asked of the endings'
+  last part alone, so one in a first ending was passed. Now it is taken the
+  last time that ending is played, at the end of the last pass it names (a To
+  Coda that names its times keeps its own rule). MuseScore's playback takes them
+  on their volta's last playthrough.
+
+Cases: `test_tb32_after_jump_endings_engine.cpp` (each MusicXML score and its MEI
+twin played alike: Maple Leaf Rag's shape and King Of The Road's, a Fine in a
+first ending marked after-jump; the same unmarked, the standard's default; a To
+Coda in a first ending; a Fine in the repeat's own bars, taken on its last pass;
+a repeat with no start sign played after the jump), each failing on tb.31 (the
+first and the last ended the process). Breaks: each caught (the repeat start
+under the sanitizer, a container overflow, and in release, a segfault). Native
+suite 328 of 328; with asserts and the address sanitizer 328 of 328; the engine
+with asserts over every live song and the six songs marked after-jump (2,773 of 2,773).
+Log-format audit: 0 calls. Parity tb.31 to tb.32: 6 of 22,086 outputs differ, all of one score, The Fool On The Hill (its coda ends with a repeat with no start sign; after the coda its pass is counted from the jump, so its second ending is played: its MEI, MIDI, pitches and timemap); the annotation locator: 0 failures, every generated id kept. Seeded ids 3,093 of 3,093. MuseSync's songs:
+the same order, all 33..
 
 **Upstream status**: not offered.
 
