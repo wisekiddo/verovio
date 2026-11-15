@@ -1033,6 +1033,23 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
         }
     };
     const auto goesOn = [&isFollowed, &sent]() { return isFollowed && !sent; };
+    // Where a jump lands, the repeat it lands in starts at the last repeat start at or before it, or at the score's
+    // beginning (as a repeat end with no start goes back). (The repeat start last met was kept: after a D.C. into a
+    // repeat with no start sign, played again after the jump, its passes began at a later repeat's start and ran
+    // off the end of the parts: Maple Leaf Rag marked after-jump ended the process. MuseNote RC47)
+    const auto landAt = [&](decltype(iter) target) {
+        iter = target;
+        rptIter = sections.begin();
+        for (auto it = sections.begin(); it != std::next(target); ++it) {
+            if (it->first.m_repeatStart) rptIter = it;
+        }
+        pass = 1;
+    };
+    // After a jump back, a Fine in an ending ends the play the last time that ending is played, at the end of the
+    // last pass it names, and a To Coda there is taken then (both were asked of the last part of the endings alone:
+    // in a first ending, played again after the jump by its repeat, they were passed. MuseNote RC47; MuseScore takes
+    // them on their volta's last playthrough)
+    bool isFinished = false;
     while (isFollowed && (iter != sections.end())) {
         // increment visited count
         iter->first.m_visited++;
@@ -1183,6 +1200,27 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 for (auto it = ending->second.begin(); goesOn() && (it != ending->second.end()); ++it) {
                     add(*it);
                 }
+                if (jumpBack && goesOn()) {
+                    for (auto part : ending->second) {
+                        bool playedLater = false;
+                        for (auto later = std::next(ending); later != endings.end(); ++later) {
+                            playedLater = playedLater
+                                || (std::find(later->second.begin(), later->second.end(), part) != later->second.end());
+                        }
+                        if (playedLater) continue;
+                        isFinished = part->first.m_fineInfo.m_fine;
+                        // (so a To Coda the jump goes on by: one that names its times is taken by them, in add)
+                        for (const play::JumpInfo &jump : part->first.m_jumps) {
+                            if (isFinished || jump.m_timesGiven || (jump.m_jump != play::JumpInfo::TOCODA)) continue;
+                            if (const auto target = targetOf(jump)) {
+                                sent = { *target, false };
+                                break;
+                            }
+                        }
+                        if (isFinished || sent) break;
+                    }
+                    if (isFinished || sent) break;
+                }
             }
 
             // A repeat sign at the end of the last of these endings brings the play round too: the passes after the
@@ -1218,14 +1256,15 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
 
         // a jump that names its times, taken when its time came
         if (sent) {
-            iter = sent->first;
+            const auto target = sent->first;
             jumpBack = sent->second;
             sent.reset();
+            landAt(target);
             continue;
         }
 
         // fine
-        if (jumpBack && endIter->first.m_fineInfo.m_fine) {
+        if (isFinished || (jumpBack && endIter->first.m_fineInfo.m_fine)) {
             break;
         }
 
@@ -1234,8 +1273,8 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
         for (const play::JumpInfo &jump : endIter->first.m_jumps) {
             if (jump.m_timesGiven || !isTime(jump, endIter->first.m_visited)) continue;
             if (const auto target = targetOf(jump)) {
-                iter = *target;
                 jumpBack = (jump.m_jump != play::JumpInfo::TOCODA);
+                landAt(*target);
                 break;
             }
         }
