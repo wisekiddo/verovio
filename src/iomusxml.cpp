@@ -2768,6 +2768,7 @@ void MusicXmlInput::ReadMusicXmlDirection(
             dir->SetPlace(dir->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
             dir->SetTstamp(timeStamp);
             std::string kind = soundNode.first_attribute().name();
+            std::string wordsTokens; // (MuseNote RC75)
             // A jump or sign written as its words alone (MuseNote RC42): read as its phrase says, where the
             // direction's sound says no jump (MusicXML puts playback on <sound>; many exporters write the words only)
             static const std::set<std::string> ofTheOrder{ "dacapo", "dalsegno", "tocoda", "fine", "coda", "segno" };
@@ -2783,15 +2784,19 @@ void MusicXmlInput::ReadMusicXmlDirection(
                 // (where a sound of the score gives a jump of that kind, the sound is its playback, and these
                 // words its print: a Fine written beside the final bar whose sound ends the play is no second Fine)
                 const auto jump = JumpOfWords(text);
-                if (jump && !SoundOfScoreGives(node, jump->first)) {
-                    kind = jump->first;
-                    if (!jump->second.empty() && (jump->second != ((kind == "segno" || kind == "dalsegno") ? "segno" : "coda"))) {
-                        dir->SetLabel(jump->second);
+                if (jump && !SoundOfScoreGives(node, jump->kind)) {
+                    kind = jump->kind;
+                    if (!jump->label.empty() && (jump->label != ((kind == "segno" || kind == "dalsegno") ? "segno" : "coda"))) {
+                        dir->SetLabel(jump->label);
                     }
-                    this->PlayJumpOfWords(jump->first, jump->second);
+                    this->PlayJumpOfWords(jump->kind, jump->label, jump->times, jump->playRepeats);
+                    // what the words say more than the jump's name: its passes, and that the repeats are played
+                    // again after it, kept in its type as a sound's time-only is (MuseNote RC75)
+                    if (!jump->times.empty()) wordsTokens += " " + order::TimesToken(jump->times);
+                    if (jump->playRepeats) wordsTokens += " repeats";
                 }
             }
-            dir->SetType(kind);
+            dir->SetType(kind + wordsTokens);
             this->KeepWhatTheSoundSays(dir, soundNode, kind);
             carried = kind;
             if (staffNode) {
@@ -4812,7 +4817,7 @@ void MusicXmlInput::MarkJumpsOfSound(
     }
 }
 
-std::optional<std::pair<std::string, std::string>> MusicXmlInput::JumpOfWords(const std::string &text)
+std::optional<MusicXmlInput::WordsJump> MusicXmlInput::JumpOfWords(const std::string &text)
 {
     // The phrases of MuseScore's MusicXML importer (importmusicxmlpass2.cpp, matchRepeat), whole, with their spacing
     // not part of them ("D.S.alCoda", "ToCoda"): a roman numeral names a second segno or coda
@@ -4828,9 +4833,23 @@ std::optional<std::pair<std::string, std::string>> MusicXmlInput::JumpOfWords(co
     // that jump: "D.S. and fade", "D.S. to fade", "D.S., vamp and fade on E", "D.C. (to Verse 2)". (Only whole
     // phrases were read, and such a jump was not played: MuseNote RC75)
     static const std::regex instruction("^(.*?)[.:;\\-]*(\\(?(and|to)?fade.*|vampandfade.*|\\(?toverse\\d+\\)?)$");
+    // "with repeat", "(w. repeat)", "play repeat": the repeats are played again after the jump (MuseNote RC75)
+    static const std::regex withRepeat("^(.*?)[.:;\\-]*(\\(?w(ith)?\\.?repeats?\\)?|playrepeats?)$");
     std::smatch m;
     std::string jumpOnly;
-    if (std::regex_match(plain, m, instruction)) jumpOnly = m[1].str();
+    bool playRepeats = false;
+    if (std::regex_match(plain, m, withRepeat)) {
+        jumpOnly = m[1].str();
+        playRepeats = true;
+    }
+    else if (std::regex_match(plain, m, instruction)) {
+        jumpOnly = m[1].str();
+    }
+    // A To Coda for the pass its words name: "2nd Time to Coda", "at 5th verse go to Coda" (MuseNote RC75)
+    static const std::regex passToCoda("^(at)?(\\d+)(st|nd|rd|th)(time|verse)(go)?(to)?coda$");
+    if (std::regex_match(plain, m, passToCoda)) {
+        return WordsJump{ "tocoda", "coda", { std::stoi(m[2].str()) }, false };
+    }
     // "al" also written "a" or with a dot after it ("D.S. a Coda", "D.C.al.Coda")
     static const std::regex daCapo("^(d\\.?|da)(c\\.?|capo)(al?\\.?(fine|coda(i{0,3})))?$");
     static const std::regex dalSegno(
@@ -4843,24 +4862,28 @@ std::optional<std::pair<std::string, std::string>> MusicXmlInput::JumpOfWords(co
     if (!jumpOnly.empty() && (std::regex_match(jumpOnly, daCapo) || std::regex_match(jumpOnly, dalSegno))) {
         plain = jumpOnly;
     }
+    else {
+        playRepeats = false;
+    }
     // a label: the sign's own name, with its numeral where it is more than the first
     const auto labelled = [](const std::string &sign, const std::string &numeral) {
         return (numeral.empty() || numeral == "i") ? sign : sign + numeral;
     };
-    if (std::regex_match(plain, m, daCapo)) return std::make_pair(std::string("dacapo"), std::string());
+    if (std::regex_match(plain, m, daCapo)) return WordsJump{ "dacapo", "", {}, playRepeats };
     if (std::regex_match(plain, m, dalSegno)) {
         // "D.S.S." names the second segno, as its numeral does
         const std::string numeral = m[3].matched ? "ii" : m[4].str();
-        return std::make_pair(std::string("dalsegno"), labelled("segno", numeral));
+        return WordsJump{ "dalsegno", labelled("segno", numeral), {}, playRepeats };
     }
-    if (std::regex_match(plain, m, fine)) return std::make_pair(std::string("fine"), std::string());
-    if (std::regex_match(plain, m, segno)) return std::make_pair(std::string("segno"), labelled("segno", m[2].str()));
-    if (std::regex_match(plain, m, toCoda)) return std::make_pair(std::string("tocoda"), labelled("coda", m[3].str()));
-    if (std::regex_match(plain, m, coda)) return std::make_pair(std::string("coda"), labelled("coda", m[2].str()));
+    if (std::regex_match(plain, m, fine)) return WordsJump{ "fine", "", {}, false };
+    if (std::regex_match(plain, m, segno)) return WordsJump{ "segno", labelled("segno", m[2].str()), {}, false };
+    if (std::regex_match(plain, m, toCoda)) return WordsJump{ "tocoda", labelled("coda", m[3].str()), {}, false };
+    if (std::regex_match(plain, m, coda)) return WordsJump{ "coda", labelled("coda", m[2].str()), {}, false };
     return std::nullopt;
 }
 
-void MusicXmlInput::PlayJumpOfWords(const std::string &kind, const std::string &label)
+void MusicXmlInput::PlayJumpOfWords(
+    const std::string &kind, const std::string &label, const std::list<int> &times, bool playRepeats)
 {
     if (kind == "segno" || kind == "coda") {
         // (a target's sound in the measure is the one: it is not overwritten, and overwrites this)
@@ -4874,13 +4897,20 @@ void MusicXmlInput::PlayJumpOfWords(const std::string &kind, const std::string &
         m_fineInfo = musicxml::FineInfo(true);
         return;
     }
-    if (kind == "dacapo") m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::DACAPO, { 1 }));
+    // (the passes the words name, and whether the repeats are played again after the jump: MuseNote RC75)
+    const bool timesGiven = !times.empty();
+    if (kind == "dacapo") {
+        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::DACAPO, timesGiven ? times : std::list<int>{ 1 }, timesGiven));
+    }
     if (kind == "dalsegno") {
-        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::DALSEGNO, label.empty() ? "segno" : label, { 1 }));
+        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::DALSEGNO, label.empty() ? "segno" : label,
+            timesGiven ? times : std::list<int>{ 1 }, timesGiven));
     }
     if (kind == "tocoda") {
-        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::TOCODA, label.empty() ? "coda" : label, { 2 }));
+        m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::TOCODA, label.empty() ? "coda" : label,
+            timesGiven ? times : std::list<int>{ 2 }, timesGiven));
     }
+    if (!m_jumps.empty() && ((kind == "dacapo") || (kind == "dalsegno"))) m_jumps.back().m_playRepeats = playRepeats;
 }
 
 bool MusicXmlInput::MeasureHoldsToCoda(const pugi::xml_node measure)
@@ -4892,7 +4922,7 @@ bool MusicXmlInput::MeasureHoldsToCoda(const pugi::xml_node measure)
             text += w.node().text().as_string();
         }
         const auto jump = JumpOfWords(text);
-        if (jump && (jump->first == "tocoda")) return true;
+        if (jump && (jump->kind == "tocoda")) return true;
     }
     return false;
 }

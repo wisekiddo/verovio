@@ -836,13 +836,16 @@ namespace {
                               const std::vector<std::string> &tokens) {
             std::list<int> times{ (type == play::JumpInfo::TOCODA) ? 2 : 1 };
             bool timesGiven = false;
+            bool playRepeats = false;
             for (const std::string &token : tokens) {
                 if (const auto named = order::TimesOf(token)) {
                     times = *named;
                     timesGiven = true;
                 }
+                playRepeats = playRepeats || (token == "repeats");
             }
             marks.m_jumps.push_back(play::JumpInfo(type, label, times, timesGiven));
+            marks.m_jumps.back().m_playRepeats = playRepeats;
         };
         for (const Object *child : measure->GetChildren()) {
             if (child->Is(REPEATMARK)) {
@@ -1200,6 +1203,9 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
     // iterate on sections to create expansion
     // prepopulate the labels map because there are forward jumps (tocoda)
     bool jumpBack = false;
+    // whether the jump the play came back by plays the repeats again (MuseNote RC75), and the one [sent] says
+    bool repeatsAfterJump = false;
+    bool sentRepeats = false;
     // the parts whose D.C. or D.S. the endings' loop has taken (each is taken once: MuseNote RC74)
     std::set<const play::SectionInfo *> jumped;
     auto iter = sections.begin();
@@ -1259,6 +1265,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             if (!jump.m_timesGiven || !isTime(jump, it->first.m_played)) continue;
             if (const auto target = targetOf(jump)) {
                 sent = { *target, jump.m_jump != play::JumpInfo::TOCODA };
+                sentRepeats = jump.m_playRepeats;
                 break;
             }
         }
@@ -1297,7 +1304,9 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             add(iter);
 
             // repeat the sections, beginning with the repeat start
-            int times = (jumpBack && !iter->first.m_repeatInfo.m_afterJump) ? 1 : iter->first.m_repeatInfo.m_times;
+            int times = (jumpBack && !iter->first.m_repeatInfo.m_afterJump && !repeatsAfterJump)
+                ? 1
+                : iter->first.m_repeatInfo.m_times;
             for (int t = 2; goesOn() && (t <= times); ++t) {
                 ++pass;
                 for (auto it = rptIter; goesOn() && (it != std::next(iter)); ++it) {
@@ -1367,7 +1376,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             // was read on a plain repeat alone. MuseNote RC38)
             bool isTakenAfterJump = false;
             for (auto part : group) isTakenAfterJump = isTakenAfterJump || part->first.m_repeatInfo.m_afterJump;
-            const bool isAfterJump = jumpBack && !isTakenAfterJump;
+            const bool isAfterJump = jumpBack && !isTakenAfterJump && !repeatsAfterJump;
 
             // when jumping back, keep only last ending: the last of its repeat. That one may stand further on, after
             // plain bars: an ending whose numbers go on from these (a "2" after this "1"). Then none of these is
@@ -1482,6 +1491,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                         if (jump.m_timesGiven || (jump.m_jump == play::JumpInfo::TOCODA)) continue;
                         if (const auto target = targetOf(jump)) {
                             sent = { *target, true };
+                            sentRepeats = jump.m_playRepeats;
                             jumped.insert(&part->first);
                             break;
                         }
@@ -1546,6 +1556,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
         if (sent) {
             const auto target = sent->first;
             jumpBack = sent->second;
+            if (jumpBack) repeatsAfterJump = sentRepeats;
             sent.reset();
             landAt(target);
             continue;
@@ -1562,6 +1573,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             if (jump.m_timesGiven || !isTime(jump, endIter->first.m_visited)) continue;
             if (const auto target = targetOf(jump)) {
                 jumpBack = (jump.m_jump != play::JumpInfo::TOCODA);
+                if (jumpBack) repeatsAfterJump = jump.m_playRepeats;
                 landAt(*target);
                 break;
             }

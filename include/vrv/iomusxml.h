@@ -341,9 +341,16 @@ private:
      * dalsegno, tocoda, fine, coda, segno) and the label of its segno or coda, when the whole text is one phrase of
      * the vocabulary MuseScore's importer reads; none otherwise
      */
-    static std::optional<std::pair<std::string, std::string>> JumpOfWords(const std::string &text);
+    struct WordsJump {
+        std::string kind; // dacapo, dalsegno, tocoda, fine, coda, segno
+        std::string label; // of its segno or coda
+        std::list<int> times; // the passes its words name ("2nd time to Coda"), none where they name none
+        bool playRepeats = false; // "with repeat": the repeats are played again after the jump
+    };
+    static std::optional<WordsJump> JumpOfWords(const std::string &text);
     /** What a jump or sign read from its words or its sign does to the order of play, as its <sound> would */
-    void PlayJumpOfWords(const std::string &kind, const std::string &label);
+    void PlayJumpOfWords(const std::string &kind, const std::string &label, const std::list<int> &times = {},
+        bool playRepeats = false);
     /**
      * Whether a <sound> anywhere in the score of [node] gives a jump or sign of [kind] (a measure's own, or a
      * direction's): then the score gives that kind's playback, and its words and signs of the kind are its print

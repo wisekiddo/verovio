@@ -128,6 +128,9 @@ struct JumpInfo {
     // its repeat's passes too. Times it does not name are what the jump means without them, counted by the returns
     // to the part: a D.C. or a D.S. the first time, a To Coda the time after the jump back
     bool m_timesGiven = false;
+    // Whether the repeats are played again after this jump ("D.S. al Coda with repeat"; MuseScore's "play repeats";
+    // MuseNote RC75): its MEI type's token "repeats"
+    bool m_playRepeats = false;
 };
 
 struct FineInfo {
