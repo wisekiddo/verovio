@@ -2784,7 +2784,7 @@ void MusicXmlInput::ReadMusicXmlDirection(
                 // (where a sound of the score gives a jump of that kind, the sound is its playback, and these
                 // words its print: a Fine written beside the final bar whose sound ends the play is no second Fine)
                 const auto jump = JumpOfWords(text);
-                if (jump && !SoundOfScoreGives(node, jump->kind)) {
+                if (jump && !SoundOfScoreGives(node, jump->kind) && !IsTailOfJump(node, text)) {
                     kind = jump->kind;
                     if (!jump->label.empty() && (jump->label != ((kind == "segno" || kind == "dalsegno") ? "segno" : "coda"))) {
                         dir->SetLabel(jump->label);
@@ -2860,12 +2860,15 @@ void MusicXmlInput::ReadMusicXmlDirection(
     }
     // A sign alone whose own sound gives no target is print (MuseNote RC42) in a score whose sounds give its kind,
     // and a coda sign in a measure that holds a To Coda is that To Coda's sign ("To Coda ⊕"; a To Coda never lands in
-    // its own bar: MuseScore's importer keeps one coda mark in a measure, handleRepeats). It is drawn as a jump drawn
-    // as its sign is, untyped: a repeat mark would be a target in the MEI, and every export would play to it.
+    // its own bar: MuseScore's importer keeps one coda mark in a measure, handleRepeats). A segno or coda sign in a
+    // measure that holds a D.C. or D.S. is that jump's print ("D.S. § al Coda ⊕": a D.S. never lands in its own bar,
+    // nor a To Coda in the bar of the jump back it leaves: MuseNote RC80). It is drawn as a jump drawn as its sign
+    // is, untyped: a repeat mark would be a target in the MEI, and every export would play to it.
     const bool signIsPrint = xmlJump && !containsWords && !jumpOfSign
         && !(soundNode && soundNode.attribute(xmlJump.node().name()))
         && (SoundOfScoreGives(node, xmlJump.node().name())
-            || (std::string(xmlJump.node().name()) == "coda" && MeasureHoldsToCoda(node.parent())));
+            || (std::string(xmlJump.node().name()) == "coda" && MeasureHoldsToCoda(node.parent()))
+            || MeasureHoldsJumpBack(node.parent()));
     if (jumpOfSign || signIsPrint) {
         Dir *dir = new Dir();
         // (a sign the file places nowhere is drawn above the staff, as a repeat mark is: a direction's own default is
@@ -4927,9 +4930,33 @@ bool MusicXmlInput::MeasureHoldsToCoda(const pugi::xml_node measure)
             text += w.node().text().as_string();
         }
         const auto jump = JumpOfWords(text);
-        if (jump && (jump->kind == "tocoda")) return true;
+        if (jump && (jump->kind == "tocoda") && !IsTailOfJump(direction.node(), text)) return true;
     }
     return false;
+}
+
+bool MusicXmlInput::MeasureHoldsJumpBack(const pugi::xml_node measure)
+{
+    if (measure.select_node(".//sound[@dalsegno]") || measure.select_node(".//sound[@dacapo='yes']")) return true;
+    for (const pugi::xpath_node &direction : measure.select_nodes("direction")) {
+        std::string text;
+        for (const pugi::xpath_node &w : direction.node().select_nodes("direction-type/words")) {
+            text += w.node().text().as_string();
+        }
+        const auto jump = JumpOfWords(text);
+        if (jump && ((jump->kind == "dacapo") || (jump->kind == "dalsegno"))) return true;
+    }
+    return false;
+}
+
+bool MusicXmlInput::IsTailOfJump(const pugi::xml_node direction, const std::string &text)
+{
+    std::string plain;
+    for (const char c : text) {
+        if (!std::isspace(static_cast<unsigned char>(c))) plain += std::tolower(static_cast<unsigned char>(c));
+    }
+    static const std::regex tail("^\\(?al\\.?coda.*");
+    return std::regex_match(plain, tail) && MeasureHoldsJumpBack(direction.parent());
 }
 
 bool MusicXmlInput::SoundOfScoreGives(const pugi::xml_node node, const std::string &kind)

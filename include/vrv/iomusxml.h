@@ -358,6 +358,13 @@ private:
     static bool SoundOfScoreGives(const pugi::xml_node node, const std::string &kind);
     /** Whether [measure] holds a To Coda: by a <sound>, or in its words */
     static bool MeasureHoldsToCoda(const pugi::xml_node measure);
+    /** Whether [measure] holds a D.C. or D.S.: by a <sound>, or in its words (MuseNote RC80) */
+    static bool MeasureHoldsJumpBack(const pugi::xml_node measure);
+    /**
+     * Whether the words [text] of [direction] are "al Coda" written apart from the D.C. or D.S. of their measure
+     * ("D.S. § al Coda ⊕" given as several directions): that jump's tail, no To Coda of their own (MuseNote RC80)
+     */
+    static bool IsTailOfJump(const pugi::xml_node direction, const std::string &text);
     bool ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord);
     /**
      * Opens a tuplet level for [tupletStart] with its own ratio (MEI's rule: the ratios of nested tuplets multiply):
