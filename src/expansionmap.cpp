@@ -821,7 +821,9 @@ namespace {
 
     /**
      * The marks of [measure] that say something of the order: a repeatMark by its function, and a direction typed
-     * as the MusicXML reader types the jumps it reads ("dacapo", "dalsegno", "tocoda", "fine").
+     * as the MusicXML reader types the jumps it reads ("dacapo", "dalsegno", "tocoda", "fine"). MEI has no function
+     * for a To Coda: a coda repeatMark whose type's first token is "toCoda" is one (as MuseNote's editor writes it;
+     * it was read as a second coda, and a D.S. al Coda made there never went to its coda: MuseNote RC72).
      */
     PlayMarks MarksOf(const Measure *measure)
     {
@@ -847,7 +849,19 @@ namespace {
                 const RepeatMark *mark = vrv_cast<const RepeatMark *>(child);
                 switch (mark->GetFunc()) {
                     case repeatMarkLog_FUNC_segno: marks.m_segno = labelOf(mark, "segno"); break;
-                    case repeatMarkLog_FUNC_coda: marks.m_coda = labelOf(mark, "coda"); break;
+                    case repeatMarkLog_FUNC_coda: {
+                        const std::vector<std::string> tokens = order::TokensOf(mark->GetType());
+                        std::string kind = tokens.empty() ? "" : tokens.front();
+                        std::transform(kind.begin(), kind.end(), kind.begin(),
+                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                        if (kind == "tocoda") {
+                            jump(play::JumpInfo::TOCODA, labelOf(mark, "coda"), tokens);
+                        }
+                        else {
+                            marks.m_coda = labelOf(mark, "coda");
+                        }
+                        break;
+                    }
                     case repeatMarkLog_FUNC_fine: marks.m_fine = true; break;
                     case repeatMarkLog_FUNC_daCapo:
                     case repeatMarkLog_FUNC_daCapoAlFine:
