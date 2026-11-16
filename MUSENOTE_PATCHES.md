@@ -2989,6 +2989,93 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 78. A document read back from its own MEI keeps the work its music is of (tb.36)
+
+Found by MuseNote plan V3_2_0_55 (root cause RC73), in parity of patch 75. The
+MEI writer writes the work the music is of as `<music decls>` (`Doc::m_musicDecls`,
+set by the Humdrum reader), and the MEI reader did not read it: a document read
+back from its own MEI lost it (patch 75's copy of 20 Humdrum test files; the MIDI
+document; MuseNote's transposition, which reloads the score's MEI). The reader
+now reads it.
+
+### 77. A To Coda written as a coda of type "toCoda" is a To Coda (tb.36)
+
+Found by MuseNote plan V3_2_0_55 (root cause RC72, finding W80). MEI has no
+`repeatMark` function for a To Coda. MuseNote's editor writes one as a coda
+refined by its type (`func="coda" type="toCoda"`), and MuseNote's exports read
+it so; the order rule (`MarksOf`, every format) read every coda `repeatMark` as a
+coda sign, and knew a To Coda only as the MusicXML reader writes it (`<dir
+type="tocoda">`). A D.S. al Coda made in MuseNote never went to its coda (the
+editor's segno, To Coda, D.S. al Coda and coda played 1 2 3 4 2 3 4 5). A coda
+`repeatMark` whose type's first token is "toCoda" (any case) is now a To Coda
+jump, with its label and its times; one with no such type is a sign as before.
+
+### 76. The parts of an ending a sign or a repeat divides keep their order through Humdrum (tb.36)
+
+Found by MuseNote plan V3_2_0_55 (root cause RC70). Since tb.35 (patch 74) such
+an ending holds its parts as sections, and the order names the parts. The MEI to
+Humdrum converter labelled only the parts standing directly in the score's
+section, and wrote no order at all when the list named anything else: the
+export of such a score was played once through read back. The converter now
+labels each part the order names: the first with the ending's label, each other
+with it, its place in small letters and the ending's number again (`*>A2b2` after
+`*>A2`), so that the label ends in the number and starts with the section's
+letters. The Humdrum reader reads such a label, of the ending's number, as a
+part of that ending: a section inside it, the ending's bars before it its first
+part (the ending's own id is then its label's with "-ending"). Read back, the
+ending holds the same bars in the same parts and plays the same order. A reader
+that follows only the list (humlib's `thru`) plays the labels as the order says.
+
+### 75. A score with no order of its own is given out with the one it is played in (tb.36)
+
+Found by MuseNote plan V3_2_0_55 (root cause RC68, finding W50). Every export of
+MuseNote's starts from the engine's MEI of the score (`getMEI`). For a score with
+no `<expansion>` (made in an editor, an MEI file), the one rule (tb.21) worked
+the order out only to play it, and the MEI given out held none: the Humdrum
+converter, which writes an order only from an `<expansion>`, wrote a D.C. as its
+words, and read back the score was played once through. `Toolkit::GetMEI` (a
+whole score, score-based, no filter) and `Toolkit::ConvertMEIToHumdrum` now pass
+a score with no order through a copy (`Toolkit::WithOrderOfPlay`): read with
+`Doc::m_writeOrderOnly`, so that `ExpandExpansions` writes the one rule's
+`<expansion>` where a score has none and plays nothing out, and written out
+again. The loaded score, its drawing and its ids are untouched, and the thread's
+id counter is set back after the copy (`Object::GetIDCounter`,
+`SetIDCounter`). A score with an order of its own, or one whose order cannot be
+worked out (more than one section at its top, editorial content), is given out
+as it is.
+
+Cases (patches 75 to 78): `test_tb36_order_written_engine.cpp`: a score made as
+MuseNote's editor makes it with a D.C. al Fine, a D.S. al Coda (patch 77) and
+endings beside loose bars, given out with its order and through Humdrum played as
+the score; one with an order of its own given out with it (alone, and beside a
+second score with none); the loaded score drawn with the same ids after it is
+given out; a score whose order cannot be worked out given out as it is; an ending
+divided by a coda sign (first and second ending) and by a repeat, through Humdrum
+the same bars in the same parts and the same order; `<music decls>` kept, with an
+order of its own and without. Three cases of `test_mei_to_humdrum_engine.cpp` turn
+round (a score made in MuseNote, with endings or a D.C., is exported with its
+order: MuseNote finding W50). Each new case failing on tb.35. Breaks, each caught
+(13): getMEI giving no order; the converter given none; the id counter not set
+back; an order written over one of its own; the copy played out; a To Coda read
+as a coda; the list not naming a part; no part recorded; a part's label not
+written; a part's label without the number; the reader keeping no part; the first
+part not its own section; `@decls` not read. Native suite 352 of 352; with asserts
+and the address sanitizer the same; the engine with asserts over every live song
+and the cases (2,771 of 2,771). Log-format audit: 0 calls. Parity tb.35 to tb.36:
+of 22,191 outputs, 20 differ, the MEI of the 20 Humdrum test files with repeats,
+each given its order (one `<expansion>` and the sections it names), every other
+line and every note id the same; the 105 others are the 15 songs published since
+(list 10), new. Over every live song with its order taken out (2,765, as a score
+made in an editor is), the MEI given out is tb.35's but for the order (1,633 are
+given one), no element id moves, and every one plays the same. Seeded ids 3,108 of
+3,108. MuseSync's songs: every note the same, all 33. MuseNote's export gate over
+list 9: no song worse in any format (MusicXML 2,756; ABC by abc2midi 2,335, six
+named apart: abc2midi plays four passes at most, MuseNote RC67; ABC by the engine
+2,608; Humdrum, judged now, 218 songs that play otherwise, against 221 on tb.35,
+listed as MuseNote finding W79).
+
+**Upstream status**: not offered (patches 75 to 78).
+
 ### 74. An ending a sign divides stays whole, and a repeat inside an ending is played (tb.35)
 
 Found by MuseNote plan V3_2_0_54 (root causes RC62 and RC65, finding W63). Where a
