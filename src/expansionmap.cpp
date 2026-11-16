@@ -1200,6 +1200,8 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
     // iterate on sections to create expansion
     // prepopulate the labels map because there are forward jumps (tocoda)
     bool jumpBack = false;
+    // the parts whose D.C. or D.S. the endings' loop has taken (each is taken once: MuseNote RC74)
+    std::set<const play::SectionInfo *> jumped;
     auto iter = sections.begin();
     auto rptIter = iter;
     auto secIter = iter;
@@ -1463,6 +1465,27 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                     closedInside.insert(&parts[k]->first);
                     if (rptNestedIter && (*rptNestedIter == parts[*innerStart])) nestedClosed = true;
                     innerStart.reset();
+                }
+                // A D.C. or D.S. in an ending that names no times is taken the last time the ending is played, and
+                // where the ending has no repeat sign of its own the jump is the ending's way back: the play goes
+                // where the jump sends it, not round again by the endings. (Only the jump of the endings' last part
+                // was read, after all of them: a D.S. in a first ending was dropped, and the play went back to the
+                // repeat's start as if the endings were a repeat. Where the ending has a sign of its own, the repeat
+                // comes first, as at any bar that ends a repeat: owner's choice, MuseScore's practice. MuseNote RC74)
+                for (auto part : parts) {
+                    if (!goesOn() || signAtEnd(part) || jumped.contains(&part->first)) continue;
+                    const std::list<int> numbers = parseInts(part->first.m_endingInfo.m_number);
+                    const int lastPass
+                        = numbers.empty() ? ending->first : *std::max_element(numbers.begin(), numbers.end());
+                    if (ending->first < lastPass) continue;
+                    for (const play::JumpInfo &jump : part->first.m_jumps) {
+                        if (jump.m_timesGiven || (jump.m_jump == play::JumpInfo::TOCODA)) continue;
+                        if (const auto target = targetOf(jump)) {
+                            sent = { *target, true };
+                            jumped.insert(&part->first);
+                            break;
+                        }
+                    }
                 }
                 if (jumpBack && goesOn()) {
                     for (auto part : ending->second) {
