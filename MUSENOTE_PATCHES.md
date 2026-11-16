@@ -2989,6 +2989,101 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 83. The pieces of a jump written apart in its bar are its print (tb.37)
+
+Found by MuseNote plan V3_2_0_56 (root cause RC80), tracing the songs the guards
+refused. "D.S. § al Coda ⊕" is often written as several directions in one bar:
+the words "D.S.", a segno sign, the words "al Coda", a coda sign. A sign with no
+sound of its own there was read as a target (a segno in the D.S.'s own bar; a coda
+the To Coda jumps to inside the bar it returns from), and the words "al Coda" alone
+as a To Coda (patch 80, which reads "Al Coda" as the To Coda some editions write).
+A D.S. never lands in its own bar, nor a To Coda in the bar of the jump back. In a
+bar that holds a D.C. or D.S. (by its sound or its words), a segno or coda sign
+with no sound of its own and the words "al Coda" alone are now that jump's print
+(`MeasureHoldsJumpBack`, `IsTailOfJump`): drawn, and no mark of the order. "Al
+Coda" in a bar with no jump back is a To Coda, as in patch 80.
+
+### 82. A Fine that names its times ends the play in that pass (tb.37)
+
+Found by MuseNote plan V3_2_0_56 (root cause RC79). MusicXML gives any sound
+particular times through a repeat (`time-only`), and a Fine with them ends the
+play in that pass. The reader kept a Fine as a bare flag, and the order ended the
+play at a Fine only after a jump back: a Fine meant for the last time through a
+repeat, in a song with no D.C. or D.S., could not be said in a file at all. The
+reader keeps a Fine's times (a type token of its MEI, as a jump's), and the order
+ends the play after the Fine's part in a pass it names. A Fine with none ends it
+after a jump back, as before.
+
+### 81. Jump words that say more: "with repeat" plays the repeats again, "2nd time to Coda" is for that pass (tb.37)
+
+Found by MuseNote plan V3_2_0_56 (root cause RC75, its second part). Words a jump
+is written in can say what MusicXML says with `after-jump` and `time-only`. "With
+repeat", "(w. repeat)", "play repeat" after a D.C. or D.S.: the repeats are played
+again after the jump (`JumpInfo::m_playRepeats`, the type token "repeats" in the
+MEI, read back by the order rule). "2nd time to Coda", "at 5th verse go to Coda":
+a To Coda for the pass its words name (the times token, as a sound's
+`time-only`). The reader passes the times and the repeats of words on as a sound's
+(`PlayJumpOfWords`). A wording that names what the order cannot hold (a lyric
+verse, "Repeat C for solos") is not guessed at.
+
+### 80. Jump words of other spellings and languages, and a jump with an instruction that is no part of the order (tb.37)
+
+Found by MuseNote plan V3_2_0_56 (root cause RC75). `JumpOfWords` (patch 66) read
+whole phrases of MuseScore's vocabulary. It now also reads a comma for a dot
+("D,S,al.fine"), a phrase in brackets ("(fine)", "(Per la coda)"), "al" written
+"a" or with a dot ("D.S. a Coda", "D.C.al.Coda"), a To Coda in other languages
+and editions ("Zur Coda", "Per la coda", "Al Coda"), and a D.C. or D.S. followed
+by an instruction with no part in the order ("D.S. and fade", "to fade", "vamp
+and fade on E", "D.C. (to Verse 2)"): that jump. Each is a whole phrase of a stated
+form.
+
+### 79. A D.C. or D.S. in an ending is taken the last time the ending is played (tb.37)
+
+Found by MuseNote plan V3_2_0_56 (root cause RC74). A D.C. or D.S. in an ending
+that names no times was dropped: only the jump of the endings' last part was read,
+after all of them, and the play went back to the repeat's start as if the endings
+were a repeat (Pistol Packin' Mama: a D.S. in its first ending went to bar 1, not
+the segno). It is taken the last time the ending is played. Where the ending has
+no repeat sign of its own it is the ending's way back; where it has one, the
+repeat comes first, then the jump (MuseScore's practice, the owner's choice; a
+file that names its times is followed).
+
+Cases (patches 79 to 83): `test_tb37_refused_songs_engine.cpp` (8 cases): a D.C.
+or D.S. in an ending with no repeat sign (Pistol Packin' Mama's and Joshua Fit The
+Battle Of Jericho's shapes) and in an ending for two passes; a D.C. at a repeat's
+end after the repeat; jump words of other spellings and languages; a jump followed
+by an instruction, and what is no jump left as words; "with repeat" (and the score
+read back from its MEI); a To Coda for the pass its words name (and read back); a
+Fine that names its pass (and read back); the pieces of a jump written apart in its
+bar (Hero's, Nellie the Elephant's, Every Little Thing She Does Is Magic's and
+Ironic's shapes, the marks of the MEI counted). One case of
+`test_tb31_jumps_in_words_engine.cpp` turns round ("D.S. and fade" is that D.S.).
+Each new case failing on tb.36. Breaks, each caught (13): the jump in an ending
+not taken; taken before its last pass; a comma not read as a dot; brackets kept;
+the To Coda of other languages not read; the instruction after a jump not read;
+"with repeat" not read; a pass to coda not read; the MEI's "repeats" not read back;
+a Fine's times not kept; the play not ended at a timed Fine; a sign beside a jump
+back read as a target; "al Coda" beside a jump back read as a To Coda. Native suite
+360 of 360; with asserts and the address sanitizer the same; the engine with
+asserts over every live song and the cases (2,771 of 2,771). Log-format audit: 0
+calls. Parity tb.36 to tb.37: of 22,191 outputs, 264 differ, in 48 songs, each a
+song whose jump words or jump in an ending these patches read. 25 play otherwise,
+each judged by MuseNote's song guards: 16 they refused on tb.36 pass, 4 they now
+refuse lacked in their files a target the words ask for (corrected in MuseNote's
+song list, or kept by the owner as they play), the others they refused before as
+after. The MEI and page of the 23 more change (words typed, signs print). 45 keep
+every note id; in 3 (Hero, Ironic, Every Little Thing She Does Is Magic) generated
+ids move where a sign becomes print, every note in its place (the annotation
+locator: 0 failures, 479,936 of 480,161 generated ids kept). Seeded ids 3,108 of
+3,108. MuseSync's songs: every note the same, all 33. MuseNote's guards:
+`bar_times.py` passes (finding W73 as before, 44 songs), `endings_whole.py` names
+the same 10 files. MuseNote's export gate over list 9, with its export of a jump
+"with repeat" (MuseNote RC81): no song worse in any format (MusicXML 2,756; ABC by
+abc2midi 2,338, six named apart; ABC by the engine 2,610; Humdrum 218, finding W79
+as before). The song guards over list 9 refuse 152 songs, against 164 on tb.36.
+
+**Upstream status**: not offered (patches 79 to 83).
+
 ### 78. A document read back from its own MEI keeps the work its music is of (tb.36)
 
 Found by MuseNote plan V3_2_0_55 (root cause RC73), in parity of patch 75. The
