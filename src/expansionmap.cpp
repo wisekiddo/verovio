@@ -816,6 +816,7 @@ namespace {
         std::string m_segno;
         std::string m_coda;
         bool m_fine = false;
+        std::list<int> m_fineTimes; // (the passes a Fine names: MuseNote RC79)
         std::vector<play::JumpInfo> m_jumps;
     };
 
@@ -886,7 +887,12 @@ namespace {
                 if (kind == "dacapo") jump(play::JumpInfo::DACAPO, "", tokens);
                 if (kind == "dalsegno") jump(play::JumpInfo::DALSEGNO, labelOf(dir, "segno"), tokens);
                 if (kind == "tocoda") jump(play::JumpInfo::TOCODA, labelOf(dir, "coda"), tokens);
-                if (kind == "fine") marks.m_fine = true;
+                if (kind == "fine") {
+                    marks.m_fine = true;
+                    for (const std::string &token : tokens) {
+                        if (const auto named = order::TimesOf(token)) marks.m_fineTimes = *named;
+                    }
+                }
                 if (kind == "coda") marks.m_coda = labelOf(dir, "coda");
                 if (kind == "segno") marks.m_segno = labelOf(dir, "segno");
             }
@@ -1022,7 +1028,11 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
             startsPart = true;
         }
         part.m_jumps.insert(part.m_jumps.end(), marks.m_jumps.begin(), marks.m_jumps.end());
-        if (marks.m_fine) part.m_fineInfo = play::FineInfo(true);
+        if (marks.m_fine) {
+            part.m_fineInfo = play::FineInfo(true);
+            part.m_fineInfo.m_times = marks.m_fineTimes;
+            part.m_fineInfo.m_timesGiven = !marks.m_fineTimes.empty();
+        }
         // (the end of an ending needs no word here: what follows it stands in another container)
         if (!marks.m_jumps.empty() || marks.m_fine) startsPart = true;
         startsRepeat = ExpansionMap::IsNextRepeatStart(measure);
@@ -1258,9 +1268,17 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
     // after the D.S. was never taken, nor a To Coda "2nd time" in a repeat. MuseNote RC35) Where it sends the play,
     // and whether back:
     std::optional<std::pair<decltype(iter), bool>> sent;
+    // a Fine that names its times, reached in one of them: the play ends after its part (MuseNote RC79)
+    bool fineReached = false;
     const auto add = [&](decltype(iter) it) {
         isFollowed = order.Add("#" + it->first.m_target->GetID());
         ++it->first.m_played;
+        const play::FineInfo &fine = it->first.m_fineInfo;
+        if (fine.m_fine && fine.m_timesGiven
+            && (std::find(fine.m_times.begin(), fine.m_times.end(), it->first.m_played) != fine.m_times.end())) {
+            fineReached = true;
+            return;
+        }
         for (const play::JumpInfo &jump : it->first.m_jumps) {
             if (!jump.m_timesGiven || !isTime(jump, it->first.m_played)) continue;
             if (const auto target = targetOf(jump)) {
@@ -1270,7 +1288,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             }
         }
     };
-    const auto goesOn = [&isFollowed, &sent]() { return isFollowed && !sent; };
+    const auto goesOn = [&isFollowed, &sent, &fineReached]() { return isFollowed && !sent && !fineReached; };
     // Where a jump lands, the repeat it lands in starts at the last repeat start at or before it, or at the score's
     // beginning (as a repeat end with no start goes back). (The repeat start last met was kept: after a D.C. into a
     // repeat with no start sign, played again after the jump, its passes began at a later repeat's start and ran
@@ -1563,7 +1581,7 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
         }
 
         // fine
-        if (isFinished || (jumpBack && endIter->first.m_fineInfo.m_fine)) {
+        if (isFinished || fineReached || (jumpBack && endIter->first.m_fineInfo.m_fine)) {
             break;
         }
 

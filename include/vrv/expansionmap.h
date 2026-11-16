@@ -136,6 +136,10 @@ struct JumpInfo {
 struct FineInfo {
     FineInfo() { m_fine = false; }
     FineInfo(bool fine) { m_fine = fine; }
+    // The passes the score names for it (MusicXML time-only): it ends the play the time its part is played that it
+    // names, a jump back or none. Without them it ends the play after a jump back (MuseNote RC79)
+    std::list<int> m_times;
+    bool m_timesGiven = false;
 
     bool m_fine;
 };

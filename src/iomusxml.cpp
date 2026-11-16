@@ -4781,10 +4781,14 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
         m_jumps.push_back(musicxml::JumpInfo(musicxml::JumpInfo::TOCODA, label, timesOf("2"), timesGiven));
     }
 
-    // fine
+    // fine (with the passes the sound names: MuseNote RC79)
     if (node.attribute("fine")) {
         if (!m_sectionStop) m_sectionStop = musicxml::SectionInfo();
         m_fineInfo = musicxml::FineInfo(true);
+        if (timesGiven) {
+            m_fineInfo->m_times = parseInts(timeOnly.as_string());
+            m_fineInfo->m_timesGiven = true;
+        }
     }
 }
 
@@ -4797,7 +4801,8 @@ void MusicXmlInput::KeepWhatTheSoundSays(ControlElement *mark, const pugi::xml_n
         const std::string label = sound.attribute(kind.c_str()).as_string();
         if (!label.empty() && (label != it->second)) mark->SetLabel(label);
     }
-    if (((kind == "tocoda") || (kind == "dalsegno") || (kind == "dacapo")) && sound.attribute("time-only")) {
+    if (((kind == "tocoda") || (kind == "dalsegno") || (kind == "dacapo") || (kind == "fine"))
+        && sound.attribute("time-only")) {
         mark->SetType(mark->GetType() + " " + order::TimesToken(parseInts(sound.attribute("time-only").as_string())));
     }
 }
