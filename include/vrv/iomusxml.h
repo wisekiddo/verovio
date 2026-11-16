@@ -777,6 +777,11 @@ private:
     /* each bar of the score, its right barline as a time stamp (the last time its notes reach) and the unit of its
      * meter: a mark whose time stamp is past it falls in a following bar (MuseNote RC55) */
     std::map<const Measure *, std::pair<double, int>> m_barEnds;
+    /* the ending that is open while the bars are read (started, not yet stopped), and which written ending it is: a
+     * part begun inside it, at a sign or a repeat start, is that ending's (MuseNote RC62) */
+    std::optional<musicxml::EndingInfo> m_openEnding;
+    int m_openEndingGroup = -1;
+    int m_endingGroups = 0;
     /* stack of clef changes to be inserted to all layers of a given staff */
     std::deque<musicxml::ClefChange> m_clefChangeQueue;
     /* stack of new arpeggios that get more notes added. */

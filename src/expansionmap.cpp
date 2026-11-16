@@ -384,7 +384,14 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
                     insertHere->AddChild(clonedObject); // add to new container, if it exists
                 }
                 else {
-                    prevSect->GetParent()->InsertAfter(prevSect, clonedObject); // or add after previous section
+                    // after the previous part; where that stands inside an ending this copy is not of, after the
+                    // ending (a part of an ending is a section inside it: MuseNote RC62)
+                    Object *after = prevSect;
+                    while (after->GetParent() && after->GetParent()->Is(ENDING)
+                        && (after->GetParent() != currSect->GetParent())) {
+                        after = after->GetParent();
+                    }
+                    after->GetParent()->InsertAfter(after, clonedObject); // or add after previous section
                 }
                 // played under its own score definitions (MuseNote RC58)
                 m_copyOf[clonedObject->GetID()] = currSect->GetID();
@@ -430,6 +437,10 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
 
                 prevSect = currSect;
                 existingList.push_back(id);
+                // An ending a part stands inside is played with it, not removed as unplayed (MuseNote RC62)
+                for (Object *up = currSect->GetParent(); up && (up != parent); up = up->GetParent()) {
+                    existingList.push_back(up->GetID());
+                }
             }
         }
     }
@@ -1014,20 +1025,32 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
             info.m_target = parent;
             continue;
         }
+        // A part of an ending it does not fill (a sign or a repeat sign inside the ending divides it) stays in the
+        // ending, a section of its own there: the bracket is drawn over all the ending's bars. (It was moved out, into
+        // a new section before the ending, and the bracket stopped at the sign: MuseNote RC62)
+        Object *ending = partMeasures.front()->GetFirstAncestor(ENDING);
+        const bool inEnding = ending && (ending->GetParent() == section)
+            && std::all_of(partMeasures.begin(), partMeasures.end(),
+                [ending](const Measure *measure) { return measure->GetFirstAncestor(ENDING) == ending; });
+        if (inEnding && parent->Is(SECTION) && (parent->GetParent() == ending) && HoldsOnly(parent, partMeasures)) {
+            info.m_target = parent;
+            continue;
+        }
+        Object *holder = inEnding ? ending : section;
         Object *top = partMeasures.front();
-        while (top->GetParent() != section) top = top->GetParent();
+        while (top->GetParent() != holder) top = top->GetParent();
         Section *target = new Section();
         if (top->Is(MEASURE)) {
             // ahead of what stands before the measure, which goes with it
             Object *first = top;
-            for (Object *before = section->GetPrevious(first); before && !before->Is({ MEASURE, SECTION, ENDING, EXPANSION });
-                before = section->GetPrevious(first)) {
+            for (Object *before = holder->GetPrevious(first); before && !before->Is({ MEASURE, SECTION, ENDING, EXPANSION });
+                before = holder->GetPrevious(first)) {
                 first = before;
             }
-            section->InsertBefore(first, target);
+            holder->InsertBefore(first, target);
         }
         else {
-            section->InsertBefore(top, target);
+            holder->InsertBefore(top, target);
         }
         for (Measure *measure : partMeasures) {
             Object *from = measure->GetParent();
@@ -1281,6 +1304,10 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             std::vector<decltype(iter)> group; // the endings' parts in score order
             auto begIter = iter;
             std::optional<decltype(iter)> rptNestedIter;
+            // a repeat begun inside these endings, not yet closed, and the parts whose sign closed one: that sign is
+            // the ending's own repeat's, and the ending goes on after it (MuseNote RC65)
+            bool innerOpen = false;
+            std::set<const play::SectionInfo *> innerClosers;
             while (iter != sections.end() && iter->first.m_classId == ENDING) {
                 const std::list<int> numbers = parseInts(iter->first.m_endingInfo.m_number);
                 bool hasPass = false;
@@ -1291,7 +1318,15 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 }
                 const bool goesOn = !hasPass && (iter != begIter)
                     && (parseInts(std::prev(iter)->first.m_endingInfo.m_number) == numbers)
-                    && (std::prev(iter)->second.back()->GetRight() != BARRENDITION_rptend);
+                    && ((std::prev(iter)->second.back()->GetRight() != BARRENDITION_rptend)
+                        || innerClosers.contains(&std::prev(iter)->first));
+                if ((iter != begIter) && iter->first.m_repeatStart) innerOpen = true;
+                if (innerOpen
+                    && ((iter->second.back()->GetRight() == BARRENDITION_rptend)
+                        || (iter->second.back()->GetRight() == BARRENDITION_rptboth))) {
+                    innerClosers.insert(&iter->first);
+                    innerOpen = false;
+                }
                 if (goesOn) {
                     for (auto &pass : endings) {
                         if (pass.second.back() == std::prev(iter)) pass.second.push_back(iter);
@@ -1356,6 +1391,16 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
             const auto placeOf = [&group](decltype(iter) part) {
                 return std::distance(group.begin(), std::find(group.begin(), group.end(), part));
             };
+            // A repeat begun inside an ending (a part of it after its first with a repeat start) and closed by a sign
+            // inside it is the ending's own: in each pass the ending is played, its bars are played its times there,
+            // and its sign sends the play back to it, not for the next pass. (The order had no repeat inside an
+            // ending: its sign was taken for the ending's, and its bars were played once. MuseNote RC65)
+            std::set<const play::SectionInfo *> closedInside;
+            bool nestedClosed = false;
+            const auto signAtEnd = [](decltype(iter) part) {
+                const data_BARRENDITION right = part->second.back()->GetRight();
+                return (right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth);
+            };
             bool isLeft = false; // the repeat left at an ending that nothing sends back from
             // the map is automatically sorted by key (ending number), so just add them to expansion in the same order
             // skip section first time because it was already added in the SECTION block
@@ -1363,7 +1408,8 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 if (ending != endings.begin()) {
                     const auto played = std::prev(ending)->second.back();
                     const data_BARRENDITION right = played->second.back()->GetRight();
-                    const bool hasOwnSign = (right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth);
+                    const bool hasOwnSign = ((right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth))
+                        && !closedInside.contains(&played->first);
                     // one ending for several passes comes round by the repeat sign at its end. Where that sign stands
                     // further on, after plain bars, it brings the ending round itself, in the passes it names. (Not
                     // where the ending has a sign of its own: the one further on is another repeat's. It passed the
@@ -1389,8 +1435,20 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                         add(it);
                     }
                 }
-                for (auto it = ending->second.begin(); goesOn() && (it != ending->second.end()); ++it) {
-                    add(*it);
+                const auto &parts = ending->second;
+                std::optional<size_t> innerStart;
+                for (size_t k = 0; goesOn() && (k < parts.size()); ++k) {
+                    if ((parts[k] != begIter) && parts[k]->first.m_repeatStart) innerStart = k;
+                    add(parts[k]);
+                    if (!innerStart || !signAtEnd(parts[k])) continue;
+                    // the ending's own repeat: its bars again, up to its times
+                    const int times = std::max(2, parts[k]->first.m_repeatInfo.m_times);
+                    for (int time = 1; goesOn() && (time < times); ++time) {
+                        for (size_t j = *innerStart; goesOn() && (j <= k); ++j) add(parts[j]);
+                    }
+                    closedInside.insert(&parts[k]->first);
+                    if (rptNestedIter && (*rptNestedIter == parts[*innerStart])) nestedClosed = true;
+                    innerStart.reset();
                 }
                 if (jumpBack && goesOn()) {
                     for (auto part : ending->second) {
@@ -1424,7 +1482,8 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 const auto last = std::prev(endings.end());
                 const auto lastPart = last->second.back();
                 const data_BARRENDITION right = lastPart->second.back()->GetRight();
-                if ((right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth)) {
+                if (((right == BARRENDITION_rptend) || (right == BARRENDITION_rptboth))
+                    && !closedInside.contains(&lastPart->first)) {
                     // (counted from the pass the repeat is in: a repeat that has played its passes by the endings
                     // before these is not taken again by a sign at their end)
                     const int times = std::max(2, lastPart->first.m_repeatInfo.m_times);
@@ -1439,8 +1498,8 @@ xsdAnyURI_List WriteOrderOfPlay(play::Sections &sections)
                 }
             }
 
-            // set the repetition to the (latest) nested one
-            if (rptNestedIter) {
+            // set the repetition to the (latest) nested one (not one the ending closed itself)
+            if (rptNestedIter && !nestedClosed) {
                 rptIter = *rptNestedIter;
                 pass = 1;
             }

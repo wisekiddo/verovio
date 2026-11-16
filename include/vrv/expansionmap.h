@@ -180,6 +180,9 @@ struct SectionInfo {
     EndingInfo m_endingInfo;
     RepeatInfo m_repeatInfo;
     bool m_repeatStart;
+    // the ending written in the score this part is of, counted from 0 (-1: none): one ending a sign or a repeat sign
+    // inside it divides is one ending element still, its parts sections inside it (MuseNote RC62)
+    int m_endingGroup = -1;
     // the jumps at its end, each for its times: a barline can hold several (MusicXML: a To Coda the second time,
     // another the third). One was kept, the last read (MuseNote RC36)
     std::vector<JumpInfo> m_jumps;

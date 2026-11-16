@@ -505,7 +505,19 @@ void MusicXmlInput::AddMeasure(Section *section, Measure *measure, int i)
     if (contentMeasure && !MeasureInExistingSection(contentMeasure)) {
         // starting a new section
         if (m_sectionStart) {
-            m_sections.push_back({ *m_sectionStart, {} });
+            musicxml::SectionInfo info = *m_sectionStart;
+            if ((info.m_classId == ENDING) && (info.m_endingInfo.m_type == "start")) {
+                m_openEnding = info.m_endingInfo;
+                m_openEndingGroup = m_endingGroups++;
+            }
+            else if (m_openEnding) {
+                // A part begun inside an ending (at a sign, a repeat start) is the ending's: played in its passes and
+                // drawn under its bracket. (It was a section of its own after the ending: a first ending's bars after
+                // a sign were played in the second pass too, and the bracket stopped at the sign: MuseNote RC62)
+                info.merge(*m_openEnding);
+            }
+            if (m_openEnding) info.m_endingGroup = m_openEndingGroup;
+            m_sections.push_back({ info, {} });
         }
         // add current measure to current section
         if (!m_sections.empty()) {
@@ -522,6 +534,7 @@ void MusicXmlInput::AddMeasure(Section *section, Measure *measure, int i)
         if (m_sectionStop && !m_sections.empty()) {
             if (m_sectionStop->m_classId == ENDING) {
                 m_sections.back().first.m_endingInfo = m_sectionStop->m_endingInfo;
+                m_openEnding.reset();
                 // A repeat sign on the barline that ends it is played as written: its count is kept. (It was
                 // dropped: the count fell to once, and a repeat whose barline also holds an ending's stop was not
                 // played, nor its times kept where it closes an ending: W51, W54)
@@ -530,7 +543,13 @@ void MusicXmlInput::AddMeasure(Section *section, Measure *measure, int i)
             else {
                 m_sections.back().first.m_repeatInfo = m_sectionStop->m_repeatInfo;
             }
-            m_sections.push_back({ musicxml::SectionInfo(), {} });
+            // (after a repeat sign inside an ending that goes on, the next part is the ending's too: MuseNote RC62)
+            musicxml::SectionInfo next;
+            if (m_openEnding) {
+                next.merge(*m_openEnding);
+                next.m_endingGroup = m_openEndingGroup;
+            }
+            m_sections.push_back({ next, {} });
         }
     }
     m_sectionStart.reset();
@@ -1515,10 +1534,51 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
     }
 
     // manage sections: create new <section> / <ending> elements and move the corresponding measures into them
+    // (a part that holds no bar is none: left in, it stood between two parts of one ending and parted them)
+    std::erase_if(m_sections, [](const auto &part) { return part.second.empty(); });
     for (auto iter = m_sections.begin(); iter != m_sections.end();) {
         std::vector<Measure *> measures = iter->second;
         if (measures.empty()) {
             iter = m_sections.erase(iter);
+            continue;
+        }
+
+        // The parts of one ending written in the score: one ending element, each part a section inside it (MuseNote
+        // RC62). A part of an ending alone is the ending element itself, as before
+        const int group = (iter->first.m_classId == ENDING) ? iter->first.m_endingGroup : -1;
+        auto last = iter;
+        while ((group >= 0) && (std::next(last) != m_sections.end()) && (std::next(last)->first.m_endingGroup == group)
+            && !std::next(last)->second.empty()) {
+            ++last;
+        }
+        if (last != iter) {
+            Ending *ending = new Ending();
+            const musicxml::EndingInfo &first = iter->first.m_endingInfo;
+            ending->SetN(first.m_text.empty() ? first.m_number : first.m_text);
+            ending->SetLendsym((last->first.m_endingInfo.m_type == "discontinue") ? LINESTARTENDSYMBOL_none
+                                                                                  : LINESTARTENDSYMBOL_angledown);
+            section->InsertBefore(iter->second.front(), ending);
+            for (auto part = iter;; ++part) {
+                Section *inside = new Section();
+                part->first.m_target = inside;
+                ending->AddChild(inside);
+                for (Measure *measure : part->second) {
+                    Object *sibling = measure;
+                    std::list<Object *> siblings;
+                    while ((sibling = section->GetPrevious(sibling))) {
+                        if (sibling->GetClassId() == SECTION || sibling->GetClassId() == ENDING) break;
+                        siblings.push_front(sibling);
+                    }
+                    for (Object *before : siblings) {
+                        section->DetachChild(section->GetChildIndex(before));
+                        inside->AddChild(before);
+                    }
+                    section->DetachChild(section->GetChildIndex(measure));
+                    inside->AddChild(measure);
+                }
+                if (part == last) break;
+            }
+            iter = std::next(last);
             continue;
         }
 
