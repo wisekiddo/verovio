@@ -2989,6 +2989,60 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 74. An ending a sign divides stays whole, and a repeat inside an ending is played (tb.35)
+
+Found by MuseNote plan V3_2_0_54 (root causes RC62 and RC65, finding W63). Where a
+sign (segno, coda) or a repeat sign inside an ending starts a new part of the order
+of play, the bars on one side were moved out of the ending: `WriteOrderOfPlayFor`
+(ABC, MEI) put the first part in a section before the ending, and the MusicXML
+reader began a plain section at the sign. The bracket stopped at the sign, and read
+from MusicXML a first ending's bars after a sign were played in the second pass
+too. The parts now stay in the ending as sections inside it (MEI 5 allows an
+ending to hold sections): the reader gives a part begun inside an open ending, at
+a sign or after a repeat sign, that ending's passes, and builds one ending element
+for an ending's parts; `WriteOrderOfPlayFor` puts a part that does not fill its
+ending in a section inside it; the expansion keeps an ending whose parts are
+played, and places a copy after the ending the part before it stands in.
+Building it found that the order had no repeat inside an ending (RC65): a part
+beginning a repeat there took the ending's passes, its closing sign was read as
+the ending's own, and the ending did not go on after it. A repeat begun and
+closed inside an ending is now the ending's own, played its times in each pass
+the ending is played; its sign does not send the play back for the next pass.
+
+### 73. A decoration written before an ABC bar line is the bar line's (tb.35)
+
+Found by MuseNote plan V3_2_0_54 (root cause RC61, finding W63). ABC 2.1, 4.14:
+decorations may be applied to bar lines. The ABC reader kept only a jump written
+after a bar's last event and before its bar line at the bar's end; any other
+decoration (segno, coda, fermata...) waited for the next note, in the next bar.
+Every decoration so written is now the bar's last event's, at the end of the bar
+the line closes. Four's coda, read back from its ABC export, no longer divides its
+second ending.
+
+Cases (both patches): `test_tb35_ending_kept_whole_engine.cpp`: a coda sign inside
+a second ending and a segno inside a first ending (the ending holds all its bars;
+the first ending's bars after the sign played in its pass only; the score played
+out puts a copy after the ending), a repeat inside an ending, closed at its end
+and closed with the ending going on (each MusicXML score and its MEI twin alike),
+and ABC: `!coda!|`, `!segno!|`, `!fermata!|` in the bar the line closes, one
+before a note unchanged, Four's shape, a coda inside an ending. Each failing on
+tb.34. Breaks, each caught (9): only jumps at the bar's end; a part begun in an
+ending not the ending's; no one ending for its parts; the part after a repeat sign
+in an ending not the ending's; ABC and MEI moving a part out of its ending; the
+expansion removing an ending as unplayed; a copy put inside an ending; no repeat
+inside an ending; an ending not going on after its own repeat. Native suite 346 of
+346; with asserts and the address sanitizer 346 of 346; the engine with asserts
+over every live song and the cases (2,771 of 2,771). Log-format audit: 0 calls.
+Parity tb.34 to tb.35: 19 of 22,086 outputs differ, in 4 scores, each judged:
+Everything, Livin' La Vida Loca and Till There Was You (files whose "2." starts on
+the repeat sign's bar, now held as written; their files are corrected, MuseNote
+RC63), and one ABC export (I Guess That's Why They Call It The Blues: a repeat
+opened at its second ending, `::`, is played; its bars played 63 on tb.34 and 70
+now, the song's 71). The annotation locator: 0 failures, every note id kept.
+Seeded ids 3,093 of 3,093. MuseSync's songs: every note the same, all 33.
+
+**Upstream status**: not offered (patches 73, 74).
+
 ### 72. A part played again plays under its own score definitions (tb.34)
 
 Found by MuseNote plan V3_2_0_52 (root cause RC58, finding W61). The expansion
