@@ -4820,17 +4820,33 @@ std::optional<std::pair<std::string, std::string>> MusicXmlInput::JumpOfWords(co
     for (const char c : text) {
         if (!std::isspace(static_cast<unsigned char>(c))) plain += std::tolower(static_cast<unsigned char>(c));
     }
-    static const std::regex daCapo("^(d\\.?|da)(c\\.?|capo)(al(fine|coda(i{0,3})))?$");
-    static const std::regex dalSegno("^(d\\.?|d[ae]l)(s\\.?(s\\.?)?|segno\\.?)(i{0,3})(\\(.*\\))?(al(fine|coda(i{0,3})))?$");
+    // (MuseNote RC75) A comma written for a dot ("D,S,al.fine"), and a phrase in brackets ("(fine)", "(Per la coda)"),
+    // are the phrase
+    std::replace(plain.begin(), plain.end(), ',', '.');
+    if ((plain.size() > 2) && (plain.front() == '(') && (plain.back() == ')')) plain = plain.substr(1, plain.size() - 2);
+    // A D.C. or a D.S. followed by an instruction with no part in the order (to fade out, the lyric verse to sing) is
+    // that jump: "D.S. and fade", "D.S. to fade", "D.S., vamp and fade on E", "D.C. (to Verse 2)". (Only whole
+    // phrases were read, and such a jump was not played: MuseNote RC75)
+    static const std::regex instruction("^(.*?)[.:;\\-]*(\\(?(and|to)?fade.*|vampandfade.*|\\(?toverse\\d+\\)?)$");
+    std::smatch m;
+    std::string jumpOnly;
+    if (std::regex_match(plain, m, instruction)) jumpOnly = m[1].str();
+    // "al" also written "a" or with a dot after it ("D.S. a Coda", "D.C.al.Coda")
+    static const std::regex daCapo("^(d\\.?|da)(c\\.?|capo)(al?\\.?(fine|coda(i{0,3})))?$");
+    static const std::regex dalSegno(
+        "^(d\\.?|d[ae]l)(s\\.?(s\\.?)?|segno\\.?)(i{0,3})(\\(.*\\))?(al?\\.?(fine|coda(i{0,3})))?$");
     static const std::regex fine("^fine$");
     static const std::regex segno("^segno(segno)?(i{0,3})$");
-    static const std::regex toCoda("^tocoda(coda)?(i{0,3})$");
+    // a To Coda in the words of other languages and editions: "Zur Coda", "Per la coda", "Al Coda" (MuseNote RC75)
+    static const std::regex toCoda("^(to|zur|perla|al)coda(coda)?(i{0,3})$");
     static const std::regex coda("^coda(coda)?(i{0,3})$");
+    if (!jumpOnly.empty() && (std::regex_match(jumpOnly, daCapo) || std::regex_match(jumpOnly, dalSegno))) {
+        plain = jumpOnly;
+    }
     // a label: the sign's own name, with its numeral where it is more than the first
     const auto labelled = [](const std::string &sign, const std::string &numeral) {
         return (numeral.empty() || numeral == "i") ? sign : sign + numeral;
     };
-    std::smatch m;
     if (std::regex_match(plain, m, daCapo)) return std::make_pair(std::string("dacapo"), std::string());
     if (std::regex_match(plain, m, dalSegno)) {
         // "D.S.S." names the second segno, as its numeral does
@@ -4839,7 +4855,7 @@ std::optional<std::pair<std::string, std::string>> MusicXmlInput::JumpOfWords(co
     }
     if (std::regex_match(plain, m, fine)) return std::make_pair(std::string("fine"), std::string());
     if (std::regex_match(plain, m, segno)) return std::make_pair(std::string("segno"), labelled("segno", m[2].str()));
-    if (std::regex_match(plain, m, toCoda)) return std::make_pair(std::string("tocoda"), labelled("coda", m[2].str()));
+    if (std::regex_match(plain, m, toCoda)) return std::make_pair(std::string("tocoda"), labelled("coda", m[3].str()));
     if (std::regex_match(plain, m, coda)) return std::make_pair(std::string("coda"), labelled("coda", m[2].str()));
     return std::nullopt;
 }
