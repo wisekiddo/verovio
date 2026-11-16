@@ -1179,6 +1179,11 @@ private:
     // m_currentending == keep track of current ending.
     vrv::Ending *m_currentending = NULL;
 
+    // m_currentpart == the part of the current ending its bars go into, where a
+    // sign or a repeat divides the ending (a section inside it, MEI 5), or NULL
+    // (MuseNote patch 76).
+    vrv::Section *m_currentpart = NULL;
+
     // m_currentsection == keep track of current section.
     vrv::Section *m_currentsection = NULL;
 

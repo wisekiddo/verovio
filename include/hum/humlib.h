@@ -9363,6 +9363,10 @@ class Tool_mei2hum : public HumTool {
 		int            m_staffcount;  // number of staves in score.
 		HumNum         m_tupletfactor = 1;
 		HumGrid        m_outdata;
+		// The parts of an ending a sign or a repeat divides (its <section>
+		// children, MEI 5), by the ending's id: each with the first measure
+		// made of it, where its label goes (MuseNote patch 76).
+		map<string, vector<pair<xml_node, GridMeasure*>>> m_endingParts;
 		int            m_currentLayer = 0;
 		int            m_currentStaff = 0;
 		int            m_maxStaffInFile = 0; // valid after parsing staves in first measure

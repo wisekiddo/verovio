@@ -9895,7 +9895,10 @@ void HumdrumInput::checkForLayoutBreak(int line)
         std::string tstring = removeCommas(group);
         Sb *sb = new Sb;
         m_layoutInformation = LAYOUT_ENCODED;
-        if (m_currentending) {
+        if (m_currentpart) {
+            m_currentpart->AddChild(sb);
+        }
+        else if (m_currentending) {
             m_currentending->AddChild(sb);
         }
         else {
@@ -9912,7 +9915,10 @@ void HumdrumInput::checkForLayoutBreak(int line)
         Pb *pb = new Pb();
         // Sb *pb = new Sb();  // suppress page break encodings
         m_layoutInformation = LAYOUT_ENCODED;
-        if (m_currentending) {
+        if (m_currentpart) {
+            m_currentpart->AddChild(pb);
+        }
+        else if (m_currentending) {
             m_currentending->AddChild(pb);
         }
         else {
@@ -30229,6 +30235,7 @@ void HumdrumInput::setupSystemMeasure(int startline, int endline)
 
     if (ending && (m_endingnum != endnum)) {
         // create a new ending
+        m_currentpart = NULL;
         m_currentending = new Ending();
         std::string endingid = *m_sectionlabels[startline];
         if (endingid.compare(0, 2, "*>") == 0) {
@@ -30248,10 +30255,29 @@ void HumdrumInput::setupSystemMeasure(int startline, int endline)
     }
     else if ((!fakenum) && (currentsection.size() > 0) && isdigit(currentsection.back())) {
         // inside a current ending
-        m_currentending->AddChild(m_measure);
+        // A label of its own with the ending's number ("A2b2" in an ending "A2") is a part of the ending: a
+        // section inside it, which an expansion list names. The ending's bars before it are its first part, a
+        // section with the ending's label, and the ending's own id its label's with "-ending". (Such a part was
+        // read as more of the ending, and a list naming it was not followed: MuseNote patch 76.)
+        const std::string opened = m_currentpart ? m_currentpart->GetID() : m_currentending->GetID();
+        if (currentsection != opened) {
+            if (!m_currentpart) {
+                Section *first = new Section();
+                first->MoveChildrenFrom(m_currentending, -1, true);
+                m_currentending->ClearRelinquishedChildren();
+                first->SetID(m_currentending->GetID());
+                m_currentending->SetID(m_currentending->GetID() + "-ending");
+                m_currentending->AddChild(first);
+            }
+            m_currentpart = new Section();
+            m_currentpart->SetID(currentsection);
+            m_currentending->AddChild(m_currentpart);
+        }
+        (m_currentpart ? static_cast<Object *>(m_currentpart) : m_currentending)->AddChild(m_measure);
     }
     else if (newsection) {
         // start a new section
+        m_currentpart = NULL;
         m_currentending = NULL;
         m_currentsection = new Section();
         if (m_measure) {
@@ -30263,6 +30289,7 @@ void HumdrumInput::setupSystemMeasure(int startline, int endline)
     }
     else {
         // outside of an ending
+        m_currentpart = NULL;
         m_currentending = NULL;
         if (m_measure) {
             m_sections.back()->AddChild(m_measure);

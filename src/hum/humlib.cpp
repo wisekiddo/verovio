@@ -102396,7 +102396,10 @@ void Tool_mei2hum::fillWithStaffDefAttributes(mei_staffDef& staffinfo, xml_node 
 // Returns the ids that <expansion> names, in its order, or none when
 // labels cannot say the order: for any section but the score's one, for
 // two lists, for music that is in no child a list can name, and for a
-// list that names what is no child.
+// list that names what is no child.  An ending a sign or a repeat divides
+// holds its parts as sections (MEI 5), and the list names those: each is
+// a child it can name.  (A list naming them was not written at all, and
+// read back the score was played once through: MuseNote RC70.)
 static vector<string> orderOfPlay(xml_node section, const vector<xml_node>& children) {
 	vector<string> order;
 	if (strcmp(section.parent().name(), "score") != 0) {
@@ -102420,6 +102423,11 @@ static vector<string> orderOfPlay(xml_node section, const vector<xml_node>& chil
 			return order;
 		} else if ((name == "section") || (name == "ending")) {
 			ids.insert(child.attribute("xml:id").value());
+			if (name == "ending") {
+				for (xml_node part : child.children("section")) {
+					ids.insert(part.attribute("xml:id").value());
+				}
+			}
 		}
 	}
 	ids.erase("");
@@ -102560,6 +102568,18 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 		}
 	}
 
+	// An ending that holds its parts as sections: they are labelled where
+	// the score's section is (each part's label at its first measure).
+	if ((strcmp(section.name(), "ending") == 0) && !section.child("measure")) {
+		vector<pair<xml_node, GridMeasure*>> parts;
+		for (auto& part : written) {
+			if (strcmp(part.first.name(), "section") == 0) {
+				parts.push_back(part);
+			}
+		}
+		m_endingParts[section.attribute("xml:id").value()] = parts;
+	}
+
 	if (m_staffcount < 1) {
 		return starttime;
 	}
@@ -102573,16 +102593,27 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 	// that number, as the text of the label.  An ending with no section
 	// before it is named as a section: played in its turn, with no
 	// bracket.
+	//
+	// The parts of an ending a sign or a repeat divides (its sections) are
+	// each labelled, for the list names them: the first with the ending's
+	// label, each other with that label, its place among the parts in
+	// small letters and the ending's number again ("A2b2"), so that the
+	// label still ends in the number and starts with the section's letters:
+	// Verovio's Humdrum reader keeps such a part in the ending, as a
+	// section inside it (MuseNote patch 76).
 	map<string, string> labels;
 	vector<string> names;
 	vector<string> brackets;
+	vector<pair<GridMeasure*, string>> partLabels;
 	string letters;
 	int sections = 0;
 	int endings = 0;
 	for (auto& part : written) {
 		string bracket;
+		string number;
 		if ((strcmp(part.first.name(), "ending") == 0) && !letters.empty()) {
-			names.push_back(letters + to_string(++endings));
+			number = to_string(++endings);
+			names.push_back(letters + number);
 			bracket = cleanDirText(part.first.attribute("n").value());
 			if (bracket == to_string(endings)) {
 				bracket.clear();
@@ -102597,6 +102628,22 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 		}
 		brackets.push_back(bracket);
 		labels[part.first.attribute("xml:id").value()] = names.back();
+		auto divided = m_endingParts.find(part.first.attribute("xml:id").value());
+		if (divided == m_endingParts.end()) {
+			continue;
+		}
+		const vector<pair<xml_node, GridMeasure*>>& parts = divided->second;
+		for (int p=0; p<(int)parts.size(); p++) {
+			string place;
+			for (int k = p + 1; k > 0; k = (k - 1) / 26) {
+				place.insert(place.begin(), (char)('a' + (k - 1) % 26));
+			}
+			const string label = (p == 0) ? names.back() : names.back() + place + number;
+			labels[parts[p].first.attribute("xml:id").value()] = label;
+			if (p > 0) {
+				partLabels.push_back(make_pair(parts[p].second, label));
+			}
+		}
 	}
 
 	// The list: the labels in the order the score names them.  What has
@@ -102621,6 +102668,12 @@ HumNum Tool_mei2hum::parseSection(xml_node section, HumNum starttime) {
 	// (the last staff's), where a reader looks for them; a label and the
 	// list are written as a tempo is, which the grid copies into every
 	// other spine.
+	// Each later part of a divided ending: its label at its first measure.
+	for (auto& part : partLabels) {
+		GridSlice* gs = new GridSlice(part.first, part.first->getTimestamp(), SliceType::Tempos, m_staffcount);
+		gs->at(m_staffcount - 1)->at(0)->at(0)->setToken("*>" + part.second);
+		part.first->push_front(gs);
+	}
 	for (int i=(int)written.size()-1; i>=0; i--) {
 		GridMeasure* gm = written[i].second;
 		vector<string> lines(1, "*>" + names[i]);
