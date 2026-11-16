@@ -1073,6 +1073,12 @@ std::string Toolkit::GetMEI(const std::string &jsonOptions)
     }
 
     std::string output = meioutput.Export();
+    // The whole score, as a score: with the order it is played in, where no reader wrote one (MuseNote patch 75).
+    // Every export starts from this text: the order lived only in the playing of it, and a score made in an editor
+    // went to Humdrum with its jumps as words, played once through read back
+    if (scoreBased && !serialized && !meioutput.HasFilter() && !generateFacs) {
+        output = this->WithOrderOfPlay(output, basic, indent, ignoreHeader, removeIds);
+    }
 
     if (hadSelection) m_doc.ReactivateSelection(false);
 
@@ -2351,12 +2357,53 @@ void Toolkit::ClearHumdrumBuffer()
 #endif
 }
 
+std::string Toolkit::WithOrderOfPlay(
+    const std::string &mei, bool basic, int indent, bool ignoreHeader, bool removeIds)
+{
+    // A score with no <expansion> in it (the text of the element, "<score" ended, not "<scoreDef")
+    bool lacking = false;
+    for (size_t at = mei.find("<score"); !lacking && (at != std::string::npos); at = mei.find("<score", at + 1)) {
+        const char next = (at + 6 < mei.size()) ? mei[at + 6] : '\0';
+        if ((next != '>') && (next != '/') && !std::isspace(static_cast<unsigned char>(next))) continue;
+        const size_t end = mei.find("</score>", at);
+        lacking = (mei.substr(at, (end == std::string::npos) ? std::string::npos : end - at).find("<expansion")
+            == std::string::npos);
+    }
+    if (!lacking) return mei;
+
+    // On a copy: read, the order written where a score has none (Doc::m_writeOrderOnly), and written out again.
+    // Its new sections and its <expansion> take ids of this thread: the counter is set back after
+    const uint32_t counter = Object::GetIDCounter();
+    std::string written = mei;
+    {
+        Doc copy;
+        copy.SetOptions(m_doc.GetOptions());
+        copy.m_writeOrderOnly = true;
+        MEIInput input(&copy);
+        if (input.Import(mei) && copy.FindDescendantByType(EXPANSION)) {
+            MEIOutput output(&copy);
+            output.SetScoreBasedMEI(true);
+            output.SetBasic(basic);
+            output.SetIndent(indent);
+            output.SetIgnoreHeader(ignoreHeader);
+            output.SetRemoveIds(removeIds);
+            written = output.Export();
+        }
+    }
+    Object::SetIDCounter(counter);
+    return written;
+}
+
 std::string Toolkit::ConvertMEIToHumdrum(const std::string &meiData)
 {
 #ifndef NO_HUMDRUM_SUPPORT
     hum::Tool_mei2hum converter;
     pugi::xml_document xmlfile;
-    xmlfile.load_string(meiData.c_str());
+    // With the order it is played in, where it has none of its own (MuseNote patch 75): the converter writes it
+    // (section labels and a list) only from an <expansion>
+    const int indent = (m_options->m_outputIndentTab.GetValue()) ? -1 : m_options->m_outputIndent.GetValue();
+    const std::string ordered = this->WithOrderOfPlay(meiData, false, indent, false, false);
+    xmlfile.load_string(ordered.c_str());
     std::stringstream conversion;
 
     this->LogRedirectStart();

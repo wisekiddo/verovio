@@ -764,6 +764,13 @@ public:
 
     static void SeedID(uint32_t seed = 0);
 
+    /**
+     * The id counter of this thread, and set back to where it was: work on a copy of a document
+     * leaves the ids the next objects get as they were (MuseNote patch 75)
+     */
+    static uint32_t GetIDCounter() { return s_xmlIDCounter; }
+    static void SetIDCounter(uint32_t counter) { s_xmlIDCounter = counter; }
+
     static std::string GenerateHashID();
 
     static uint32_t Hash(uint32_t number, bool reverse = false);

@@ -638,6 +638,13 @@ public:
     /** An expansion map that contains  */
     ExpansionMap m_expansionMap;
 
+    /**
+     * Whether ExpandExpansions only writes the order a score with none is played in (the one rule's
+     * <expansion>), and plays nothing out: a copy made to give the order out with the score's MEI
+     * (MuseNote patch 75, Toolkit::WithOrderOfPlay)
+     */
+    bool m_writeOrderOnly = false;
+
 private:
     /**
      * The type of document indicates how to deal with the layout information.

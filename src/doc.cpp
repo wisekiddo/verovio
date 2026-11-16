@@ -1719,6 +1719,16 @@ void Doc::ExpandExpansions()
         return;
     }
 
+    // Only the order written, where a score has none: the copy that gives it out (MuseNote patch 75)
+    if (m_writeOrderOnly) {
+        for (Object *object : this->FindAllDescendantsByType(SCORE)) {
+            Score *score = vrv_cast<Score *>(object);
+            assert(score);
+            if (!score->FindDescendantByType(EXPANSION)) m_expansionMap.GenerateExpansionFor(score);
+        }
+        return;
+    }
+
     // The list of output formats that we always expand, and generate an expansion if there isn't one
     static std::vector<FileFormat> valid = { MIDI, TIMEMAP, EXPANSIONMAP };
     bool expandInputFormat = (std::find(valid.begin(), valid.end(), m_options->GetOutputTo()) != valid.end());

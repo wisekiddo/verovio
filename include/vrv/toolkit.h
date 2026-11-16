@@ -801,6 +801,14 @@ protected:
     void ResetMidiDoc();
 
 private:
+    /**
+     * [mei] with the order each of its scores is played in, where a score has no <expansion> of its own: the one
+     * rule's (ExpansionMap::GenerateExpansionFor), worked out on a copy of the score and written as its
+     * <expansion>; the loaded document and the ids its next objects get are untouched. [mei] as it is where every
+     * score has an order, or none can be worked out. The settings are the MEI output's (MuseNote patch 75).
+     */
+    std::string WithOrderOfPlay(const std::string &mei, bool basic, int indent, bool ignoreHeader, bool removeIds);
+
     bool SetFont(const std::string &fontName);
     bool IsUTF16(const std::string &filename);
     bool LoadUTF16File(const std::string &filename);
