@@ -1626,24 +1626,17 @@ namespace abc {
     }
 
     /**
-     * A jump written after a bar's last note, before its bar line ("... !D.S.! |"), is said at the bar's end: it is
-     * the last event's. (A decoration waits for the note after it, and that one stands in the next bar, or nowhere.)
+     * A decoration written after a bar's last note, before its bar line ("... !D.S.! |", "... !coda! |"), is the bar
+     * line's (ABC 2.1, 4.14: decorations may be applied to bar lines): it is said at the end of the bar the line
+     * closes, as the bar's last event's. (Only a jump was: a sign or a fermata waited for the next note, in the next
+     * bar, and a coda at the end of an ending's first bar divided the ending: MuseNote RC61)
      */
     void Reader::MarksAtBarEnd(Voice &voice)
     {
-        static const std::set<std::string> jumps = { "D.S.", "D.C.", "dacapo", "dacoda", "fine" };
         std::vector<Event> &events = voice.Events();
         if (events.empty() || voice.m_marks.empty()) return;
-        std::vector<std::string> waiting;
-        for (const std::string &name : voice.m_marks) {
-            if (jumps.contains(name)) {
-                events.back().m_marks.push_back(name);
-            }
-            else {
-                waiting.push_back(name);
-            }
-        }
-        voice.m_marks = waiting;
+        for (const std::string &name : voice.m_marks) events.back().m_marks.push_back(name);
+        voice.m_marks.clear();
     }
 
     /** Ends the voice's bar with [sign] on its right, and begins the next one */
