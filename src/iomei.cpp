@@ -4169,6 +4169,9 @@ bool MEIInput::ReadDoc(pugi::xml_node root)
         LogError("No <music> element found in the MEI data");
         return false;
     }
+    // The work the music is of, as MEIOutput writes it (MuseNote patch 78: it was not read, and a document read back
+    // from its own MEI lost it)
+    m_doc->m_musicDecls = music.attribute("decls").as_string();
 
     facsimile = music.child("facsimile");
     if (!facsimile.empty()) {
