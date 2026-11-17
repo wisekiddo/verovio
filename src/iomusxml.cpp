@@ -586,11 +586,16 @@ void MusicXmlInput::AddLayerElement(Layer *layer, LayerElement *element, int dur
 
 Layer *MusicXmlInput::SelectLayer(pugi::xml_node node, Measure *measure)
 {
-    // If value is initialized - get current layer
-    if (m_isLayerInitialized) return m_currentLayer;
-
     // Find voice number of node
     short int layerNum = (node.child("voice")) ? node.child("voice").text().as_int() : 1;
+
+    // A node that names no voice, or the current layer's, stays in the current layer (a note of that voice on another
+    // staff is drawn there, cross-staff). One of another voice goes to that voice's layer also with no <backup> before
+    // it: a voice can begin or resume where the cursor already is (it went into the current layer: MuseNote RC112)
+    const bool otherVoice = m_isLayerInitialized && m_currentLayer && node.child("voice")
+        && (std::max<short int>(layerNum, 1) != m_currentLayer->GetN());
+    if (m_isLayerInitialized && !otherVoice) return m_currentLayer;
+
     if (layerNum < 1) {
         LogWarning("MusicXML import: Layer %d cannot be found", layerNum);
         layerNum = 1;
@@ -614,6 +619,16 @@ Layer *MusicXmlInput::SelectLayer(pugi::xml_node node, Measure *measure)
     staffNum--;
     Staff *staff = vrv_cast<Staff *>(measure->GetChild(staffNum, STAFF));
     assert(staff);
+    // (another voice with no backup, not yet on this staff but in this bar on another: its notes' layer there, the
+    // note drawn cross-staff as the voice's others are)
+    AttNIntegerComparison isVoice(LAYER, layerNum);
+    if (otherVoice && !staff->FindDescendantByComparison(&isVoice, 1)) {
+        Layer *elsewhere = vrv_cast<Layer *>(measure->FindDescendantByComparison(&isVoice, 2));
+        if (elsewhere) {
+            m_currentLayer = elsewhere;
+            return m_currentLayer;
+        }
+    }
     m_currentLayer = SelectLayer(layerNum, staff);
 
     m_isLayerInitialized = true;
