@@ -9,6 +9,10 @@
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
+
+//----------------------------------------------------------------------------
+
 #include "doc.h"
 #include "floatingobject.h"
 #include "slur.h"
@@ -113,7 +117,10 @@ FunctorCode AdjustSlursFunctor::VisitStaffAlignment(StaffAlignment *staffAlignme
         }
     }
 
-    // Adjust outer slurs w.r.t. inner slurs
+    // Adjust outer slurs w.r.t. inner slurs: innermost first (a slur holding another outer slur holds more inner
+    // slurs), so that each outer slur avoids its inner slurs as they will be drawn
+    std::stable_sort(innerCurveMap.begin(), innerCurveMap.end(),
+        [](const auto &a, const auto &b) { return a.second.size() < b.second.size(); });
     for (const auto &mapEntry : innerCurveMap) {
         Slur *slur = vrv_cast<Slur *>(mapEntry.first->GetObject());
         assert(slur);
