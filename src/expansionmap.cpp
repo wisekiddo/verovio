@@ -340,6 +340,20 @@ Object *ExpansionMap::Expand(Expansion *expansion, std::set<std::string> &existi
         return prevSect;
     }
 
+    // The order's scope: its parent, or, where that is an editorial element holding none of the parts it names (an
+    // <orig> or <reg> of a <choice> of orders: Humdrum's alternative lists), the nearest ancestor that holds them. (Its
+    // parts were looked for under the <orig>, and stand beside the <choice>: the order was not followed, and the score
+    // played its bars once. MuseNote RC98)
+    const auto holdsANamedPart = [this, &expansionPlist](Object *scope) {
+        for (const std::string &ref : expansionPlist) {
+            if (this->FindWritten(scope, (ref.rfind("#", 0) == 0) ? ref.substr(1) : ref)) return true;
+        }
+        return false;
+    };
+    while (parent->IsEditorialElement() && parent->GetParent() && !holdsANamedPart(parent)) {
+        parent = parent->GetParent();
+    }
+
     assert(prevSect);
     assert(prevSect->GetParent());
 
