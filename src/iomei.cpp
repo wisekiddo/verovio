@@ -3611,6 +3611,14 @@ bool MEIInput::Import(const std::string &mei)
         pugi::xml_document doc;
         doc.load_string(mei.c_str(), (pugi::parse_comments | pugi::parse_default) & ~pugi::parse_eol);
         pugi::xml_node root = doc.first_child();
+        // The objects made for the file, and for what is laid out from it, take ids past the ones it holds: a file
+        // written by a load under the seed this one runs with holds the ids the sequence would give again (MuseNote
+        // RC102: the reader's views from its own MEI held ids twice)
+        std::vector<std::string> ids;
+        for (const pugi::xpath_node &id : doc.select_nodes("//@*[name()='xml:id']")) {
+            ids.push_back(id.attribute().value());
+        }
+        Object::ContinuePastIDs(ids);
         if (m_deserializing) {
             m_doc->ResetToSerialization();
             m_meiversion = MEI_CURRENT_VERSION;

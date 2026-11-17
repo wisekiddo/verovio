@@ -318,6 +318,8 @@ void Toolkit::PassMidiOptionsOn()
 
 bool Toolkit::SetMidiDoc()
 {
+    // (the document for playback is made on the main document's place in the id sequence: MuseNote RC102)
+    DocIDScope ids(m_doc);
     // Refused already: said again, in this call's log
     if (!m_midiDocRefusal.empty()) {
         LogError("%s", m_midiDocRefusal.c_str());
@@ -584,6 +586,10 @@ void Toolkit::SetViewAndEditor()
 
 bool Toolkit::LoadData(const std::string &data, bool resetLogBuffer)
 {
+    // A new document starts where the thread's counter is (a seed set with the options sets it), and keeps its own
+    // place in the sequence from there (MuseNote RC102)
+    m_doc.m_hasIDCounter = false;
+    DocIDScope ids(m_doc);
     const Resources &resources = m_doc.GetResources();
     if (!resources.Ok()) {
         LogError("The data cannot be loaded because the font resources are not available");
@@ -1005,6 +1011,7 @@ std::string Toolkit::GetMEI(const std::string &jsonOptions)
 
 std::string Toolkit::GetMEI(const std::string &jsonOptions, bool withOrderOfPlay)
 {
+    DocIDScope ids(m_doc);
     bool scoreBased = true;
     bool basic = false;
     bool ignoreHeader = false;
@@ -1608,6 +1615,7 @@ std::string Toolkit::GetExpansionIdsForElement(const std::string &xmlId)
 
 bool Toolkit::Edit(const std::string &editorAction)
 {
+    DocIDScope ids(m_doc);
     this->ResetLogBuffer();
 
     if (!m_editorToolkit) return false;
@@ -1683,6 +1691,7 @@ void Toolkit::LogRedirectStop()
 
 void Toolkit::RedoLayout(const std::string &jsonOptions)
 {
+    DocIDScope ids(m_doc);
     bool resetCache = true;
 
     jsonxx::Object json;
@@ -1727,6 +1736,7 @@ void Toolkit::RedoLayout(const std::string &jsonOptions)
 
 void Toolkit::RedoPagePitchPosLayout()
 {
+    DocIDScope ids(m_doc);
     this->ResetLogBuffer();
 
     Page *page = m_doc.GetDrawingPage();
@@ -1741,6 +1751,7 @@ void Toolkit::RedoPagePitchPosLayout()
 
 bool Toolkit::RenderToDeviceContext(int pageNo, DeviceContext *deviceContext)
 {
+    DocIDScope ids(m_doc);
     if (pageNo > this->GetPageCount()) {
         LogWarning("Page %d does not exist", pageNo);
         return false;

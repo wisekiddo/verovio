@@ -645,6 +645,14 @@ public:
      */
     bool m_writeOrderOnly = false;
 
+    /**
+     * This document's place in the id sequence, which the ids of the objects made for it continue whatever another
+     * document or a seed did to the thread's counter since (DocIDScope; MuseNote patch 88, RC102)
+     */
+    bool m_hasIDCounter = false;
+    uint32_t m_idCounter = 0;
+    int m_idScopes = 0;
+
 private:
     /**
      * The type of document indicates how to deal with the layout information.
@@ -771,6 +779,28 @@ private:
 
     /** Facsimile information */
     Facsimile *m_facsimile;
+};
+
+//----------------------------------------------------------------------------
+// DocIDScope
+//----------------------------------------------------------------------------
+
+/**
+ * The ids of the objects made for a document while the scope lasts continue the document's own place in the id
+ * sequence, and the scope keeps where they got to (MuseNote patch 88, RC102). Ids come from one counter per thread,
+ * which another document's seeded load sets back, and which is another thread's when a Dart isolate's next message
+ * runs there: a re-layout then gave new lines and pages ids the document's notes hold. Only the outermost scope on a
+ * document swaps (a load, a re-layout, the drawing of a page, the document for playback, the export, an edit).
+ */
+class DocIDScope {
+public:
+    explicit DocIDScope(Doc &doc);
+    ~DocIDScope();
+    DocIDScope(const DocIDScope &) = delete;
+    DocIDScope &operator=(const DocIDScope &) = delete;
+
+private:
+    Doc &m_doc;
 };
 
 } // namespace vrv

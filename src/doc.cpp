@@ -2604,4 +2604,21 @@ FunctorCode Doc::AcceptEnd(ConstFunctor &functor) const
     return functor.VisitDocEnd(this);
 }
 
+//----------------------------------------------------------------------------
+// DocIDScope
+//----------------------------------------------------------------------------
+
+DocIDScope::DocIDScope(Doc &doc) : m_doc(doc)
+{
+    if ((m_doc.m_idScopes++ == 0) && m_doc.m_hasIDCounter) Object::ContinueIDs(m_doc.m_idCounter);
+}
+
+DocIDScope::~DocIDScope()
+{
+    if (--m_doc.m_idScopes == 0) {
+        m_doc.m_idCounter = Object::GetIDCounter();
+        m_doc.m_hasIDCounter = true;
+    }
+}
+
 } // namespace vrv

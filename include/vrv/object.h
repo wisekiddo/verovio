@@ -771,6 +771,20 @@ public:
     static uint32_t GetIDCounter() { return s_xmlIDCounter; }
     static void SetIDCounter(uint32_t counter) { s_xmlIDCounter = counter; }
 
+    /**
+     * Continue the id sequence from [counter] on this thread. A thread that has built no object yet does not then
+     * replace it with a random seed on its first (MuseNote patch 88, RC102)
+     */
+    static void ContinueIDs(uint32_t counter);
+
+    /**
+     * Move the id counter past the ids of the generated form among [ids] (a letter, then the hash of a counter in base
+     * 36): to the start of the widest stretch of the sequence none of them is in. A document read from a file that a
+     * load under the same seed wrote then gives the objects it makes ids the file does not hold (MuseNote patch 88,
+     * RC102)
+     */
+    static void ContinuePastIDs(const std::vector<std::string> &ids);
+
     static std::string GenerateHashID();
 
     static uint32_t Hash(uint32_t number, bool reverse = false);

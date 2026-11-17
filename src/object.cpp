@@ -9,8 +9,10 @@
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
 #include <cassert>
 #include <climits>
+#include <cstdint>
 #include <iostream>
 #include <math.h>
 #include <random>
@@ -1277,6 +1279,50 @@ void Object::SeedID(uint32_t seed)
         s_xmlIDCounter = Object::Hash(seed);
     }
     s_xmlIDSeeded = true;
+}
+
+void Object::ContinueIDs(uint32_t counter)
+{
+    s_xmlIDCounter = counter;
+    s_xmlIDSeeded = true;
+}
+
+void Object::ContinuePastIDs(const std::vector<std::string> &ids)
+{
+    // The place in the sequence of each id of the generated form: GenerateID writes 'a' + (counter % 26), then the hash
+    // of the counter it moves to, in base 36 with no leading zero (BaseEncodeInt)
+    std::vector<uint32_t> places;
+    for (const std::string &id : ids) {
+        if ((id.size() < 2) || (id.size() > 8) || (id[0] < 'a') || (id[0] > 'z')) continue;
+        if ((id.size() > 2) && (id[1] == '0')) continue;
+        uint64_t value = 0;
+        bool generated = true;
+        for (size_t i = 1; generated && (i < id.size()); ++i) {
+            const char c = id[i];
+            const int digit = ((c >= '0') && (c <= '9')) ? (c - '0') : (((c >= 'a') && (c <= 'z')) ? (c - 'a' + 10) : -1);
+            generated = (digit >= 0);
+            value = value * 36 + std::max(digit, 0);
+            generated = generated && (value <= UINT32_MAX);
+        }
+        if (!generated) continue;
+        const uint32_t place = Object::Hash(static_cast<uint32_t>(value), true);
+        if (id[0] != static_cast<char>('a' + ((place - 1) % 26))) continue;
+        places.push_back(place);
+    }
+    if (places.empty()) return;
+    std::sort(places.begin(), places.end());
+    places.erase(std::unique(places.begin(), places.end()), places.end());
+    // The widest stretch between two places, the one past the last place and round to the first included (unsigned
+    // arithmetic wraps round): the counter goes to the place it starts after
+    size_t widest = places.size() - 1;
+    uint32_t widestLength = places.front() - places.back();
+    for (size_t i = 0; (i + 1) < places.size(); ++i) {
+        if (places.at(i + 1) - places.at(i) > widestLength) {
+            widestLength = places.at(i + 1) - places.at(i);
+            widest = i;
+        }
+    }
+    Object::ContinueIDs(places.at(widest));
 }
 
 std::string Object::GenerateHashID()
