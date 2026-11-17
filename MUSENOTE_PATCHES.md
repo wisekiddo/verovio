@@ -2989,6 +2989,81 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 97. A bar is full by its longest voice (tb.44)
+
+Found by MuseNote plan V3_2_0_66's export gate (root cause RC116). The MusicXML reader marked a bar not full
+(`metcon="false"`) by where its cursor stood at the bar's end, which is where the voice written last ends; the bar's
+longest voice was computed a few lines later, for its right barline. A bar whose voice written last ends early (All I
+Ask of You's MusicXML export: voice 2, a half rest, written after voice 1's full bar) was marked not full. The bar's
+time, its longest voice's, is now taken first and decides it.
+
+Parity, against patch 95 alone: 69 of 22,674 outputs differ, the MEI of 23 songs and their locator MEIs, by
+`metcon` only: 23 bars lose `metcon="false"` (full by their longest voice), 14 gain it (a voice runs past the meter
+while the cursor ended on it: an overfull bar). No page, MIDI, timemap or pitch map changes, and no note moves.
+
+**Cases**: `test/native/test_tb44_voice_layers_engine.cpp`: a whole note, a backup, and a half rest of voice 2 written
+last make a full bar; a bar of one half note in 4/4 is still not full. The first fails on tb.43; the break (the cursor
+again) caught.
+
+**Upstream status**: not offered.
+
+### 96. A staff is as long as its longest layer, each layer filled to it, in the Humdrum export (tb.44)
+
+Found by MuseNote plan V3_2_0_66's export gate (root cause RC115). `Tool_mei2hum::parseStaff` (and its mensural twin)
+took a staff's length from its first layer: a staff whose first-written layer is the shorter ended early, and the next
+measure overwrote its last beats (`.ZZZ` tokens, rests of negative length). The MusicXML reader makes a bar's layers in
+the order its voices first appear, so a bar that starts with voice 2 lists layer 2 first: In Your Own Sweet Way's
+Humdrum export, garbled from bar 21. A staff is now as long as its longest layer, and each layer shorter than it is
+filled to its end with a rest that is not seen (`ryy`): the staff's length alone was not enough, since a layer left
+short ran its spine out of step with the others (I Just Can't Wait to Be King: two layers of two beats beside one of
+four, then a bar of two; their spines merged before the barline). The measure's filling of a short staff, which
+reached only its first spine, had hidden that where the first layer was the short one. (The mensural path writes every
+length as 0 in the case tried, so it cannot show the fault there; it takes the staff's length by the same rule.)
+
+No output of the parity set changes: the converter writes none of them. MuseNote's export gate (every song's Humdrum
+export, read back by the engine), against tb.43: Goldfinger and its v2, English Country Garden and How to Save a Life
+now play as their songs; no song plays worse. (The gate's census of element kinds counts more unseen rests.)
+
+**Cases**: `test/native/test_mei_to_humdrum_engine.cpp`: a staff whose first layer, layer 2 or layer 1, is the
+shorter converts with no `ZZZ` and no length below 0, and plays as written when read back; and two short layers
+beside a full one, then a bar of two, play as written read back. The first fails on tb.43, the last with the staff's
+length alone: both breaks caught.
+
+**Upstream status**: not offered.
+
+### 95. A note goes into its own voice's layer (tb.44)
+
+Found by MuseNote plan V3_2_0_66, reading the bars of its census of bar times (root cause RC112; finding W73). The
+MusicXML reader took a note's layer from its `<voice>` and `<staff>` only at a bar's start and after a `<backup>`
+(`SelectLayer`, `m_isLayerInitialized`); any other note went into the layer of the note before it. A voice that begins
+or resumes where the cursor already is needs no backup in MusicXML: Big Girls Don't Cry writes voice 1's last rest
+right after voice 2's notes, both at the third beat's end, and the engine put the rest into voice 2's layer, which then
+held five quarters in a bar of four (the bar played five). A node of another voice than the current layer's now goes
+to that voice's layer: on its own staff, or, where the voice has none there yet but one on another staff of the bar,
+that one (the note drawn cross-staff, as its voice's other notes there are). A node of the current voice, or one that
+names none, stays in the current layer, as before: a note of the voice on another staff is drawn there, cross-staff
+(placing every voiced node by its staff, as the patch first did, took cross-staff notes off their voice: an MEI's
+cross-staff notes exported to MusicXML and read back, 16 of 18 lost).
+
+Parity: 55 of 22,674 outputs differ, all of the 9 songs that write a voice change with no backup (20 bars): each
+keeps its notes and pitches, its voices now in their own layers. Six play their bars at the file's length again (Big
+Girls Don't Cry 303 quarters, now 300; How to Save a Life 518, now 508; Your Song and its v2 5 21/32 fewer; Paper Planes;
+Chaka Khan), three only change layers (In Your Own Sweet Way, All I Ask of You, The Winner Takes It All). Chaka Khan's
+MIDI has 3 note-ons fewer: unisons of its two voices now struck at one time on one channel, every note in the
+timemap as before. The annotation locator: 64 notes (74 by source ids) moved from another voice's layer to their own,
+and 629 generated ids renumber after them; MuseNote's resolver places 2,472 of 2,517 marks of the 3.2.0 kind on their
+notes, 32 not at all, 13 on a note of the same pitch and length in the same bar. Seeded ids 3,177 of 3,177; read back
+from MEI 3,571 of 3,571.
+
+**Cases**: `test/native/test_tb44_voice_layers_engine.cpp` in MuseNote's `corelib/verovio`, three: two voices written
+with a voice change and no backup read the same layers, notes and MIDI as the same voices written one after the other
+with a backup, on one staff and on two, each layer two half notes; a note of the current voice on another staff stays
+in its layer with its staff; a note of another voice on a staff its voice has no layer on joins the voice's layer,
+drawn there, the same as written voice by voice. The first and third fail on tb.43; three breaks caught (tb.43's early
+return; every voiced node placed by its staff; no layer of the voice on another staff looked for).
+
+**Upstream status**: not offered.
+
 ### 94. A multi-bar rest's own barlines and chord symbols are read with it (tb.43)
 
 Found by MuseNote plan V3_2_0_29's export round trip (root causes RC110 and RC111; findings W43, W95, W96). Two faults
