@@ -1796,12 +1796,13 @@ namespace abc {
         }
         const bool isBoth = (before > 0) && (after > 0);
         // (how often a repeat is played is said by the colons of its end, or of its start)
-        int times = std::min(before + 1, 100);
+        // (as many as the colons say: they were read as a hundred at most, MuseNote RC93)
+        int times = before + 1;
         if (before > 0) {
             times = std::max(times, voice.m_startTimes);
             voice.m_startTimes = 2;
         }
-        if (after > 0) voice.m_startTimes = std::min(after + 1, 100);
+        if (after > 0) voice.m_startTimes = after + 1;
 
         Bar &bar = voice.Current();
         if (bar.IsEmpty()) {
@@ -3638,7 +3639,10 @@ namespace {
             // the order as letters: a number repeats the letter or the group before it
             std::vector<std::string> groups{ "" };
             const std::string &said = tune.m_parts;
-            for (size_t i = 0; (i < said.size()) && (groups.front().size() < 2000); ++i) {
+            // (the letters are read until they name more parts than any order followed, and such an order is not
+            // followed: the score is not played. They were cut at 2,000, and a repeat at a hundred: MuseNote RC93)
+            const auto pastOrder = [](const std::string &letters) { return letters.size() > OrderOfPlay::s_maxCost; };
+            for (size_t i = 0; (i < said.size()) && !pastOrder(groups.front()); ++i) {
                 const char c = said[i];
                 std::string unit;
                 if (c == '(') {
@@ -3658,8 +3662,9 @@ namespace {
                 size_t after = i + 1;
                 int repeat = abc::IsDigit((after < said.size()) ? said[after] : ' ') ? abc::ReadNumber(said, after) : 1;
                 if (repeat != 1) i = after - 1;
-                repeat = std::clamp(repeat, 1, 100);
-                for (int r = 0; (r < repeat) && (groups.back().size() < 2000); ++r) groups.back() += unit;
+                // (a count too long to read is more than any order plays)
+                repeat = (repeat < 0) ? INT_MAX : std::max(repeat, 1);
+                for (int r = 0; (r < repeat) && !pastOrder(groups.back()); ++r) groups.back() += unit;
             }
             for (const char label : groups.front()) {
                 if (stretches.contains(label)) playlist.push_back(stretches.at(label));

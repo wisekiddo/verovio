@@ -2504,9 +2504,9 @@ void MusicXmlInput::ReadMusicXmlBarLine(pugi::xml_node node, Measure *measure, c
     int repeatTimes = 1;
     bool repeatAfterJump = false;
     if (repeat) {
-        // (more than a hundred is no count of a repeat: a hundred million of them never came back from the
-        // order being written)
-        repeatTimes = std::min(repeat.node().attribute("times").as_int(2), 100);
+        // (as many as it says: an order is written up to the most that is played, and past that the score is not
+        // played. A count of more than a hundred was read as a hundred: MuseNote RC93)
+        repeatTimes = repeat.node().attribute("times").as_int(2);
         repeatAfterJump = repeat.node().attribute("after-jump").as_bool(false);
     }
     if (!barStyle.empty()) {

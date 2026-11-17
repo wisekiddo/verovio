@@ -23,6 +23,7 @@
 #include "clef.h"
 #include "dir.h"
 #include "editorial.h"
+#include "functor.h"
 #include "ending.h"
 #include "comparison.h"
 #include "expansion.h"
@@ -53,10 +54,9 @@ namespace vrv {
 
 bool OrderOfPlay::Add(const std::string &ref)
 {
-    if (m_leastCost > s_maxCost) return false;
+    // (each reference plays one element at the least)
+    if (m_refs.size() > s_maxCost) return false;
     m_refs.push_back(ref);
-    // named t times, then once more: (t + 1) squared is 2t + 1 more than t squared
-    m_leastCost += 2 * m_timesNamed[ref]++ + 1;
     return true;
 }
 
@@ -73,8 +73,10 @@ ExpansionMap::~ExpansionMap() {}
 
 void ExpansionMap::Reset()
 {
-    m_map.clear();
+    m_groupOf.clear();
+    m_groups.clear();
     m_isProcessed = false;
+    m_isRefused = false;
     this->ClearWrittenContexts();
 }
 
@@ -143,7 +145,70 @@ namespace {
         return copy;
     }
 
+    /** Each object a walk meets, by its id */
+    class RecordIdsFunctor : public Functor {
+    public:
+        explicit RecordIdsFunctor(std::map<std::string, std::vector<Object *>> &ids) : m_ids(ids) {}
+        bool ImplementsEndInterface() const override { return false; }
+        FunctorCode VisitObject(Object *object) override
+        {
+            m_ids[object->GetID()].push_back(object);
+            return FUNCTOR_CONTINUE;
+        }
+
+    private:
+        std::map<std::string, std::vector<Object *>> &m_ids;
+    };
+
 } // namespace
+
+void ExpansionMap::RecordWrittenIds(Object *root)
+{
+    this->ClearWrittenIds();
+    // every object, and those a walk that passes over what is hidden meets (as FindDescendantByID's walk does)
+    RecordIdsFunctor every(m_writtenIds);
+    every.SetVisibleOnly(false);
+    root->Process(every);
+    RecordIdsFunctor shown(m_shownIds);
+    root->Process(shown);
+}
+
+void ExpansionMap::ClearWrittenIds()
+{
+    m_writtenIds.clear();
+    m_shownIds.clear();
+    m_idsHeldTwice.clear();
+}
+
+void ExpansionMap::RecordMade(Object *object)
+{
+    // (only while the document's ids are recorded; as made, not as met by a walk of what is shown: such an id is
+    // looked for as before)
+    if (m_writtenIds.empty()) return;
+    m_writtenIds[object->GetID()].push_back(object);
+    for (Object *child : object->GetChildren()) this->RecordMade(child);
+}
+
+Object *ExpansionMap::FindWritten(Object *parent, const std::string &id)
+{
+    // No object has it: nothing is found (every object of the document is recorded, and every one Expand makes)
+    const auto written = m_writtenIds.find(id);
+    if (written == m_writtenIds.end()) return NULL;
+    // One object has it, which a walk of what is shown met: found where it stands under [parent]. (An id held twice,
+    // which no document should do, one under something hidden, or one Expand made: looked for as before)
+    if ((written->second.size() > 1) && m_idsHeldTwice.insert(id).second) {
+        LogWarning("ExpansionMap::Expand: the id '%s' is held by %d elements", id.c_str(), (int)written->second.size());
+    }
+    const auto shown = m_shownIds.find(id);
+    if ((written->second.size() != 1) || (shown == m_shownIds.end()) || (shown->second.size() != 1)) {
+        return parent->FindDescendantByID(id);
+    }
+    Object *object = shown->second.front();
+    for (const Object *up = object->GetParent(); up; up = up->GetParent()) {
+        if (up == parent) return object;
+    }
+    return NULL;
+}
 
 void ExpansionMap::ClearWrittenContexts()
 {
@@ -255,10 +320,13 @@ void ExpansionMap::RestateWrittenContext(Object *previous, Object *part)
         staffDef->SetTransSemi(wanted.first);
         staffDef->SetTransDiat(wanted.second);
     }
-    if (restated) parent->InsertBefore(part, restated);
+    if (restated) {
+        parent->InsertBefore(part, restated);
+        this->RecordMade(restated);
+    }
 }
 
-Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList, Object *prevSect,
+Object *ExpansionMap::Expand(Expansion *expansion, std::set<std::string> &existingList, Object *prevSect,
     xsdAnyURI_List &deletionList, bool deleteList = false)
 {
     assert(expansion);
@@ -278,7 +346,7 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
     Object *insertHere = nullptr; // cloned parent container
 
     // If expansion parent already exists, create a new empty such element
-    if (std::find(existingList.begin(), existingList.end(), parent->GetID()) != existingList.end()) {
+    if (existingList.contains(parent->GetID())) {
         Object *newContainer;
         // check type of expansion parent
         if (parent->Is(SECTION)) {
@@ -300,17 +368,23 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
         }
 
         assert(parent->GetParent());
-        Object *referenceChild = parent->GetDirectChild(parent->GetParent(), prevSect);
+        // The part of the parent's parent that prevSect stands in, by prevSect's ancestors. (GetDirectChild searched
+        // all of the parent's parent first, which grows with every copy: MuseNote RC93)
+        Object *referenceChild = prevSect;
+        while (referenceChild && (referenceChild->GetParent() != parent->GetParent())) {
+            referenceChild = referenceChild->GetParent();
+        }
         assert(referenceChild);
         parent->GetParent()->InsertAfter(referenceChild, newContainer);
         GeneratePredictableIDs(parent, newContainer);
+        this->RecordMade(newContainer);
         LogDebug("Creating new container <%s> for expansion element %s", newContainer->GetClassName().c_str(),
             newContainer->GetID().c_str());
 
         insertHere = newContainer;
     }
-    else if (std::find(existingList.begin(), existingList.end(), parent->GetID()) == existingList.end()) {
-        existingList.push_back(parent->GetID());
+    else {
+        existingList.insert(parent->GetID());
     }
 
     // find and add all relevant (and new) expansion sibling ids to deletionList
@@ -325,7 +399,7 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
     for (std::string id : expansionPlist) {
         LogDebug("Looking for element in @plist: %s", id.c_str());
         if (id.rfind("#", 0) == 0) id = id.substr(1, id.size() - 1); // remove leading hash from id
-        Object *currSect = parent->FindDescendantByID(id); // find section pointer for id string
+        Object *currSect = this->FindWritten(parent, id); // find section pointer for id string
         if (currSect == NULL) {
             // Warn about referenced element not found and continue
             LogWarning("ExpansionMap::Expand: Element referenced in @plist not found: %s", id.c_str());
@@ -356,8 +430,7 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
         }
         else {
             // id already in existingList or currSect is not in expansion parent, clone object, update ids, insert it
-            if (std::find(existingList.begin(), existingList.end(), id) != existingList.end()
-                || (insertHere != NULL && currSect->GetParent() != insertHere)) {
+            if (existingList.contains(id) || (insertHere != NULL && currSect->GetParent() != insertHere)) {
 
                 // clone current section/ending/rdg/lem and rename it, adding -"rend2" for the first repetition etc.
                 Object *clonedObject = currSect->Clone();
@@ -377,6 +450,7 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
 
                 // go through cloned objects, find TimePointing/SpanningInterface, PListInterface, LinkingInterface
                 this->UpdateIDs(clonedObject);
+                this->RecordMade(clonedObject);
 
                 LogDebug("Cloning element in @plist: %s", clonedObject->GetID().c_str());
 
@@ -398,7 +472,7 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
                 this->RestateWrittenContext(prevSect, clonedObject);
 
                 prevSect = clonedObject;
-                existingList.push_back(clonedObject->GetID());
+                existingList.insert(clonedObject->GetID());
             }
             else { // add to existingList, remember previous element, re-order if necessary
 
@@ -436,10 +510,10 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
                 this->RestateWrittenContext(prevSect, currSect);
 
                 prevSect = currSect;
-                existingList.push_back(id);
+                existingList.insert(id);
                 // An ending a part stands inside is played with it, not removed as unplayed (MuseNote RC62)
                 for (Object *up = currSect->GetParent(); up && (up != parent); up = up->GetParent()) {
-                    existingList.push_back(up->GetID());
+                    existingList.insert(up->GetID());
                 }
             }
         }
@@ -448,9 +522,8 @@ Object *ExpansionMap::Expand(Expansion *expansion, xsdAnyURI_List &existingList,
     // at the very end, remove unused sections from structure if not in existingList
     if (deleteList) {
         for (std::string del : deletionList) {
-            long cnt = std::count(existingList.begin(), existingList.end(), del);
-            if (cnt == 0) {
-                Object *currSect = parent->FindDescendantByID(del); // find section pointer for id string
+            if (!existingList.contains(del)) {
+                Object *currSect = this->FindWritten(parent, del); // find section pointer for id string
                 // Removed already, with a section that holds it and was not played either (it was read)
                 if (!currSect) continue;
 
@@ -474,7 +547,7 @@ bool ExpansionMap::UpdateIDs(Object *object)
             // @startid
             std::string oldStartId = interface->GetStartid();
             if (oldStartId.rfind("#", 0) == 0) oldStartId = oldStartId.substr(1, oldStartId.size() - 1);
-            std::string newStartId = this->GetExpansionIDsForElement(oldStartId).back();
+            std::string newStartId = this->LastOf(oldStartId);
             if (!newStartId.empty()) interface->SetStartid("#" + newStartId);
         }
         if (o->HasInterface(INTERFACE_TIME_SPANNING)) {
@@ -483,12 +556,12 @@ bool ExpansionMap::UpdateIDs(Object *object)
             // @startid
             std::string oldStartId = interface->GetStartid();
             if (oldStartId.rfind("#", 0) == 0) oldStartId = oldStartId.substr(1, oldStartId.size() - 1);
-            std::string newStartId = this->GetExpansionIDsForElement(oldStartId).back();
+            std::string newStartId = this->LastOf(oldStartId);
             if (!newStartId.empty()) interface->SetStartid("#" + newStartId);
             // @endid
             oldStartId = interface->GetEndid();
             if (oldStartId.rfind("#", 0) == 0) oldStartId = oldStartId.substr(1, oldStartId.size() - 1);
-            std::string newEndId = this->GetExpansionIDsForElement(oldStartId).back();
+            std::string newEndId = this->LastOf(oldStartId);
             if (!newEndId.empty()) interface->SetEndid("#" + newEndId);
         }
         if (o->HasInterface(INTERFACE_PLIST)) {
@@ -498,7 +571,7 @@ bool ExpansionMap::UpdateIDs(Object *object)
             xsdAnyURI_List newList;
             for (std::string oldRefString : oldList) {
                 if (oldRefString.rfind("#", 0) == 0) oldRefString = oldRefString.substr(1, oldRefString.size() - 1);
-                newList.push_back("#" + this->GetExpansionIDsForElement(oldRefString).back());
+                newList.push_back("#" + this->LastOf(oldRefString));
             }
             interface->SetPlist(newList);
         }
@@ -508,27 +581,27 @@ bool ExpansionMap::UpdateIDs(Object *object)
             // @sameas
             std::string oldIdString = interface->GetSameas();
             if (oldIdString.rfind("#", 0) == 0) oldIdString = oldIdString.substr(1, oldIdString.size() - 1);
-            std::string newIdString = this->GetExpansionIDsForElement(oldIdString).back();
+            std::string newIdString = this->LastOf(oldIdString);
             if (!newIdString.empty()) interface->SetSameas("#" + newIdString);
             // @next
             oldIdString = interface->GetNext();
             if (oldIdString.rfind("#", 0) == 0) oldIdString = oldIdString.substr(1, oldIdString.size() - 1);
-            newIdString = this->GetExpansionIDsForElement(oldIdString).back();
+            newIdString = this->LastOf(oldIdString);
             if (!newIdString.empty()) interface->SetNext("#" + newIdString);
             // @prev
             oldIdString = interface->GetPrev();
             if (oldIdString.rfind("#", 0) == 0) oldIdString = oldIdString.substr(1, oldIdString.size() - 1);
-            newIdString = this->GetExpansionIDsForElement(oldIdString).back();
+            newIdString = this->LastOf(oldIdString);
             if (!newIdString.empty()) interface->SetPrev("#" + newIdString);
             // @copyof
             oldIdString = interface->GetCopyof();
             if (oldIdString.rfind("#", 0) == 0) oldIdString = oldIdString.substr(1, oldIdString.size() - 1);
-            newIdString = this->GetExpansionIDsForElement(oldIdString).back();
+            newIdString = this->LastOf(oldIdString);
             if (!newIdString.empty()) interface->SetCopyof("#" + newIdString);
             // @synch
             oldIdString = interface->GetSynch();
             if (oldIdString.rfind("#", 0) == 0) oldIdString = oldIdString.substr(1, oldIdString.size() - 1);
-            newIdString = this->GetExpansionIDsForElement(oldIdString).back();
+            newIdString = this->LastOf(oldIdString);
             if (!newIdString.empty()) interface->SetSynch("#" + newIdString);
             // @corresp is already handle by the Object::Clone and LinkingInterface::AddBackLink
         }
@@ -603,13 +676,13 @@ void ExpansionMap::FollowSpansInOrder(Object *root, const std::map<std::string, 
     std::map<std::string, std::map<int, Object *>> copiesOf;
     std::vector<std::pair<Object *, int>> spans;
     for (int k = 0; k < count; ++k) {
-        const auto bar = writtenBars.find(this->GetExpansionIDsForElement(played[k]->GetID()).front());
+        const auto bar = writtenBars.find(this->FirstOf(played[k]->GetID()));
         if (bar != writtenBars.end()) written[k] = bar->second;
         std::vector<Object *> elements;
         CollectWithIds(played[k], elements);
         for (Object *element : elements) {
             byId[element->GetID()] = { element, k };
-            copiesOf[this->GetExpansionIDsForElement(element->GetID()).front()].emplace(k, element);
+            copiesOf[this->FirstOf(element->GetID())].emplace(k, element);
             if (element->HasInterface(INTERFACE_TIME_SPANNING)) spans.push_back({ element, k });
         }
     }
@@ -633,7 +706,7 @@ void ExpansionMap::FollowSpansInOrder(Object *root, const std::map<std::string, 
         if (span->HasEndid()) {
             const auto found = byId.find(WithoutHash(span->GetEndid()));
             if (found == byId.end()) continue;
-            endWritten = this->GetExpansionIDsForElement(found->first).front();
+            endWritten = this->FirstOf(found->first);
             endBar = written[found->second.second];
         }
         else if (span->HasTstamp2()) {
@@ -686,7 +759,7 @@ void ExpansionMap::FollowSpansInOrder(Object *root, const std::map<std::string, 
                     if (found == byId.end()) continue;
                     const auto way = passed.find(written[found->second.second]);
                     if (way == passed.end()) continue;
-                    const auto copies = copiesOf.find(this->GetExpansionIDsForElement(found->first).front());
+                    const auto copies = copiesOf.find(this->FirstOf(found->first));
                     if (copies == copiesOf.end()) continue;
                     const auto copy = copies->second.find(way->second);
                     if (copy != copies->second.end()) refs.back() = "#" + copy->second->GetID();
@@ -734,43 +807,49 @@ void ExpansionMap::FollowSpansInOrder(Object *root, const std::map<std::string, 
 
 bool ExpansionMap::AddExpandedIDToExpansionMap(const std::string &origXmlId, std::string newXmlId)
 {
-    auto list = m_map.find(origXmlId);
-    if (list != m_map.end()) {
-        list->second.push_back(newXmlId); // add to existing key
-        for (std::string s : list->second) {
-            // (Every key but the one the copy is of: a section that holds a copy is a copy's copy, whose own list
-            // was written to while it was read, and the original's was not written)
-            if (s != origXmlId && s != list->second.back()) {
-                m_map.at(s).push_back(newXmlId); // add to middle keys
-            }
-        }
-        m_map.insert({ newXmlId, m_map.at(origXmlId) }); // add new as key
+    // The copy joins the group of what it copies (a copy's copy too), or starts one with it. An id already in a group
+    // stays in its own
+    const auto group = m_groupOf.find(origXmlId);
+    if (group != m_groupOf.end()) {
+        m_groups[group->second].push_back(newXmlId);
+        m_groupOf.emplace(newXmlId, group->second);
     }
     else {
-        std::vector<std::string> s;
-        s.push_back(origXmlId);
-        s.push_back(newXmlId);
-        m_map.insert({ origXmlId, s });
-        m_map.insert({ newXmlId, s });
+        m_groupOf.emplace(origXmlId, m_groups.size());
+        m_groupOf.emplace(newXmlId, m_groups.size());
+        m_groups.push_back({ origXmlId, newXmlId });
     }
     return true;
 }
 
-std::vector<std::string> ExpansionMap::GetExpansionIDsForElement(const std::string &xmlId)
+std::vector<std::string> ExpansionMap::GetExpansionIDsForElement(const std::string &xmlId) const
 {
-    if (m_map.contains(xmlId)) {
-        return m_map.at(xmlId);
-    }
-    else {
-        std::vector<std::string> ids;
-        ids.push_back(xmlId.c_str());
-        return ids;
-    }
+    const auto group = m_groupOf.find(xmlId);
+    if (group != m_groupOf.end()) return m_groups[group->second];
+    return { xmlId };
+}
+
+std::string ExpansionMap::FirstOf(const std::string &xmlId) const
+{
+    const auto group = m_groupOf.find(xmlId);
+    return (group != m_groupOf.end()) ? m_groups[group->second].front() : xmlId;
+}
+
+std::string ExpansionMap::LastOf(const std::string &xmlId) const
+{
+    const auto group = m_groupOf.find(xmlId);
+    return (group != m_groupOf.end()) ? m_groups[group->second].back() : xmlId;
+}
+
+size_t ExpansionMap::CountOf(const std::string &xmlId) const
+{
+    const auto group = m_groupOf.find(xmlId);
+    return (group != m_groupOf.end()) ? m_groups[group->second].size() : 1;
 }
 
 bool ExpansionMap::HasExpansionMap()
 {
-    return (m_map.empty()) ? false : true;
+    return !m_groupOf.empty();
 }
 
 void ExpansionMap::GetIDList(Object *object, std::vector<std::string> &idList)
@@ -784,7 +863,7 @@ void ExpansionMap::GetIDList(Object *object, std::vector<std::string> &idList)
 void ExpansionMap::GeneratePredictableIDs(Object *source, Object *target)
 {
     target->SetID(
-        source->GetID() + "-rend" + std::to_string(this->GetExpansionIDsForElement(source->GetID()).size() + 1));
+        source->GetID() + "-rend" + std::to_string(this->CountOf(source->GetID()) + 1));
 
     ArrayOfObjects sourceObjects = source->GetChildren();
     ArrayOfObjects targetObjects = target->GetChildren();
@@ -799,7 +878,8 @@ void ExpansionMap::GeneratePredictableIDs(Object *source, Object *target)
 void ExpansionMap::ToJson(std::string &output)
 {
     jsonxx::Object expansionmap;
-    for (auto &[id, ids] : m_map) {
+    for (const auto &[id, group] : m_groupOf) {
+        const std::vector<std::string> &ids = m_groups[group];
         jsonxx::Array expandedIds;
         for (auto i : ids) expandedIds << i;
         expansionmap << id << expandedIds;
@@ -1024,7 +1104,7 @@ void WriteOrderOfPlayFor(Score *score, const std::map<const Measure *, int> &rep
                 if (const auto count = order::RepeatOf(token)) times = *count;
                 afterJump = afterJump || (token == order::kAfterJump);
             }
-            part.m_repeatInfo = play::RepeatInfo(std::clamp(times, 1, 100), afterJump);
+            part.m_repeatInfo = play::RepeatInfo(std::max(times, 1), afterJump);
             startsPart = true;
         }
         part.m_jumps.insert(part.m_jumps.end(), marks.m_jumps.begin(), marks.m_jumps.end());

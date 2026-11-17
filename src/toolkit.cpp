@@ -295,6 +295,8 @@ FileFormat Toolkit::IdentifyInputFrom(const std::string &data)
 
 void Toolkit::ResetMidiDoc()
 {
+    m_midiDocRefusal.clear();
+
     // Nothing to do
     if (!m_midiDoc) return;
 
@@ -314,36 +316,52 @@ void Toolkit::PassMidiOptionsOn()
     }
 }
 
-void Toolkit::SetMidiDoc()
+bool Toolkit::SetMidiDoc()
 {
+    // Refused already: said again, in this call's log
+    if (!m_midiDocRefusal.empty()) {
+        LogError("%s", m_midiDocRefusal.c_str());
+        return false;
+    }
     // Nothing to do
-    if (m_midiDoc) return;
+    if (m_midiDoc) return true;
+
+    // The score is not played at all where it cannot be played as it says. (A document that could not be read
+    // back from its own MEI was played as loaded, unexpanded, every repeat and jump dropped, and the warning that
+    // said so was erased by the caller's next ResetLogBuffer: MuseNote RC91)
+    const auto refuse = [this](const std::string &reason) {
+        m_midiDocRefusal = "The score cannot be played: " + reason;
+        LogError("%s", m_midiDocRefusal.c_str());
+        return false;
+    };
+    const std::string pastBound = "its order of play holds more than can be played";
+    if (m_doc.m_expansionMap.IsRefused()) return refuse(pastBound);
 
     // The doc has been expanded, or the midi file must not or cannot be expanded, use the main doc
     if (m_doc.m_expansionMap.HasExpansionMap() || m_options->m_expandNever.GetValue()
         || m_doc.m_expansionMap.IsProcessed()) {
         m_midiDoc = &m_doc;
+        return true;
     }
-    else {
-        m_midiDoc = new Doc();
-        m_midiDoc->SetOptions(m_doc.GetOptions());
-        m_midiDoc->GetOptions()->m_expandAlways.SetValue(true);
-        Resources &resources = m_midiDoc->GetResourcesForModification();
-        resources.SetPath(m_doc.GetResources().GetPath());
-        resources.InitFonts();
-        MEIInput midiInput(m_midiDoc);
-        if (!midiInput.Import(this->GetMEI())) {
-            // The document cannot be read back from its own MEI (seen with the empty <staffGrp> the
-            // MusicXML importer writes for an empty <part-group>). PrepareData() on the empty document
-            // that leaves has no score to work on: play the document as loaded, unexpanded
-            LogWarning("The MIDI document could not be built, the document is played unexpanded");
-            delete m_midiDoc;
-            m_midiDoc = &m_doc;
-            return;
-        }
-        m_midiDoc->PrepareData();
-        CustomTuning::CopyCustomTunings(&m_doc, m_midiDoc);
+    Doc *midiDoc = new Doc();
+    midiDoc->SetOptions(m_doc.GetOptions());
+    midiDoc->GetOptions()->m_expandAlways.SetValue(true);
+    Resources &resources = midiDoc->GetResourcesForModification();
+    resources.SetPath(m_doc.GetResources().GetPath());
+    resources.InitFonts();
+    MEIInput midiInput(midiDoc);
+    if (!midiInput.Import(this->GetMEI())) {
+        delete midiDoc;
+        return refuse("its document for playback could not be read back from its own MEI");
     }
+    if (midiDoc->m_expansionMap.IsRefused()) {
+        delete midiDoc;
+        return refuse(pastBound);
+    }
+    m_midiDoc = midiDoc;
+    m_midiDoc->PrepareData();
+    CustomTuning::CopyCustomTunings(&m_doc, m_midiDoc);
+    return true;
 }
 
 bool Toolkit::LoadFile(const std::string &filename)
@@ -1557,11 +1575,11 @@ std::string Toolkit::GetElementAttr(const std::string &xmlId)
 
 std::string Toolkit::GetNotatedIdForElement(const std::string &xmlId)
 {
-    this->SetMidiDoc();
+    if (!this->SetMidiDoc()) return xmlId;
 
     assert(m_midiDoc);
     if (m_midiDoc->m_expansionMap.HasExpansionMap()) {
-        return m_midiDoc->m_expansionMap.GetExpansionIDsForElement(xmlId).front();
+        return m_midiDoc->m_expansionMap.FirstOf(xmlId);
     }
     else {
         return xmlId;
@@ -1570,11 +1588,8 @@ std::string Toolkit::GetNotatedIdForElement(const std::string &xmlId)
 
 std::string Toolkit::GetExpansionIdsForElement(const std::string &xmlId)
 {
-    this->SetMidiDoc();
-
-    assert(m_midiDoc);
     jsonxx::Array a;
-    if (m_midiDoc->m_expansionMap.HasExpansionMap()) {
+    if (this->SetMidiDoc() && m_midiDoc->m_expansionMap.HasExpansionMap()) {
         for (std::string id : m_midiDoc->m_expansionMap.GetExpansionIDsForElement(xmlId)) {
             a << id;
         }
@@ -1885,8 +1900,8 @@ void Toolkit::GetHumdrum(std::ostream &output)
 
 std::string Toolkit::RenderToMIDI()
 {
-    this->SetMidiDoc();
     this->ResetLogBuffer();
+    if (!this->SetMidiDoc()) return "";
 
     smf::MidiFile outputfile;
     assert(m_midiDoc);
@@ -1954,10 +1969,9 @@ std::string Toolkit::RenderToTimemap(const std::string &jsonOptions)
         }
     }
 
-    this->SetMidiDoc();
     this->ResetLogBuffer();
-
     std::string output;
+    if (!this->SetMidiDoc()) return output;
     assert(m_midiDoc);
     m_midiDoc->ExportTimemap(output, includeRests, includeMeasures, useFractions);
     return output;
@@ -1965,8 +1979,8 @@ std::string Toolkit::RenderToTimemap(const std::string &jsonOptions)
 
 std::string Toolkit::RenderToExpansionMap()
 {
-    this->SetMidiDoc();
     this->ResetLogBuffer();
+    if (!this->SetMidiDoc()) return "";
 
     std::string output;
     assert(m_midiDoc);
@@ -1976,8 +1990,8 @@ std::string Toolkit::RenderToExpansionMap()
 
 std::string Toolkit::GetElementsAtTime(int millisec)
 {
-    this->SetMidiDoc();
     this->ResetLogBuffer();
+    if (!this->SetMidiDoc()) return jsonxx::Object().json();
 
     jsonxx::Object o;
     jsonxx::Array noteArray;
@@ -2043,8 +2057,8 @@ std::string Toolkit::GetElementsAtTime(int millisec)
 
 bool Toolkit::RenderToMIDIFile(const std::string &filename)
 {
-    this->SetMidiDoc();
     this->ResetLogBuffer();
+    if (!this->SetMidiDoc()) return false;
 
     smf::MidiFile outputfile;
     assert(m_midiDoc);
@@ -2058,6 +2072,8 @@ bool Toolkit::RenderToMIDIFile(const std::string &filename)
 bool Toolkit::RenderToTimemapFile(const std::string &filename, const std::string &jsonOptions)
 {
     std::string outputString = this->RenderToTimemap(jsonOptions);
+    // (none where the score cannot be played: no file is written)
+    if (outputString.empty()) return false;
 
     std::ofstream output(filename.c_str());
     if (!output.is_open()) {
@@ -2110,8 +2126,8 @@ int Toolkit::GetPageWithElement(const std::string &xmlId)
 
 int Toolkit::GetTimeForElement(const std::string &xmlId)
 {
-    this->SetMidiDoc();
     this->ResetLogBuffer();
+    if (!this->SetMidiDoc()) return 0;
 
     assert(m_midiDoc);
     Object *element = m_midiDoc->FindDescendantByID(xmlId);
@@ -2160,8 +2176,8 @@ int Toolkit::GetTimeForElement(const std::string &xmlId)
 
 std::string Toolkit::GetTimesForElement(const std::string &xmlId)
 {
-    this->SetMidiDoc();
     this->ResetLogBuffer();
+    if (!this->SetMidiDoc()) return jsonxx::Object().json();
 
     Object *element = m_doc.FindDescendantByID(xmlId);
     jsonxx::Object o;
@@ -2217,8 +2233,8 @@ std::string Toolkit::GetTimesForElement(const std::string &xmlId)
 
 std::string Toolkit::GetMIDIValuesForElement(const std::string &xmlId)
 {
-    this->SetMidiDoc();
     this->ResetLogBuffer();
+    if (!this->SetMidiDoc()) return jsonxx::Object().json();
 
     assert(m_midiDoc);
     Object *element = m_midiDoc->FindDescendantByID(xmlId);
@@ -2260,7 +2276,7 @@ std::map<std::string, int> Toolkit::GetMIDIPitches()
         return notePitches;
     }
 
-    this->SetMidiDoc();
+    if (!this->SetMidiDoc()) return notePitches;
     assert(m_midiDoc);
 
     // The pitches are recorded while the MIDI output is generated

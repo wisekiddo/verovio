@@ -1768,15 +1768,14 @@ void Doc::ExpandExpansions()
         }
     }
 
-    // What following the order costs. A section played again is a copy of its elements, and every copy of an
-    // element is listed with all the others of it (ExpansionMap): k times played is k times k. The dearest of
-    // 2,785 real scores comes to 30,000 by this count; 200 repeat ends in a row with no start come to millions,
-    // a gigabyte and minutes from a file of 2 KB. An order that costs more than OrderOfPlay::s_maxCost is not
-    // followed at all: the score is played as it is written, once through, every repeat of it dropped and not
-    // only the dear one. (A MusicXML repeat is read as at most 100 times before it comes here: a measure marked
-    // 2,000 times is played 100 times, if the order that makes is within the cost.) The writers of an order
-    // (ExpansionMap::GenerateExpansionFor, MusicXmlInput::CreateExpansion) stop at the same limit by a count that
-    // is never more than this one; what they leave is the beginning of an order, and is refused here.
+    // What following the order costs: the elements the score holds as played. A section played again is a copy of
+    // its elements. (Every copy of an element was listed with all the others of it, k times played cost k times k,
+    // and the cost was counted so: 200 repeat ends in a row with no start came to a gigabyte and minutes from a file
+    // of 2 KB, and a repeat was read as 100 times at most. MuseNote RC93) An order that costs more than
+    // OrderOfPlay::s_maxCost is refused: the score is not played at all (it was played as it is written, once
+    // through, every repeat of it dropped, and only a log line the next call erased said so: MuseNote RC91). The
+    // writers of an order (WriteOrderOfPlay for every format, the Humdrum reader's own) stop at the same limit by a
+    // count that is never more than this one; what they leave is the beginning of an order, and is refused here.
     // Each element weighs 1 and 1 more for every 64 bytes of its id: ids of thousands of bytes, counted as short ones,
     // took a gigabyte within the limit. Ids under 64 bytes count as they did.
     // An expansion named in the order is counted as what it plays.
@@ -1791,7 +1790,7 @@ void Doc::ExpandExpansions()
     for (const auto &[id, times] : timesPlayed) weights[id] = 0;
     WeighForOrder(this, weights);
     // (In 64 bits. A reference named more times than the limit, or a section heavier than it, is past it already;
-    // else each factor is at most the limit, a product at most its cube, 10^18, and nothing wraps, on 32 bits or 64.
+    // else each factor is at most the limit, a product at most its square, and nothing wraps, on 32 bits or 64.
     // A reference that names nothing weighs 0, and is counted as nothing below that.)
     uint64_t orderCost = counted ? 0 : OrderOfPlay::s_maxCost + 1;
     for (const auto &[id, times] : timesPlayed) {
@@ -1801,12 +1800,13 @@ void Doc::ExpandExpansions()
             orderCost = OrderOfPlay::s_maxCost + 1;
             break;
         }
-        orderCost += times * times * weight;
+        orderCost += times * weight;
         if (orderCost > OrderOfPlay::s_maxCost) break;
     }
     if (orderCost > OrderOfPlay::s_maxCost) {
-        LogWarning("The order of %d sections is not followed (too many repeats): the score is played as written",
+        LogError("The order of %d sections is more than can be played: the score is not played",
             (int)startExpansion->GetPlist().size());
+        m_expansionMap.SetRefused(true);
         return;
     }
 
@@ -1816,12 +1816,14 @@ void Doc::ExpandExpansions()
         writtenBars.emplace(measure->GetID(), (int)writtenBars.size());
     }
 
-    xsdAnyURI_List existingList; // list of xml:id strings of elements already in the document
+    std::set<std::string> existingList; // the xml:id strings of elements already in the document
     xsdAnyURI_List deletionList; // list of xml:id strings of elements not cloned and to be deleted at the end
     // What the score definitions say at each part as written, before the order moves or copies any (MuseNote RC58)
     m_expansionMap.RecordWrittenContexts(startExpansion->GetFirstAncestor(SCORE) ? startExpansion->GetFirstAncestor(SCORE)
                                                                                  : static_cast<Object *>(this));
+    m_expansionMap.RecordWrittenIds(this);
     m_expansionMap.Expand(startExpansion, existingList, startExpansion, deletionList, true);
+    m_expansionMap.ClearWrittenIds();
     m_expansionMap.ClearWrittenContexts();
 
     // Every tie, slur and line of the score as played, judged by the order of play (patch 60)

@@ -11,6 +11,7 @@
 #include <list>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -43,14 +44,20 @@ struct WrittenContext {
 };
 
 /**
- * An order of play while it is written, and the least that following it can cost: each section by the times it is
- * named, squared (it holds one element at the least; the count itself is in Doc::ExpandExpansions). Whoever writes
- * an order stops when that is past what is followed. What it has written by then costs more than is followed too.
+ * An order of play while it is written, and the least that following it can cost: one element for each reference (a
+ * section holds one at the least; the count itself is in Doc::ExpandExpansions). Whoever writes an order stops when
+ * that is past what is followed. What it has written by then costs more than is followed too, and is refused.
+ * (The cost was each section by the times it is named, squared, as the expansion map's lists grew: MuseNote RC93)
  */
 class OrderOfPlay {
 public:
-    /** What following an order of play may cost */
-    static constexpr size_t s_maxCost = 1000000;
+    /**
+     * What following an order of play may cost: the elements the score holds as played. The dearest of MuseNote's
+     * 3,571 scores and inputs holds 7,819 (Piano Man); 100,000 take some 350 MB and two and a half seconds on a
+     * desktop, every played note some 17 KB. (It was 1,000,000 by the square of the times a section is played:
+     * MuseNote RC93)
+     */
+    static constexpr size_t s_maxCost = 100000;
 
     /** Adds a reference. False, and nothing added, once the order costs more than is followed */
     bool Add(const std::string &ref);
@@ -59,8 +66,6 @@ public:
 
 private:
     xsdAnyURI_List m_refs;
-    std::map<std::string, size_t> m_timesNamed;
-    size_t m_leastCost = 0;
 };
 
 /**
@@ -269,10 +274,27 @@ public:
     /**
      * Expand expansion recursively
      */
-    Object *Expand(Expansion *expansion, xsdAnyURI_List &existingList, Object *prevSection,
+    Object *Expand(Expansion *expansion, std::set<std::string> &existingList, Object *prevSection,
         xsdAnyURI_List &deletionList, bool deleteList);
 
-    std::vector<std::string> GetExpansionIDsForElement(const std::string &xmlId);
+    /**
+     * The objects of the document under [root] as written, by their ids, for Expand to find what an order names;
+     * cleared after (MuseNote RC93: each reference was looked for in the whole document, which grows with every copy)
+     */
+    void RecordWrittenIds(Object *root);
+    void ClearWrittenIds();
+
+    /**
+     * The ids of [xmlId]'s group: the one the others copy first, then each copy as it was made; [xmlId] alone where
+     * it has none. A copy of the whole list, for the toolkit's own calls: the engine reads FirstOf, LastOf and CountOf
+     */
+    std::vector<std::string> GetExpansionIDsForElement(const std::string &xmlId) const;
+    /** The first id of [xmlId]'s group, the last, and how many it holds (MuseNote RC93) */
+    ///@{
+    std::string FirstOf(const std::string &xmlId) const;
+    std::string LastOf(const std::string &xmlId) const;
+    size_t CountOf(const std::string &xmlId) const;
+    ///@}
 
     /**
      * Write the currentexpansionMap to a JSON string
@@ -312,6 +334,15 @@ public:
     bool IsProcessed() { return m_isProcessed; }
     ///@}
 
+    /**
+     * Whether the order of play was refused: more than the engine plays (Doc::ExpandExpansions). Such a score is
+     * not played at all, rather than played otherwise than it says (MuseNote RC91)
+     */
+    ///@{
+    void SetRefused(bool isRefused) { m_isRefused = isRefused; }
+    bool IsRefused() const { return m_isRefused; }
+    ///@}
+
     //----------------//
     // Static methods //
     //----------------//
@@ -332,6 +363,10 @@ private:
     void GetIDList(Object *object, std::vector<std::string> &idList);
 
     void GeneratePredictableIDs(Object *source, Object *target);
+    /** What parent->FindDescendantByID(id) finds, from the ids recorded where they say (MuseNote RC93) */
+    Object *FindWritten(Object *parent, const std::string &id);
+    /** [object] and what it holds, made by Expand, recorded with the document's ids while they are */
+    void RecordMade(Object *object);
     /** Where [part] is placed after [previous], what of its own score definitions differs from those in effect there
      * is said again just before it (MuseNote RC58) */
     void RestateWrittenContext(Object *previous, Object *part);
@@ -340,9 +375,18 @@ private:
     /** Ads an id string to an original/notated id */
     bool AddExpandedIDToExpansionMap(const std::string &origXmlId, std::string newXmlId);
 
-public:
-    /** The expansion map indicates which xmlId has been repeated (expanded) elsewhere */
-    std::map<std::string, std::vector<std::string>> m_map;
+    /**
+     * The expansion map indicates which xmlId has been repeated (expanded) elsewhere: each id copied, or a copy, by
+     * its group in m_groups, the one they copy first and each copy in the order made. (Each id held a list of its
+     * own, and every list was written to at each copy: k copies cost k times k. MuseNote RC93)
+     */
+    std::map<std::string, size_t> m_groupOf;
+    std::vector<std::vector<std::string>> m_groups;
+    /* the objects of the document as written by their ids: every one, and those a walk of what is shown meets */
+    std::map<std::string, std::vector<Object *>> m_writtenIds;
+    std::map<std::string, std::vector<Object *>> m_shownIds;
+    /* the ids held twice that an order named, each said once */
+    std::set<std::string> m_idsHeldTwice;
 
 private:
     /** A flag indicating that the generation processed has been run even if the expansion map is empty  */
@@ -352,6 +396,7 @@ private:
     /* each copy the expansion made, by its id: the id of the part it copies (RC58) */
     std::map<std::string, std::string> m_copyOf;
     bool m_isProcessed;
+    bool m_isRefused = false;
     /** The expansions that Expand is in, outermost first, but for the one it expands now */
     std::vector<const Expansion *> m_expanding;
 };

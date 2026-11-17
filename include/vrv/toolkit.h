@@ -833,8 +833,10 @@ private:
     /**
      * Set the Doc pointer for MIDI / Timemap rendering.
      * Point to the main Doc if no difference in expansion handling is needed.
+     * False, and no document, where the score's playback cannot be built: it is never played otherwise than it
+     * says. The reason is logged on every call, after the caller has reset the log (MuseNote RC91)
      */
-    void SetMidiDoc();
+    bool SetMidiDoc();
     /** Passes the MIDI options set since the document for MIDI was made on to it */
     void PassMidiOptionsOn();
 
@@ -847,6 +849,8 @@ protected:
 
 private:
     Doc *m_midiDoc;
+    /** Why the score's playback cannot be built; empty where it can, or has not been asked for (MuseNote RC91) */
+    std::string m_midiDocRefusal;
 
     Options *m_options;
 
