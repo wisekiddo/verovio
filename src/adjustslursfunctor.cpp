@@ -69,8 +69,10 @@ FunctorCode AdjustSlursFunctor::VisitStaffAlignment(StaffAlignment *staffAlignme
 
     this->ResetCurrent();
 
-    // Detection of inner slurs
-    std::map<FloatingCurvePositioner *, ArrayOfFloatingCurvePositioners> innerCurveMap;
+    // Detection of inner slurs. (Kept in the order of the positioners, the document's: in a map keyed by them, the
+    // outer slurs were adjusted in the order of their memory addresses, and where slurs nest the order decides where
+    // they go: a score was laid out otherwise from one load to another. MuseNote RC106)
+    std::vector<std::pair<FloatingCurvePositioner *, ArrayOfFloatingCurvePositioners>> innerCurveMap;
     for (int i = 0; i < (int)positioners.size(); ++i) {
         Slur *firstSlur = vrv_cast<Slur *>(positioners[i]->GetObject());
         ArrayOfFloatingCurvePositioners innerCurves;
@@ -107,7 +109,7 @@ FunctorCode AdjustSlursFunctor::VisitStaffAlignment(StaffAlignment *staffAlignme
             }
         }
         if (!innerCurves.empty()) {
-            innerCurveMap[positioners[i]] = innerCurves;
+            innerCurveMap.push_back({ positioners[i], innerCurves });
         }
     }
 
