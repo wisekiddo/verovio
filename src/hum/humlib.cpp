@@ -103160,11 +103160,20 @@ HumNum Tool_mei2hum::parseStaff(xml_node staff, HumNum starttime) {
 
 	vector<bool> layerPresent;
 	vector<HumNum> durations;
+	vector<int> layerNumbers; // each layer's number, as parseLayer() takes it; 0 for one it passes over
 
 	for (int i=0; i<(int)children.size(); i++) {
 		string nodename = children[i].name();
 		if (nodename == "layer") {
+			vector<bool> before = layerPresent;
 			durations.push_back(parseLayer(children[i], starttime, layerPresent) - starttime);
+			int number = 0;
+			for (int j=0; j<(int)layerPresent.size(); j++) {
+				if (layerPresent[j] && ((j >= (int)before.size()) || !before[j])) {
+					number = j + 1;
+				}
+			}
+			layerNumbers.push_back(number);
 		} else {
 			cerr << DKHTP << staff.name() << "/" << nodename << CURRLOC << endl;
 		}
@@ -103202,7 +103211,25 @@ HumNum Tool_mei2hum::parseStaff(xml_node staff, HumNum starttime) {
 		}
 	}
 
+	// A staff is as long as its longest layer, whichever is written first: a first layer that is the shorter ended
+	// the staff early, and the next measure overwrote its last beats. And a layer shorter than its staff is filled to
+	// its end with a rest that is not seen: left short, its spine ran out of step with the others (MuseNote RC115)
 	HumNum staffdur = durations[0];
+	for (int i=1; i<(int)durations.size(); i++) {
+		if (durations[i] > staffdur) {
+			staffdur = durations[i];
+		}
+	}
+	for (int i=0; i<(int)durations.size(); i++) {
+		if ((layerNumbers[i] < 1) || (durations[i] >= staffdur)) {
+			continue;
+		}
+		HumNum difference = staffdur - durations[i];
+		string spacer = Convert::durationToRecip(difference QUARTER_CONVERT);
+		spacer += "ryy";
+		m_outdata.back()->addDataToken(spacer, starttime QUARTER_CONVERT + durations[i] QUARTER_CONVERT,
+				m_currentStaff-1, 0, layerNumbers[i]-1, m_staffcount);
+	}
 	m_currentStaff = 0;
 
 	return starttime + staffdur;
@@ -103274,7 +103301,14 @@ HumNum Tool_mei2hum::parseStaff_mensural(xml_node staff, HumNum starttime) {
 		}
 	}
 
+	// A staff is as long as its longest layer, whichever is written first: a first layer that is the shorter ended
+	// the staff early, and the next measure overwrote its last beats (MuseNote RC115)
 	HumNum staffdur = durations[0];
+	for (int i=1; i<(int)durations.size(); i++) {
+		if (durations[i] > staffdur) {
+			staffdur = durations[i];
+		}
+	}
 	m_currentStaff = 0;
 
 	return starttime + staffdur;
