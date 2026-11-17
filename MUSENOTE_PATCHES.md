@@ -2989,6 +2989,22 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 92. Every movement plays its own order of play (tb.41)
+
+Found by MuseNote plan V3_2_0_62's device check (root cause RC107; finding W94). `Doc::ExpandExpansions` generated an
+`<expansion>` for every `<score>`, then followed the first it found in the document: a document of several movements,
+an ABC tune book among them, played the others as written, their repeats and jumps left out (two tunes, each repeated,
+every movement asked for: 64 notes played of 82). Each score's own order is followed, the first `<expansion>` in it;
+their costs are counted together against patch 84's bound (the document as played). An order named (`expand`) is
+followed alone, as before.
+
+No output of the parity set changes (22,674 outputs, 0 differ): every score of it holds one movement.
+
+**Cases**: `test/native/test_tb40_mei_reads_back_engine.cpp`: two tunes, each repeated, play 16 notes from the file and
+from its MEI, every movement asked for; the break (the first score's order alone) caught.
+
+**Upstream status**: not offered.
+
 ### 91. Nested slurs are laid out in the document's order (tb.40)
 
 Found by MuseNote plan V3_2_0_62's round-trip gate (root cause RC106; finding W93). `AdjustSlursFunctor` adjusted
