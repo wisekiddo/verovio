@@ -2989,6 +2989,42 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 94. A multi-bar rest's own barlines and chord symbols are read with it (tb.43)
+
+Found by MuseNote plan V3_2_0_29's export round trip (root causes RC110 and RC111; findings W43, W95, W96). Two faults
+of the MusicXML reader's handling of a multi-bar rest, which is one MEI measure for all its bars:
+
+- On the bar the rest begins in, the reader built the rest at the `<attributes>` that hold its `<multiple-rest>`,
+  read what followed them for directions and sounds alone (`ReadMultiRestMarks`) and stopped reading the bar.
+  MusicXML lets a bar hold its elements in any order: a barline written after those attributes was lost (a repeat
+  start, an ending, a one-bar rest's right barline: MuseNote's own export, writing the attributes first, played Afro
+  Blue's last repeat from the top), and a chord symbol (Afro Blue writes Fm7 and F♯7 there, over three rests).
+- The rest's last bar's barlines were read after the rest's measure was placed in the order of play (`AddMeasure`):
+  what they say of the order, a repeat end or an ending's stop, was left pending and applied to the bar after the
+  rest. A score whose rest ends a repeat repeated the bar after it.
+
+`ReadMultiRestMarks` now reads the rest's first and last bars' barlines, wherever the bar writes them, and its first
+bar's chord symbols (where they would stand before the rest's attributes), before the rest's measure is placed; the
+read after it in `ReadMusicXmlPart` is gone. A chord symbol of a later bar has no place in the rest's one measure: it
+is left out with a warning.
+
+Parity: 4 of 22,674 outputs differ, all of Afro Blue, the corpus's only file with a chord symbol after a rest's
+attributes: its MEI, its page and its two locator MEIs gain Fm7 at bar 50 and F♯7 at bars 66 and 70, and the generated
+ids after them renumber; its MIDI, timemap and pitch map are unchanged. No file of the corpus writes a barline after a
+rest's attributes. Afro Blue's rest that ends ending 1 with a repeat (bar 32) is now placed with the rest; it played
+right before, because bar 33's own ending took the pending stop over, and its sections are the same. 19 other songs
+end a rest's last bar with a barline of style alone, set on the measure at once either way. Seeded ids 3,177 of 3,177;
+read back from MEI 3,571 of 3,571.
+
+**Cases**: `test/native/test_tb43_rest_marks_engine.cpp` in MuseNote's `corelib/verovio`: one score written two ways
+(the rests' barlines and chord symbol before their attributes, and after) reads the same MEI but for its generated ids
+and the same MIDI: the two-bar rest's measure with its repeat start and end and the chord symbol, the one-bar rest's
+measure with its double barline, the rest repeated (the last note at quarter 24; on tb.42, 20 written one way, 32 the
+other); a chord symbol in a rest's second bar is left out and the log says so. Both fail on tb.42; four breaks caught
+(no barline read there, the last bar's read after the measure is placed, no chord symbol read, a later bar's read).
+
+**Upstream status**: not offered.
+
 ### 93. A chord's beam is read once (tb.42)
 
 Found by MuseNote plan V3_2_0_28's export round trip (root cause RC109; finding W39). The MusicXML reader read a
