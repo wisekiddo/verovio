@@ -1751,19 +1751,28 @@ void Doc::ExpandExpansions()
         }
     }
 
-    Expansion *startExpansion = NULL;
+    // The orders followed: the one named, or each score's own, encoded or generated. (The first in the document was
+    // followed alone: a document of several movements, an ABC tune book, played the others as written, their repeats
+    // and jumps left out. MuseNote RC107)
+    std::vector<Expansion *> startExpansions;
     if (expandSelected) {
-        startExpansion = dynamic_cast<Expansion *>(this->FindDescendantByID(expansionId));
-        if (startExpansion == NULL) {
+        Expansion *named = dynamic_cast<Expansion *>(this->FindDescendantByID(expansionId));
+        if (named == NULL) {
             LogWarning("Expansion ID '%s' not found. Nothing expanded.", expansionId.c_str());
             return;
         }
+        startExpansions.push_back(named);
     }
-    // Use the first one (encoded or generated)
     else {
-        startExpansion = dynamic_cast<Expansion *>(this->FindDescendantByType(EXPANSION));
-        if (startExpansion == NULL) {
-            return;
+        for (Object *score : this->FindAllDescendantsByType(SCORE)) {
+            Expansion *own = dynamic_cast<Expansion *>(score->FindDescendantByType(EXPANSION));
+            if (own) startExpansions.push_back(own);
+        }
+        // (one that stands in no score: the first in the document, as before)
+        if (startExpansions.empty()) {
+            Expansion *first = dynamic_cast<Expansion *>(this->FindDescendantByType(EXPANSION));
+            if (first == NULL) return;
+            startExpansions.push_back(first);
         }
     }
 
@@ -1777,7 +1786,8 @@ void Doc::ExpandExpansions()
     // count that is never more than this one; what they leave is the beginning of an order, and is refused here.
     // Each element weighs 1 and 1 more for every 64 bytes of its id: ids of thousands of bytes, counted as short ones,
     // took a gigabyte within the limit. Ids under 64 bytes count as they did.
-    // An expansion named in the order is counted as what it plays.
+    // An expansion named in the order is counted as what it plays. The orders of all the scores are counted together:
+    // the document as played.
     std::map<std::string, const Expansion *> expansions;
     for (const Object *object : this->FindAllDescendantsByType(EXPANSION)) {
         expansions.emplace(object->GetID(), vrv_cast<const Expansion *>(object));
@@ -1785,7 +1795,12 @@ void Doc::ExpandExpansions()
     std::map<std::string, uint64_t> timesPlayed, weights;
     std::set<const Expansion *> inProgress;
     uint64_t visits = 0;
-    const bool counted = CountForOrder(startExpansion, 1, expansions, inProgress, timesPlayed, visits);
+    bool counted = true;
+    int sections = 0;
+    for (const Expansion *startExpansion : startExpansions) {
+        counted = counted && CountForOrder(startExpansion, 1, expansions, inProgress, timesPlayed, visits);
+        sections += (int)startExpansion->GetPlist().size();
+    }
     for (const auto &[id, times] : timesPlayed) weights[id] = 0;
     WeighForOrder(this, weights);
     // (In 64 bits. A reference named more times than the limit, or a section heavier than it, is past it already;
@@ -1803,8 +1818,7 @@ void Doc::ExpandExpansions()
         if (orderCost > OrderOfPlay::s_maxCost) break;
     }
     if (orderCost > OrderOfPlay::s_maxCost) {
-        LogError("The order of %d sections is more than can be played: the score is not played",
-            (int)startExpansion->GetPlist().size());
+        LogError("The order of %d sections is more than can be played: the score is not played", sections);
         m_expansionMap.SetRefused(true);
         return;
     }
@@ -1815,15 +1829,18 @@ void Doc::ExpandExpansions()
         writtenBars.emplace(measure->GetID(), (int)writtenBars.size());
     }
 
-    std::set<std::string> existingList; // the xml:id strings of elements already in the document
-    xsdAnyURI_List deletionList; // list of xml:id strings of elements not cloned and to be deleted at the end
-    // What the score definitions say at each part as written, before the order moves or copies any (MuseNote RC58)
-    m_expansionMap.RecordWrittenContexts(startExpansion->GetFirstAncestor(SCORE) ? startExpansion->GetFirstAncestor(SCORE)
-                                                                                 : static_cast<Object *>(this));
     m_expansionMap.RecordWrittenIds(this);
-    m_expansionMap.Expand(startExpansion, existingList, startExpansion, deletionList, true);
+    for (Expansion *startExpansion : startExpansions) {
+        std::set<std::string> existingList; // the xml:id strings of elements already in the document
+        xsdAnyURI_List deletionList; // list of xml:id strings of elements not cloned and to be deleted at the end
+        // What the score definitions say at each part as written, before the order moves or copies any (MuseNote RC58)
+        m_expansionMap.RecordWrittenContexts(startExpansion->GetFirstAncestor(SCORE)
+                ? startExpansion->GetFirstAncestor(SCORE)
+                : static_cast<Object *>(this));
+        m_expansionMap.Expand(startExpansion, existingList, startExpansion, deletionList, true);
+        m_expansionMap.ClearWrittenContexts();
+    }
     m_expansionMap.ClearWrittenIds();
-    m_expansionMap.ClearWrittenContexts();
 
     // Every tie, slur and line of the score as played, judged by the order of play (patch 60)
     m_expansionMap.FollowSpansInOrder(this, writtenBars);
