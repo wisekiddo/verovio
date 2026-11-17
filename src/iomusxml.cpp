@@ -780,6 +780,19 @@ namespace {
         return pugi::xml_node();
     }
 
+    // The note whose <beam> marks [note] reads. A chord's marks are the chord's, read once, at its first note: from
+    // the first of its notes that carries any (files write them on the first, on every one, or on another). A later
+    // note of a chord reads none: empty
+    pugi::xml_node BeamMarksOf(const pugi::xml_node &note)
+    {
+        if (note.child("chord")) return pugi::xml_node();
+        for (pugi::xml_node it = note; it; it = it.next_sibling("note")) {
+            if ((it != note) && !it.child("chord")) break;
+            if (it.child("beam")) return it;
+        }
+        return note;
+    }
+
 } // namespace
 
 pugi::xml_node MusicXmlInput::OpenOuterTupletLevels(
@@ -3546,8 +3559,9 @@ void MusicXmlInput::ReadMusicXmlNote(
 
     const bool readBeamsAndTuplets = ReadMusicXmlBeamsAndTuplets(node, layer, isChord);
 
-    // beam start
-    bool beamStart = node.select_node("beam[@number='1'][text()='begin']");
+    // beam start (a chord's marks, once: BeamMarksOf)
+    const pugi::xml_node beamMarks = BeamMarksOf(node);
+    bool beamStart = beamMarks.select_node("beam[@number='1'][text()='begin']");
     // tremolos
     pugi::xpath_node tremolo = notations.node().select_node("ornaments/tremolo");
 
@@ -3562,7 +3576,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                 while (beamStart && beamAttachedNum < 8) { // count number of (attached) beams, max 8
                     std::ostringstream o;
                     o << "beam[@number='" << ++beamAttachedNum + 1 << "'][text()='begin']";
-                    beamStart = node.select_node(o.str().c_str());
+                    beamStart = beamMarks.select_node(o.str().c_str());
                 }
                 fTrem->SetBeams(beamFloatNum + beamAttachedNum);
                 fTrem->SetBeamsFloat(beamFloatNum);
@@ -4594,9 +4608,9 @@ void MusicXmlInput::ReadMusicXmlNote(
     }
 
     // beam end
-    bool beamEnd = node.select_node("beam[text()='end']");
+    bool beamEnd = beamMarks.select_node("beam[text()='end']");
     if (beamEnd) {
-        int breakSec = (int)node.select_nodes("beam[text()='continue']").size();
+        int breakSec = (int)beamMarks.select_nodes("beam[text()='continue']").size();
         if (breakSec) {
             if (element->Is(NOTE)) {
                 Note *note = vrv_cast<Note *>(element);
@@ -5033,7 +5047,7 @@ void MusicXmlInput::ReadMultiRestMarks(pugi::xml_node from, pugi::xml_node bar, 
 
 bool MusicXmlInput::ReadMusicXmlBeamsAndTuplets(const pugi::xml_node &node, Layer *layer, bool isChord)
 {
-    pugi::xpath_node beamStart = node.select_node("beam[@number='1' and text()='begin']");
+    pugi::xpath_node beamStart = BeamMarksOf(node).select_node("beam[@number='1' and text()='begin']");
     pugi::xpath_node currentMeasure = node.select_node("ancestor::measure");
 
     pugi::xml_node beamEnd = node.select_node("./following-sibling::note[beam[@number='1' and text()='end']]").node();
