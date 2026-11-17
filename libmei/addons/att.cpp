@@ -9,7 +9,11 @@
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <iomanip>
+#include <locale>
 #include <regex>
 #include <sstream>
 
@@ -18,6 +22,41 @@
 #include "libmei.h"
 
 namespace vrv {
+
+namespace {
+
+    // A number written so that it reads back as the same number (MuseNote patch 90, RC104): the shortest decimal that
+    // does (15 significant digits, else 16, else 17), in the classic locale, and in plain form, as MEI's decimals are.
+    // Four decimals were written: a beat of 1.21875 was read back as 1.2188, another beat
+    std::string ExactDecimal(double data)
+    {
+        std::string text;
+        for (int precision = 15; precision <= 17; ++precision) {
+            std::ostringstream out;
+            out.imbue(std::locale::classic());
+            out << std::setprecision(precision) << data;
+            text = out.str();
+            std::istringstream in(text);
+            in.imbue(std::locale::classic());
+            double back = 0.0;
+            in >> back;
+            if (back == data) break;
+        }
+        if (text.find_first_of("eE") == std::string::npos) return text;
+        // Too large or too small for the plain form at that precision: plain, 17 significant digits
+        const int magnitude = (data == 0.0) ? 0 : static_cast<int>(std::floor(std::log10(std::fabs(data))));
+        std::ostringstream out;
+        out.imbue(std::locale::classic());
+        out << std::fixed << std::setprecision(std::max(0, 16 - magnitude)) << data;
+        text = out.str();
+        if (text.find('.') != std::string::npos) {
+            text.erase(text.find_last_not_of('0') + 1);
+            if (text.back() == '.') text.pop_back();
+        }
+        return text;
+    }
+
+} // namespace
 
 //----------------------------------------------------------------------------
 // Att
@@ -32,9 +71,7 @@ std::string Att::StrToStr(std::string str) const
 
 std::string Att::DblToStr(double data) const
 {
-    std::stringstream sstream;
-    sstream << round(data * 10000.0) / 10000.0;
-    return sstream.str();
+    return ExactDecimal(data);
 }
 
 std::string Att::IntToStr(int data) const
@@ -425,7 +462,7 @@ data_KEYSIGNATURE Att::StrToKeysignature(const std::string &value, bool logWarni
 std::string Att::MeasurebeatToStr(data_MEASUREBEAT data) const
 {
     std::stringstream sstream;
-    sstream << data.first << "m+" << round(data.second * 10000.0) / 10000.0;
+    sstream << data.first << "m+" << ExactDecimal(data.second);
     return sstream.str();
 }
 
