@@ -802,6 +802,14 @@ protected:
 
 private:
     /**
+     * The MEI as GetMEI gives it, with the order of play written where no reader wrote one ([withOrderOfPlay]), or as
+     * the document holds it. (The document for playback works out the order itself, by the same rule, as it reads
+     * the score: read with the order written, it took for its own new objects the ids the order was written with,
+     * which WithOrderOfPlay gives back to the counter. MuseNote RC94)
+     */
+    std::string GetMEI(const std::string &jsonOptions, bool withOrderOfPlay);
+
+    /**
      * [mei] with the order each of its scores is played in, where a score has no <expansion> of its own: the one
      * rule's (ExpansionMap::GenerateExpansionFor), worked out on a copy of the score and written as its
      * <expansion>; the loaded document and the ids its next objects get are untouched. [mei] as it is where every

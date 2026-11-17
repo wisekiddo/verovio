@@ -350,7 +350,8 @@ bool Toolkit::SetMidiDoc()
     resources.SetPath(m_doc.GetResources().GetPath());
     resources.InitFonts();
     MEIInput midiInput(midiDoc);
-    if (!midiInput.Import(this->GetMEI())) {
+    // (the score as it is loaded: the document works out its order of play as it reads it, MuseNote RC94)
+    if (!midiInput.Import(this->GetMEI("", false))) {
         delete midiDoc;
         return refuse("its document for playback could not be read back from its own MEI");
     }
@@ -999,6 +1000,11 @@ bool Toolkit::LoadData(const std::string &data, bool resetLogBuffer)
 
 std::string Toolkit::GetMEI(const std::string &jsonOptions)
 {
+    return this->GetMEI(jsonOptions, true);
+}
+
+std::string Toolkit::GetMEI(const std::string &jsonOptions, bool withOrderOfPlay)
+{
     bool scoreBased = true;
     bool basic = false;
     bool ignoreHeader = false;
@@ -1094,7 +1100,7 @@ std::string Toolkit::GetMEI(const std::string &jsonOptions)
     // The whole score, as a score: with the order it is played in, where no reader wrote one (MuseNote patch 75).
     // Every export starts from this text: the order lived only in the playing of it, and a score made in an editor
     // went to Humdrum with its jumps as words, played once through read back
-    if (scoreBased && !serialized && !meioutput.HasFilter() && !generateFacs) {
+    if (withOrderOfPlay && scoreBased && !serialized && !meioutput.HasFilter() && !generateFacs) {
         output = this->WithOrderOfPlay(output, basic, indent, ignoreHeader, removeIds);
     }
 
