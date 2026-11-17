@@ -1031,9 +1031,9 @@ FunctorCode PreparePointersByLayerFunctor::VisitMeasureEnd(Measure *measure)
 // PrepareLyricsFunctor
 //----------------------------------------------------------------------------
 
-PrepareLyricsFunctor::PrepareLyricsFunctor() : Functor()
+PrepareLyricsFunctor::PrepareLyricsFunctor(const std::vector<int> &verses) : Functor()
 {
-    m_currentSyl = NULL;
+    for (const int n : verses) m_currentSyls[n] = NULL;
     m_lastNoteOrChord = NULL;
     m_penultimateNoteOrChord = NULL;
 }
@@ -1048,18 +1048,20 @@ FunctorCode PrepareLyricsFunctor::VisitChord(Chord *chord)
 
 FunctorCode PrepareLyricsFunctor::VisitDocEnd(Doc *doc)
 {
-    if (!m_currentSyl) {
-        return FUNCTOR_STOP; // early return
-    }
-    if (m_lastNoteOrChord && (m_currentSyl->GetStart() != m_lastNoteOrChord)) {
-        m_currentSyl->SetEnd(m_lastNoteOrChord);
-    }
-    else if (doc->GetOptions()->m_openControlEvents.GetValue()) {
-        sylLog_WORDPOS wordpos = m_currentSyl->GetWordpos();
-        if ((wordpos == sylLog_WORDPOS_i) || (wordpos == sylLog_WORDPOS_m)) {
-            Measure *lastMeasure = vrv_cast<Measure *>(doc->FindDescendantByType(MEASURE, UNLIMITED_DEPTH, BACKWARD));
-            assert(lastMeasure);
-            m_currentSyl->SetEnd(lastMeasure->GetRightBarLine());
+    // Each verse in turn, as its own walk ended
+    for (const auto &[n, currentSyl] : m_currentSyls) {
+        if (!currentSyl) continue;
+        if (m_lastNoteOrChord && (currentSyl->GetStart() != m_lastNoteOrChord)) {
+            currentSyl->SetEnd(m_lastNoteOrChord);
+        }
+        else if (doc->GetOptions()->m_openControlEvents.GetValue()) {
+            sylLog_WORDPOS wordpos = currentSyl->GetWordpos();
+            if ((wordpos == sylLog_WORDPOS_i) || (wordpos == sylLog_WORDPOS_m)) {
+                Measure *lastMeasure
+                    = vrv_cast<Measure *>(doc->FindDescendantByType(MEASURE, UNLIMITED_DEPTH, BACKWARD));
+                assert(lastMeasure);
+                currentSyl->SetEnd(lastMeasure->GetRightBarLine());
+            }
         }
     }
 
@@ -1090,6 +1092,22 @@ FunctorCode PrepareLyricsFunctor::VisitSyl(Syl *syl)
         syl->SetStart(vrv_cast<LayerElement *>(syl->GetFirstAncestor(CHORD, MAX_CHORD_DEPTH)));
     }
 
+    // A syl in a verse, at any depth, is of that verse; one in none was met by the walk of every verse of its layer
+    const Verse *own = vrv_cast<const Verse *>(syl->GetFirstAncestor(VERSE));
+    if (own) {
+        if (m_currentSyls.contains(own->GetN())) this->FollowSyl(syl, own->GetN());
+    }
+    else {
+        for (auto &[n, currentSyl] : m_currentSyls) this->FollowSyl(syl, n);
+    }
+
+    return FUNCTOR_CONTINUE;
+}
+
+void PrepareLyricsFunctor::FollowSyl(Syl *syl, int n)
+{
+    Syl *&m_currentSyl = m_currentSyls.at(n);
+
     // At this stage currentSyl is actually the previous one that is ending here
     if (m_currentSyl) {
         // The previous syl was an initial or median -> The note we just parsed is the end
@@ -1112,17 +1130,13 @@ FunctorCode PrepareLyricsFunctor::VisitSyl(Syl *syl)
     // Now decide what to do with the starting syl and check if it has a forward connector
     if ((syl->GetWordpos() == sylLog_WORDPOS_i) || (syl->GetWordpos() == sylLog_WORDPOS_m)) {
         m_currentSyl = syl;
-        return FUNCTOR_CONTINUE;
     }
     else if (syl->GetCon() == sylLog_CON_u) {
         m_currentSyl = syl;
-        return FUNCTOR_CONTINUE;
     }
     else {
         m_currentSyl = NULL;
     }
-
-    return FUNCTOR_CONTINUE;
 }
 
 //----------------------------------------------------------------------------

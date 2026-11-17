@@ -7,13 +7,18 @@
 
 #include "adjustsylspacingfunctor.h"
 
+#include <climits>
+
 //----------------------------------------------------------------------------
 
 #include "doc.h"
 #include "label.h"
 #include "labelabbr.h"
+#include "layer.h"
+#include "measure.h"
 #include "staff.h"
 #include "syl.h"
+#include "system.h"
 #include "verse.h"
 
 //----------------------------------------------------------------------------
@@ -201,6 +206,80 @@ FunctorCode AdjustSylSpacingFunctor::VisitVerse(Verse *verse)
     m_previousMeasure = NULL;
 
     return FUNCTOR_CONTINUE;
+}
+
+//----------------------------------------------------------------------------
+// RecordSylSpacingFunctor (MuseNote RC92)
+//----------------------------------------------------------------------------
+
+FunctorCode RecordSylSpacingFunctor::VisitLayer(Layer *layer)
+{
+    m_layerN = layer->GetN();
+    return FUNCTOR_CONTINUE;
+}
+
+FunctorCode RecordSylSpacingFunctor::VisitMeasureEnd(Measure *measure)
+{
+    m_measureEnds.emplace_back(m_place++, measure);
+    return FUNCTOR_CONTINUE;
+}
+
+FunctorCode RecordSylSpacingFunctor::VisitStaff(Staff *staff)
+{
+    m_staffN = staff->GetN();
+    m_staves[m_staffN].emplace_back(m_place++, staff);
+    return FUNCTOR_CONTINUE;
+}
+
+FunctorCode RecordSylSpacingFunctor::VisitSystem(System *system)
+{
+    m_systems.emplace_back(m_place++, system);
+    return FUNCTOR_CONTINUE;
+}
+
+FunctorCode RecordSylSpacingFunctor::VisitSystemEnd(System *system)
+{
+    m_systemEnds.emplace_back(m_place++, system);
+    return FUNCTOR_CONTINUE;
+}
+
+FunctorCode RecordSylSpacingFunctor::VisitVerse(Verse *verse)
+{
+    m_verses[{ m_staffN, m_layerN, verse->GetN() }].emplace_back(m_place++, verse);
+    return FUNCTOR_CONTINUE;
+}
+
+void RecordSylSpacingFunctor::Replay(int staffN, int layerN, int verseN, AdjustSylSpacingFunctor &functor) const
+{
+    static const Met<Staff> noStaves;
+    static const Met<Verse> noVerses;
+    const auto staves = m_staves.find(staffN);
+    const auto verses = m_verses.find({ staffN, layerN, verseN });
+    const Met<Staff> &staffMet = (staves != m_staves.end()) ? staves->second : noStaves;
+    const Met<Verse> &verseMet = (verses != m_verses.end()) ? verses->second : noVerses;
+    // The five lists, each in the order of the walk, merged by their places in it
+    size_t system = 0, measureEnd = 0, systemEnd = 0, staff = 0, verse = 0;
+    const auto placeOf = [](const auto &met, size_t i) { return (i < met.size()) ? met[i].first : INT_MAX; };
+    while (true) {
+        const int next = std::min({ placeOf(m_systems, system), placeOf(m_measureEnds, measureEnd),
+            placeOf(m_systemEnds, systemEnd), placeOf(staffMet, staff), placeOf(verseMet, verse) });
+        if (next == INT_MAX) break;
+        if (next == placeOf(m_systems, system)) {
+            functor.VisitSystem(m_systems[system++].second);
+        }
+        else if (next == placeOf(m_measureEnds, measureEnd)) {
+            functor.VisitMeasureEnd(m_measureEnds[measureEnd++].second);
+        }
+        else if (next == placeOf(m_systemEnds, systemEnd)) {
+            functor.VisitSystemEnd(m_systemEnds[systemEnd++].second);
+        }
+        else if (next == placeOf(staffMet, staff)) {
+            functor.VisitStaff(staffMet[staff++].second);
+        }
+        else {
+            functor.VisitVerse(verseMet[verse++].second);
+        }
+    }
 }
 
 } // namespace vrv

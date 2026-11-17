@@ -761,21 +761,16 @@ void Page::AdjustSylSpacingByVerse(const IntTree &verseTree, Doc *doc)
 
     if (verseTree.child.empty()) return;
 
-    Filters filters;
-
-    // Same for the lyrics, but Verse by Verse since Syl are TimeSpanningInterface elements for handling connectors
+    // Same for the lyrics, but Verse by Verse since Syl are TimeSpanningInterface elements for handling connectors.
+    // Each verse is given what the walk of the page filtered to it met, from one walk that records it (a walk for
+    // each verse took seconds for a token of 3,000 words: MuseNote RC92)
+    RecordSylSpacingFunctor recordSylSpacing;
+    this->Process(recordSylSpacing);
     for (staves = verseTree.child.begin(); staves != verseTree.child.end(); ++staves) {
         for (layers = staves->second.child.begin(); layers != staves->second.child.end(); ++layers) {
             for (verses = layers->second.child.begin(); verses != layers->second.child.end(); ++verses) {
-                // Create ad comparison object for each type / @n
-                AttNIntegerComparison matchStaff(STAFF, staves->first);
-                AttNIntegerComparison matchLayer(LAYER, layers->first);
-                AttNIntegerComparison matchVerse(VERSE, verses->first);
-                filters = { &matchStaff, &matchLayer, &matchVerse };
-
                 AdjustSylSpacingFunctor adjustSylSpacing(doc);
-                adjustSylSpacing.SetFilters(&filters);
-                this->Process(adjustSylSpacing);
+                recordSylSpacing.Replay(staves->first, layers->first, verses->first, adjustSylSpacing);
             }
         }
     }

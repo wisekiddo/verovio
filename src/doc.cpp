@@ -890,26 +890,25 @@ void Doc::PrepareData()
 
     /************ Resolve lyric connectors ************/
 
-    // Same for the lyrics, but Verse by Verse since Syl are TimeSpanningInterface elements for handling connectors
+    // Same for the lyrics, Layer by Layer, each verse followed on its own since Syl are TimeSpanningInterface elements
+    // for handling connectors. (A walk of the whole document for each verse: as many walks as verses, and a Humdrum
+    // token of 3,000 words took seconds. MuseNote RC92)
     for (auto &staves : verseTree.child) {
         for (auto &layers : staves.second.child) {
-            for (auto &verses : layers.second.child) {
-                // std::cout << staves->first << " => " << layers->first << " => " << verses->first << '\n';
-                filters.Clear();
-                // Create ad comparison object for each type / @n
-                AttNIntegerComparison matchStaff(STAFF, staves.first);
-                AttNIntegerComparison matchLayer(LAYER, layers.first);
-                AttNIntegerComparison matchVerse(VERSE, verses.first);
-                filters.Add(&matchStaff);
-                filters.Add(&matchLayer);
-                filters.Add(&matchVerse);
+            std::vector<int> verses;
+            for (auto &verse : layers.second.child) verses.push_back(verse.first);
+            filters.Clear();
+            // Create ad comparison object for each type / @n
+            AttNIntegerComparison matchStaff(STAFF, staves.first);
+            AttNIntegerComparison matchLayer(LAYER, layers.first);
+            filters.Add(&matchStaff);
+            filters.Add(&matchLayer);
 
-                // The first pass sets m_drawingFirstNote and m_drawingLastNote for each syl
-                // m_drawingLastNote is set only if the syl has a forward connector
-                PrepareLyricsFunctor prepareLyrics;
-                prepareLyrics.SetFilters(&filters);
-                root->Process(prepareLyrics);
-            }
+            // The first pass sets m_drawingFirstNote and m_drawingLastNote for each syl
+            // m_drawingLastNote is set only if the syl has a forward connector
+            PrepareLyricsFunctor prepareLyrics(verses);
+            prepareLyrics.SetFilters(&filters);
+            root->Process(prepareLyrics);
         }
     }
 

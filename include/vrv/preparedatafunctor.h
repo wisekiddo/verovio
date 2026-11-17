@@ -668,9 +668,10 @@ class PrepareLyricsFunctor : public Functor {
 public:
     /**
      * @name Constructors, destructors
+     * [verses]: the numbers of the verses of the layer it walks, each of which it follows (MuseNote RC92)
      */
     ///@{
-    PrepareLyricsFunctor();
+    PrepareLyricsFunctor(const std::vector<int> &verses);
     virtual ~PrepareLyricsFunctor() = default;
     ///@}
 
@@ -696,8 +697,13 @@ private:
 public:
     //
 private:
-    // The current Syl
-    Syl *m_currentSyl;
+    /** What the syl of verse [n] sets: its own start, and the end of the one before it in [n] */
+    void FollowSyl(Syl *syl, int n);
+
+private:
+    // The current Syl of each verse, by its number. (Each verse was followed in a walk of the whole document of its
+    // own: as many walks as verses, and a token of thousands of words never came back. MuseNote RC92)
+    std::map<int, Syl *> m_currentSyls;
     // The last Note or Chord
     LayerElement *m_lastNoteOrChord;
     // The penultimate Note or Chord
