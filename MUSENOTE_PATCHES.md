@@ -2989,6 +2989,34 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 87. An order of play given among other orders is followed (tb.39)
+
+Found by MuseNote plan V3_2_0_61 (root cause RC98; the audit's finding
+W31). A score may give more than one order of play: an MEI `<choice>` of
+expansions, or Humdrum's `*>[A,A,B]` beside `*>norep[A,B]`, which the
+Humdrum reader holds as `<choice><orig>` (the main list, whichever the
+file gives first) `<reg>` (the others). `ExpansionMap::Expand` looked for
+the parts an order names under the order's own parent, the `<orig>`; the
+parts stand beside the `<choice>`, none was found, and the score played
+its bars once (MuseNote worked round it by loading every Humdrum score
+twice more, from a copy with its other orders blanked: RC99). The order's
+scope is now its parent or, where that is an editorial element that holds
+none of the parts the order names, the nearest ancestor that does. An
+order inside a reading that holds its own parts keeps the reading. The
+order played is still the one the engine shows (the first visible: the
+`<orig>`).
+
+No output of the parity set changes (22,674 outputs, 0 differ; seeded ids
+on a fresh thread 3,177 of 3,177): no corpus file gives two orders. One
+plain load plays what a load with `expandAlways` plays, timemap and MIDI
+byte for byte, for the 299 Humdrum inputs at hand.
+
+**Cases**: `test/native/test_tb39_order_among_orders_engine.cpp` in
+MuseNote's `corelib/verovio` (3 cases); the rule broken on purpose, the two
+cases with two orders fail.
+
+**Upstream status**: not offered.
+
 ### 86. The document for playback reads the score as loaded (tb.38)
 
 Found by MuseNote plan V3_2_0_59 (root cause RC94), measuring the order of
