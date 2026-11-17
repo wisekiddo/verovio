@@ -2380,11 +2380,18 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
         }
     }
 
-    // set metcon to false for pickup measures
+    // The bar's time: its longest voice's (the cursor stands where the voice written last ends)
+    int barTime = m_durTotal;
+    for (const auto &[layer, end] : m_layerEndTimes) {
+        if (layer->GetFirstAncestor(MEASURE) == measure) barTime = std::max(barTime, end);
+    }
+
+    // set metcon to false for pickup measures: by the bar's time (by the cursor, a bar whose voice written last ends
+    // early was marked not full: MuseNote RC116)
     int measureTotal = m_ppq * 4;
     for (const int &num : m_meterCount) measureTotal *= num;
     measureTotal /= m_meterUnit;
-    if (m_durTotal && m_durTotal != measureTotal) {
+    if (barTime && barTime != measureTotal) {
         measure->SetMetcon(BOOLEAN_false);
     }
 
@@ -2392,10 +2399,6 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
     // A tie whose voice went on without it, and that no other voice ended, is left out (it ties nothing: it was
     // drawn and played to a later note of its pitch). One whose voice has nothing more in this measure waits for
     // the next measure's first notes, once.
-    int barTime = m_durTotal;
-    for (const auto &[layer, end] : m_layerEndTimes) {
-        if (layer->GetFirstAncestor(MEASURE) == measure) barTime = std::max(barTime, end);
-    }
     // Its right barline, as the time stamp of a mark there (MuseNote RC55)
     if ((m_ppq > 0) && (m_meterUnit > 0)) {
         m_barEnds[measure] = { (double)barTime * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0, m_meterUnit };
