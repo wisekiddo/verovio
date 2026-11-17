@@ -2989,6 +2989,82 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 91. Nested slurs are laid out in the document's order (tb.40)
+
+Found by MuseNote plan V3_2_0_62's round-trip gate (root cause RC106; finding W93). `AdjustSlursFunctor` adjusted
+each outer slur to its inner slurs walking a `std::map` keyed by the slurs' positioner pointers: in the order of their
+memory addresses. Where slurs nest, the order decides where they go, so a score was laid out otherwise from one load to
+another: Imagine (Humdrum), its MEI loaded while the file's toolkit was alive, put line 2 71 units lower than the
+file's own page. The outer slurs are taken in their positioners' order, the document's.
+
+No output of the parity set changes by it: a dump's fresh process gives the positioners rising addresses, the order
+they are made in.
+
+**Cases**: `test/native/test_tb40_mei_reads_back_engine.cpp` in MuseNote's `corelib/verovio`: Imagine laid out with the
+engine's objects given rising, then falling addresses from an arena of the test's own; the break caught.
+
+**Upstream status**: not offered.
+
+### 90. A number is written so that it reads back as itself (tb.40)
+
+Found by MuseNote plan V3_2_0_62 (root cause RC104; the audit's W32). `Att::DblToStr` and `Att::MeasurebeatToStr`
+wrote every number rounded to four decimals, through a stream of six significant digits: a beat of 1.21875 was written
+"1.2188" and read back as another beat (138 corpus songs carry beats written to four decimals; in 5 a line drawn from
+the MEI moved by a unit). Each number is written as the shortest decimal that reads back the same (15 significant
+digits, else 16, else 17), in the classic locale and in plain form.
+
+Parity: the MEI of 421 outputs changes, 1,363 lines, numbers only (a beat of 2 and 11/12 is "2.9166666666666665"
+where it was "2.9167"). No SVG, timemap, MIDI or pitch map changes by it.
+
+**Upstream status**: not offered.
+
+### 89. The MusicXML reader holds a text as MEI holds it (tb.40)
+
+Found by MuseNote plan V3_2_0_62 (root cause RC103; the audit's W32, "a text read back from MEI is divided into runs
+otherwise"). The reader held texts in forms MEI cannot hold, so the same score read back from its MEI was drawn
+otherwise: texts side by side (a tempo's "(", " = ", its number and ")"), an empty text (an empty lyric), and white
+space with a line break at a text's ends (a lyric "nel" and a newline), which the MEI reader takes as the file's
+layout. At the end of the import the texts of every element are joined where they stand side by side, an empty one is
+removed, and the white space with a line break at the start of the first or the end of the last is taken off. That
+rule, the MEI reader's, is one pair of functions now (`LeftTrimLaidOut`, `RightTrimLaidOut` in `vrv.cpp`), used by
+both readers.
+
+Parity: the page of 282 scores (183 by their tempo marks, 98 by an empty lyric, 1 by both), their runs and boxes, no
+mark moved; 4 more where a lyric ended in a line break, their bars as wide as their notes need; the MEI of 7 songs
+(21 outputs), the line break gone from a lyric. No timemap, MIDI or pitch map changes.
+
+**Upstream status**: not offered.
+
+### 88. A document holds each id once (tb.40)
+
+Found by MuseNote plan V3_2_0_62 (root cause RC102; the audit's W32). Ids came from one counter per thread, which a
+seed sets back, and nothing kept a document from being given an id it already held:
+- a load under the seed its file's ids were made with (MuseNote's reader loads its own MEI with `xmlIdSeed` 1) gave
+  the objects it makes without an id (texts, stems, measure numbers, lines, pages) ids the file gives to other
+  elements. Of the 3,157 corpus songs, 3,138 MEI views held ids twice on their pages, a note's among them in 2,964:
+  the app gave such a note another element's box, and a tie, a connector or an ending's bracket was drawn into another
+  element's group;
+- another document's seeded load on the thread (a thumbnail, an import, a print) did the same to a document's later
+  layouts, and a thread that had built nothing reseeded at random on its first object.
+
+`MEIInput::Import` reads its file's ids first and moves the counter past those of the generated form
+(`Object::ContinuePastIDs`: each read back to its place in the sequence with the hash's inverse, the counter to the
+start of the widest stretch none is in). Each document keeps its own place in the sequence (`DocIDScope`, swapped in by
+the outermost of a load, a re-layout, the drawing of a page, the document for playback, the export and an edit;
+`Object::ContinueIDs` marks the thread seeded). The ids a file gives are kept.
+
+Parity: the ids of 20 MEI inputs' own objects on their pages (nothing else on them), and of the order of play the MEI
+of 20 Humdrum scores writes (patch 75's copy, now on the document's own place). Annotation locator: 0 failures (a
+million notes). Seeded ids on a fresh thread: 3,177 of 3,177.
+
+**Cases**: `test/native/test_tb40_mei_reads_back_engine.cpp`: a score's MEI loaded again with the seed holds each id
+once and keeps its notes' ids; a re-layout after another toolkit's seeded load holds each id once; a re-layout on
+another thread gives the loading thread's ids; two seeded loads of one MEI give the same ids. Three breaks caught.
+The parity gate gains `roundtrip/status` (MuseNote's `tool/parity/roundtrip.cpp`): every input read back from its MEI
+as it was, each id once on every page, after another toolkit's seeded load too: 3,571 of 3,571.
+
+**Upstream status**: not offered.
+
 ### 87. An order of play given among other orders is followed (tb.39)
 
 Found by MuseNote plan V3_2_0_61 (root cause RC98; the audit's finding
