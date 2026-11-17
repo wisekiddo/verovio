@@ -2989,6 +2989,111 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 86. The document for playback reads the score as loaded (tb.38)
+
+Found by MuseNote plan V3_2_0_59 (root cause RC94), measuring the order of
+play. Since patch 75 the engine's MEI holds the order a score is played in,
+where no reader wrote one (`WithOrderOfPlay`), and that order is written on
+a copy, on ids from the thread's counter, which is set back after. The
+document for playback (`Toolkit::SetMidiDoc`) read that MEI straight after,
+and gave its own new objects (the accidentals it makes of `@accid.ges`) the
+same ids: an order's sections and the order itself shared their ids with
+accidentals. Nothing was played wrong, the sections standing first, but a
+document holds each id once, and patch 84's lookup of what an order names
+walks the document for an id held twice. The document for playback reads
+the score as loaded (a private `GetMEI` with the order left out) and works
+the order out itself, by the same rule, as it did before patch 75.
+`ExpansionMap::FindWritten` says it once for an id an order names that two
+elements hold.
+
+**Upstream status**: not offered (patch 75 is ours).
+
+### 85. The verses of a layer in one walk (tb.38)
+
+Found by MuseNote plan V3_2_0_59 (root cause RC92; the audit's finding W7).
+`Doc::PrepareData` resolved the lyric connectors with a walk of the whole
+document for every staff, layer and verse, and `Page::AdjustSylSpacingByVerse`
+spaced the syllables with a walk of the page for each verse: a Humdrum
+`**vvdata` token of 3,000 words (a verse for each word) took 17 seconds by
+the square of its words, and patch 31 (tb.14) kept a token of more than 64
+words as one verse to stay clear of it, otherwise than the format says.
+
+- `PrepareLyricsFunctor` walks each staff and layer once and follows each
+  of its verses on its own (the current syllable of each verse number): the
+  notes it tracks are the same for every verse of a layer, and a syllable in
+  no verse is followed in each, as each walk met it.
+- `RecordSylSpacingFunctor` records in one walk of the page what the walk of
+  each verse met (the systems and the ends of the measures, the staves of
+  its number, its verses), and each verse is spaced in turn from its record,
+  as before: the verses still move the measures one after the other.
+- Every `**vvdata` token is split into its words (`kMaxVvdataVerses` goes).
+
+3,000 words now take 0.1 s, 10,000 0.4 s (never came back on tb.13).
+
+**Upstream status**: not offered; `develop` of 2026-10-08 walks each verse.
+
+### 84. An order of play is followed as far as the score as played can be held, and a score that cannot be played is not played (tb.38)
+
+Found by MuseNote plan V3_2_0_59 (root causes RC91 and RC93; the audit's
+findings W6 and W7).
+
+- **One document for playback, or none (RC91).** Where the engine could not
+  follow a score it played the score as written, every repeat and jump
+  dropped: the MIDI document could not be read back from the score's own
+  MEI (patch 7), or its order was past the bound (patch 16). The warning
+  that said so was erased by the caller's next `ResetLogBuffer`. Such a
+  score is now drawn and not played at all: `SetMidiDoc` returns false and
+  keeps the reason, every caller resets its log first and returns what it
+  returns for nothing (`RenderToMIDI` and `RenderToTimemap` an empty string,
+  `RenderToTimemapFile` false and no file, the pitch, time and expansion
+  lookups empty), and logs the reason ("The score cannot be played: ...").
+  `Doc::ExpandExpansions` marks an order past the bound as refused
+  (`ExpansionMap::IsRefused`).
+- **The copies of an element share one list (RC93).** `ExpansionMap` kept,
+  under every copy's id, its own list of all the copies, and every list was
+  written to at each copy: k copies cost k times k. One note repeated 2,000
+  times peaked at 839 MB, 16 notes at 5 GB. Each id now names its group
+  (`m_groupOf`, `m_groups`): the same lists, in the same order, written once;
+  the engine reads `FirstOf`, `LastOf` and `CountOf`, and the toolkit's two
+  calls copy a list. 2,000 times one note: 45 MB.
+- **The parts an order names are found where they stand (RC93).** `Expand`
+  looked each one up in the whole document (`FindDescendantByID`), which
+  grows with every copy, and searched the parts played so far as a list:
+  200 repeat ends in a row took 21 seconds. The objects of the document are
+  recorded by their ids before it is expanded (`RecordWrittenIds`, every one
+  and those a walk of what is shown meets), with every object `Expand` makes
+  (`RecordMade`); a part is found where it stands under the expansion's
+  parent, and an id held twice or under something hidden is looked for as
+  before. The parts played are a set. The place of a new container is found
+  by `prevSect`'s ancestors (`GetDirectChild` searched the whole parent
+  first: 2 to the 14th plays took 13 seconds, now 2.5).
+- **The bound is the elements the score holds as played (RC93).** The cost
+  was each section by the times it is played, squared, against 1,000,000;
+  past it the order was dropped. It is each section's elements by the times
+  it is played, against `OrderOfPlay::s_maxCost` = 100,000: the dearest of
+  MuseNote's 3,571 scores and inputs holds 7,819 (Piano Man); 100,000 take
+  some 350 MB and 2.5 seconds on a desktop. The writers of an order stop at
+  one element a reference, past the bound (`OrderOfPlay::Add`, and the MEI
+  to Humdrum converter's own count). A repeat is played as often as it says:
+  the clamps at 100 go (a MusicXML `times`, an ABC repeat's colons, an ABC
+  `P:` count, the order rule), and the ABC `P:` field is read until it names
+  more than the bound, not cut at 2,000 letters.
+
+**Upstream status**: not offered; `develop` of 2026-10-08 keeps a list for
+every copy and plays a document it cannot read back without its order.
+
+**Gates of tb.38** (patches 84 to 86): the native suite, 368 cases with
+asserts in Release and under the address sanitizer with libc++ hardening;
+the new cases fail on tb.37 (6 of 8; the other two guard what stays as it
+was, and their breaks are caught), and 12 deliberate breaks, each caught:
+the refusal, the vvdata split, the MusicXML and the two ABC counts, the
+read of the score as loaded, a syllable in its own verse, the walk of the
+verses (reading and spacing), the copies' lists, the lookup of a part, the
+place of a container, and the linear count.
+Parity tb.37 to tb.38: 22,674 outputs over 3,177 scores and inputs, 0 differ (no
+score of the corpus reaches a limit these patches change); seeded ids on a fresh
+thread, 3,177 of 3,177. MuseSync's 24 starters give the same timemap and MIDI.
+
 ### 83. The pieces of a jump written apart in its bar are its print (tb.37)
 
 Found by MuseNote plan V3_2_0_56 (root cause RC80), tracing the songs the guards
