@@ -2989,6 +2989,36 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 93. A chord's beam is read once (tb.42)
+
+Found by MuseNote plan V3_2_0_28's export round trip (root cause RC109; finding W39). The MusicXML reader read a
+beam's begin and end from every note of a chord, where the marks are the chord's. Written on each of its notes
+(Notation Composer does; MusicXML allows it), a begin read while the chord was open started a beam inside the chord
+(`ReadMusicXmlBeamStart` refuses a second beam only when a beam is on top), the chord's next note found no chord on
+top to join ("Chord starting point has not been found") and the bar's later notes were lost with it, and an end with
+nothing left open went to `CloseBeamSpan`: Love Is Strange kept one note of 21 in each of four bars, the bar marked
+not full, with beam spans pointing at notes it dropped. A break in the second beam was set on every note of the chord
+besides the chord. A chord's marks are now read once, at its first note, from the first of its notes that carries any
+(`BeamMarksOf`): the begin the beam is built from, the begin a tremolo counts its beams by, the end and its break. A
+later note of a chord reads none. Where a beam and a tuplet start on one note, their nesting still compares the marks
+where the file writes them, as it does the tuplet's stop.
+
+Parity: 7 of 22,674 outputs differ, all of Love Is Strange, the corpus's only file that writes a chord's marks on more
+than its first note (20 chords; 1,953 beamed chords carry them on the first note only): its page, MIDI, timemap, pitch
+map, MEI and its two locator MEIs. Its four bars read their 7 chords and 21 notes each, full (342 notes in all, now
+422; 338 played, now 418); 8 beam spans fewer (82, now 74), and the generated ids after bar 2 renumbered. The spans
+left are the file's: 77 first beams it never ends in their bar, and 31 ends of the first beam while it marks a higher
+one "continue", read as a break of the second beam (a fault of the file, which no reading of a correctly marked file
+reaches). Seeded ids 3,177 of 3,177; read back from MEI 3,571 of 3,571; locator 0 failures.
+
+**Cases**: `test/native/test_tb42_chord_beams_engine.cpp` in MuseNote's `corelib/verovio`: a bar of beamed chords and
+a bar whose second beam breaks, each with the marks on every note, on the first only and on the second only: every
+note read, in its beams, the bar full, no beam span, the break on the chord alone. Both fail on tb.41; four breaks
+caught (a later note reading its marks again, the marks read from the first note only, the end read from each note,
+the begin read from each note).
+
+**Upstream status**: not offered.
+
 ### 92. Every movement plays its own order of play (tb.41)
 
 Found by MuseNote plan V3_2_0_62's device check (root cause RC107; finding W94). `Doc::ExpandExpansions` generated an
