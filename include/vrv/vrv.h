@@ -104,6 +104,14 @@ std::string UTF32to8(const std::u32string &in);
 std::u32string UTF8to32(const std::string &in);
 
 /**
+ * The white space at the start (LeftTrimLaidOut) or at the end (RightTrimLaidOut) of a text, taken off when it is how
+ * the file is laid out: a run with a line break in it. A run on one line is text, as the writer wrote it. The MEI
+ * reader's rule for an element's first and last text, and the MusicXML reader's since MuseNote patch 89 (RC103)
+ */
+std::u32string LeftTrimLaidOut(std::u32string str);
+std::u32string RightTrimLaidOut(std::u32string str);
+
+/**
  * Utility for converting UTF16 (std::u16string) to UTF-8
  */
 std::string UTF16to8(const std::u16string &in);

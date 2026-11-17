@@ -932,8 +932,6 @@ private:
     ///@{
     void SetMeiID(pugi::xml_node element, Object *object);
     DocType StrToDocType(std::string type);
-    std::u32string LeftTrim(std::u32string str);
-    std::u32string RightTrim(std::u32string str);
     bool ReadXMLComment(Object *object, pugi::xml_node element);
     ///@}
 

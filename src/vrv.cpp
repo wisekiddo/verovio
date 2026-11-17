@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
+#include <cwctype>
 #include <iostream>
 #include <locale>
 #include <regex>
@@ -338,6 +339,33 @@ std::u32string UTF8to32(const std::string &in)
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> strCnv;
     return strCnv.from_bytes(in);
     */
+}
+
+// The white space at the start and at the end of an element's text is taken off when it is how the file is laid out: a
+// run with a line break in it. A run on one line is text, as the writer wrote it ("<rend> CODA</rend>" after another
+// run): it was taken off too, and a text that went out to MEI and came back ran into the one before it.
+std::u32string LeftTrimLaidOut(std::u32string str)
+{
+    std::u32string::size_type pos = 0;
+    bool lineBreak = false;
+    while (pos < str.size() && iswspace(str[pos])) {
+        lineBreak = lineBreak || (str[pos] == U'\n') || (str[pos] == U'\r');
+        pos++;
+    }
+    if (lineBreak) str.erase(0, pos);
+    return str;
+}
+
+std::u32string RightTrimLaidOut(std::u32string str)
+{
+    std::u32string::size_type pos = str.size();
+    bool lineBreak = false;
+    while (pos > 0 && iswspace(str[pos - 1])) {
+        lineBreak = lineBreak || (str[pos - 1] == U'\n') || (str[pos - 1] == U'\r');
+        pos--;
+    }
+    if (lineBreak) str.erase(pos);
+    return str;
 }
 
 std::string UTF16to8(const std::u16string &in)

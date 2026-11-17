@@ -1226,6 +1226,51 @@ void MusicXmlInput::PrintMetronome(pugi::xml_node metronome, Tempo *tempo)
 //////////////////////////////////////////////////////////////////////////////
 // Parsing methods
 
+namespace {
+
+    // A text as MEI holds it, in [parent] and in all it holds (MuseNote patch 89, RC103): texts side by side are one (a
+    // tempo's "(", " = ", its number and ")" were four), an empty text is none (an empty lyric), and white space with a
+    // line break at the start of the first child or the end of the last, which the MEI reader takes as the file's
+    // layout, is taken off (a lyric "nel" and a newline). The score read back from its MEI is the score it was: the
+    // reader's transposed and one-part views are drawn from it
+    void HoldTextsAsMeiHoldsThem(Object *parent)
+    {
+        std::vector<Object *> gone;
+        Text *previous = NULL;
+        for (Object *child : parent->GetChildren()) {
+            if (!child->Is(TEXT)) {
+                previous = NULL;
+                continue;
+            }
+            Text *text = vrv_cast<Text *>(child);
+            if (previous) {
+                previous->SetText(previous->GetText() + text->GetText());
+                gone.push_back(text);
+            }
+            else {
+                previous = text;
+            }
+        }
+        for (Object *text : gone) parent->DeleteChild(text);
+        const ArrayOfObjects &children = parent->GetChildren();
+        if (!children.empty() && children.front()->Is(TEXT)) {
+            Text *first = vrv_cast<Text *>(children.front());
+            first->SetText(LeftTrimLaidOut(first->GetText()));
+        }
+        if (!children.empty() && children.back()->Is(TEXT)) {
+            Text *last = vrv_cast<Text *>(children.back());
+            last->SetText(RightTrimLaidOut(last->GetText()));
+        }
+        gone.clear();
+        for (Object *child : parent->GetChildren()) {
+            if (child->Is(TEXT) && vrv_cast<Text *>(child)->GetText().empty()) gone.push_back(child);
+        }
+        for (Object *text : gone) parent->DeleteChild(text);
+        for (Object *child : parent->GetChildren()) HoldTextsAsMeiHoldsThem(child);
+    }
+
+} // namespace
+
 bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
 {
     assert(root);
@@ -1645,6 +1690,9 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
     // The signs of the sounds the page would not show, on the score as it is written: before its repeats are
     // written out (a copy of a bar carries its signs) and before it is paged
     this->WriteSignsOfSound();
+
+    // Its texts as MEI holds them: before its repeats are written out (a copy carries its texts)
+    HoldTextsAsMeiHoldsThem(m_doc);
 
     // finalize document
     m_doc->ExpandExpansions();
