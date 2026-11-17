@@ -2185,24 +2185,7 @@ bool MusicXmlInput::ReadMusicXmlPart(pugi::xml_node node, Section *section, shor
             // Add the measure to the system - if already there from a previous part we'll just merge the content
             this->AddMeasure(section, measure, i);
         }
-        else {
-            // Handle barline parsing for the multirests (where barline would be defined in last measure of the mRest)
-            // If this is last measure, find starting measure of the mRest (based on the Id) and add barline to it
-            auto lastElementIter = std::find_if(m_multiRests.begin(), m_multiRests.end(),
-                [i](const std::pair<int, int> &elem) { return i == elem.second; });
-            if (lastElementIter != m_multiRests.end()) {
-                auto measureIter = std::find_if(m_measureCounts.begin(), m_measureCounts.end(),
-                    [lastElementIter](
-                        const std::pair<Measure *, int> &elem) { return lastElementIter->first == elem.second; });
-                if (measureIter != m_measureCounts.end()) {
-                    for (auto it = xmlMeasure.node().begin(); it != xmlMeasure.node().end(); ++it) {
-                        if (IsElement(*it, "barline")) {
-                            this->ReadMusicXmlBarLine(*it, measureIter->first, measureIter->first->GetN());
-                        }
-                    }
-                }
-            }
-        }
+        // (a bar a multi-bar rest stands for, after its first, is read with the rest: ReadMultiRestMarks)
         ++i;
     }
 
@@ -5040,6 +5023,23 @@ void MusicXmlInput::ReadMultiRestMarks(pugi::xml_node from, pugi::xml_node bar, 
             else if (IsElement(mark, "sound")) {
                 this->ReadMusicXmlSound(mark, measure, section);
                 this->MarkJumpsOfSound(mark, measure, "", 1.0);
+            }
+            // Its own barlines, its first bar's and its last bar's, wherever the bar writes them, before its measure
+            // is placed in the order of play (MuseNote RC110: one after the rest's attributes was lost; RC111: the
+            // last bar's were read after, and a repeat end there repeated the bar after the rest)
+            else if (IsElement(mark, "barline") && ((b == 0) || (b == bars - 1))) {
+                this->ReadMusicXmlBarLine(mark, measure, measureNum);
+            }
+            // A chord symbol of its first bar stands where it would before the rest's attributes; one of a later bar
+            // has no place in the rest's one measure (MuseNote RC110)
+            else if (IsElement(mark, "harmony")) {
+                if (b == 0) {
+                    this->ReadMusicXmlHarmony(mark, measure, measureNum);
+                }
+                else {
+                    LogWarning("MusicXML import: a chord symbol in bar %s, inside a multi-bar rest, is left out",
+                        bar.attribute("number").as_string());
+                }
             }
         }
     }
