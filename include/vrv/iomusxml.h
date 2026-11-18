@@ -707,6 +707,11 @@ private:
     int m_ppq = -1;
     /* measure time */
     int m_durTotal = 0;
+    // The furthest the cursor reaches in the measure by a <forward>, the forward that took it there and the layer
+    // current then (MuseNote RC3)
+    int m_forwardReach = 0;
+    pugi::xml_node m_forwardReachNode;
+    Layer *m_forwardReachLayer = NULL;
     /* measure time */
     int m_durFb = 0;
     /* meter signature */

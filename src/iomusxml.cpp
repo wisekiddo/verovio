@@ -2293,6 +2293,9 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
 
     // reset measure time
     m_durTotal = 0;
+    m_forwardReach = 0;
+    m_forwardReachNode = pugi::xml_node();
+    m_forwardReachLayer = NULL;
 
     // reset clef changed flag
     m_clefChanged = 0;
@@ -2384,6 +2387,21 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
     int barTime = m_durTotal;
     for (const auto &[layer, end] : m_layerEndTimes) {
         if (layer->GetFirstAncestor(MEASURE) == measure) barTime = std::max(barTime, end);
+    }
+    // A forward that took the cursor past everything the bar holds, and came back: the bar lasts that long all the
+    // same, its time carried by space in the forward's voice (MuseNote RC3)
+    if (m_forwardReach > barTime) {
+        Layer *layer = m_forwardReachLayer;
+        if (m_forwardReachNode.child("voice") || !layer) {
+            const int voice = std::max(1, m_forwardReachNode.child("voice").text().as_int());
+            const int staffNum = std::max(1, m_forwardReachNode.child("staff").text().as_int());
+            Staff *staff = vrv_cast<Staff *>(measure->GetChild(std::min(staffNum, measure->GetStaffCount()) - 1, STAFF));
+            assert(staff);
+            layer = this->SelectLayer(voice, staff);
+        }
+        const int reached = m_layerEndTimes.contains(layer) ? m_layerEndTimes.at(layer) : 0;
+        this->FillSpace(layer, m_forwardReach - reached);
+        barTime = m_forwardReach;
     }
 
     // set metcon to false for pickup measures: by the bar's time (by the cursor, a bar whose voice written last ends
@@ -3431,13 +3449,23 @@ void MusicXmlInput::ReadMusicXmlForward(pugi::xml_node node, Measure *measure, c
     assert(node);
     assert(measure);
 
-    if (!node.next_sibling()) {
-        // fill the layer, if forward element is last sibling
-        this->FillSpace(SelectLayer(node, measure), node.child("duration").text().as_int());
+    // A forward moves the cursor. The bar's last one in time (nothing timed after it, a barline or a direction may
+    // follow) brings its voice (its <voice>, else the current layer's) to the cursor, with space where the voice holds
+    // nothing yet; any other is the cursor's alone. A forward made time only as the bar's last element (followed by a
+    // barline or a direction it made none), and then its whole length after what its voice already held, a forward
+    // after a backup too (MuseNote RC3). How far the forwards reach is kept for the bar's end
+    m_durTotal += node.child("duration").text().as_int();
+    if (m_durTotal > m_forwardReach) {
+        m_forwardReach = m_durTotal;
+        m_forwardReachNode = node;
+        m_forwardReachLayer = m_currentLayer;
     }
-    else {
-        m_durTotal += node.child("duration").text().as_int();
+    for (pugi::xml_node next = node.next_sibling(); next; next = next.next_sibling()) {
+        if (IsElement(next, "note") || IsElement(next, "backup") || IsElement(next, "forward")) return;
     }
+    Layer *layer = SelectLayer(node, measure);
+    const int reached = m_layerEndTimes.contains(layer) ? m_layerEndTimes.at(layer) : 0;
+    if (m_durTotal > reached) this->FillSpace(layer, m_durTotal - reached);
 }
 
 void MusicXmlInput::ReadMusicXmlHarmony(pugi::xml_node node, Measure *measure, const std::string &measureNum)
