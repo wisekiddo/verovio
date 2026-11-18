@@ -2989,6 +2989,40 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 98. A forward is time in its voice wherever it stands (tb.45)
+
+Found by MuseNote's finding W35 and traced by plan V3_2_0_66 (root cause RC3); fixed by plan V3_2_0_68. The MusicXML
+reader took a `<forward>` as cursor movement only. It made time when a later note needed the gap, or when the forward
+was the bar's very last element (`!node.next_sibling()`), and then its whole length after what its voice held:
+
+- a barline or a direction after it, a second forward, or a backup after it left the bar short (All Through the Night
+  bars 62 and 63, two forwards in each voice: 2 beats of 4; Rock Around the Clock bar 42; Consider Yourself bar 17);
+- a forward after a backup, over time its voice already had, was added again (Cabaret v2 bar 16: 5 beats of 4);
+- a forward that filled its voice did not move the cursor, so its bar was marked not full (`metcon="false"`).
+
+A forward with no note, backup or forward after it in its bar now brings its voice (its `<voice>`, else the current
+layer's) to the cursor, with space only where the voice holds nothing yet; any other forward moves the cursor alone.
+The furthest a bar's forwards carry the cursor is the bar's time, as MusicXML gives it: a bar they carried past
+everything it holds, and back, is filled to there in the forward's voice at its end. A first version that filled at
+every forward broke Chaka Khan v2 bar 20, where a forward of no voice takes the cursor to a chord symbol and is backed
+up from; it was dropped.
+
+Parity, against tb.44: 503 of 22,919 outputs differ. 38 ended songs of the MuseNote corpus, never served, play their
+forwards (the files that cross their bars' ends, corrected since as new songs); the 35 songs MuseNote corrected in plan
+V3_2_0_67 are new outputs. Of the live songs, 12: four play as their files give (the bars above); two play the padded
+pickup their files write (America the Beautiful v2, Birdland: MuseNote finding W101, the files corrected); three fill a
+voice to their bar's end, play identical (El día que me quieras v2, New York State of Mind v2, La Brabançonne's last
+bar); four are marked full or not full by their true time (Fantomas, High Noon, Since I Fell for You v2; Superstar bar 1,
+overfull by a sixtieth of a quarter). Seeded ids on a fresh thread: 3,212 of 3,212; every input reads back from its MEI.
+
+**Cases**: `test/native/test_tb45_forwards_engine.cpp`: a forward before a barline or a direction, in a voice or of
+none; forwards in a row; a forward after a backup; a forward then a backup with nothing after (the bar four beats; of
+voice 2, its time in voice 2's layer); and two shapes that must not change (a forward to a chord symbol, backed up
+from; forwards before their voice's notes). Four fail on tb.44. Each part broken and caught: the old "anything after it"
+test, filling the forward's whole length, no fill at the bar's end, that fill always in the current layer.
+
+**Upstream status**: not offered.
+
 ### 97. A bar is full by its longest voice (tb.44)
 
 Found by MuseNote plan V3_2_0_66's export gate (root cause RC116). The MusicXML reader marked a bar not full
