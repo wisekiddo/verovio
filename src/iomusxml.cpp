@@ -2862,9 +2862,12 @@ void MusicXmlInput::ReadMusicXmlDirection(
                     text += w.node().text().as_string();
                 }
                 // (where a sound of the score gives a jump of that kind, the sound is its playback, and these
-                // words its print: a Fine written beside the final bar whose sound ends the play is no second Fine)
+                // words its print: a Fine written beside the final bar whose sound ends the play is no second Fine.
+                // Words that name a coda or segno whose sign the measure holds are the sign's name, its print: they
+                // were a second target beside it, "coda" written by the coda sign of Livin' La Vida Loca: MuseNote W76)
                 const auto jump = JumpOfWords(text);
-                if (jump && !SoundOfScoreGives(node, jump->kind) && !IsTailOfJump(node, text)) {
+                if (jump && !SoundOfScoreGives(node, jump->kind) && !IsTailOfJump(node, text)
+                    && !MeasureHoldsSign(node.parent(), jump->kind)) {
                     kind = jump->kind;
                     if (!jump->label.empty() && (jump->label != ((kind == "segno" || kind == "dalsegno") ? "segno" : "coda"))) {
                         dir->SetLabel(jump->label);
@@ -2971,14 +2974,18 @@ void MusicXmlInput::ReadMusicXmlDirection(
         m_controlElements.push_back({ measure, dir });
     }
     else if (xmlJump && !containsWords) {
-        // a sign alone, in a score whose sounds give no target of its kind, is its target (MuseNote RC42)
-        if (!SoundOfScoreGives(node, xmlJump.node().name())) {
-            this->PlayJumpOfWords(xmlJump.node().name(), xmlJump.node().name());
+        // a sign alone, in a score whose sounds give no target of its kind, is its target (MuseNote RC42), named by
+        // the words beside it that name it ("Coda II": the second coda; MuseNote W76)
+        const std::string kind = xmlJump.node().name();
+        const std::string name = NameOfSign(node.parent(), kind);
+        if (!SoundOfScoreGives(node, kind)) {
+            this->PlayJumpOfWords(kind, name.empty() ? kind : name);
         }
         RepeatMark *mark = new RepeatMark();
         mark->SetPlace(mark->AttPlacementRelStaff::StrToStaffrel(placeStr.c_str()));
         mark->SetTstamp(timeStamp);
         mark->SetFunc(ConvertJumpType(xmlJump.node().name()));
+        if (!name.empty() && (name != kind)) mark->SetLabel(name);
         if (soundNode) this->KeepWhatTheSoundSays(mark, soundNode, xmlJump.node().name());
         mark->SetStaff(mark->AttStaffIdent::StrToXsdPositiveIntegerList("1"));
         if (xmlJump.node().attribute("smufl")) {
@@ -5038,6 +5045,30 @@ bool MusicXmlInput::MeasureHoldsJumpBack(const pugi::xml_node measure)
         if (jump && ((jump->kind == "dacapo") || (jump->kind == "dalsegno"))) return true;
     }
     return false;
+}
+
+bool MusicXmlInput::MeasureHoldsSign(const pugi::xml_node measure, const std::string &kind)
+{
+    for (const pugi::xpath_node &direction : measure.select_nodes("direction")) {
+        if (direction.node().select_node(("direction-type/" + kind).c_str())
+            && !direction.node().select_node("direction-type/words")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string MusicXmlInput::NameOfSign(const pugi::xml_node measure, const std::string &kind)
+{
+    for (const pugi::xpath_node &direction : measure.select_nodes("direction")) {
+        std::string text;
+        for (const pugi::xpath_node &w : direction.node().select_nodes("direction-type/words")) {
+            text += w.node().text().as_string();
+        }
+        const auto jump = JumpOfWords(text);
+        if (jump && (jump->kind == kind)) return jump->label;
+    }
+    return "";
 }
 
 bool MusicXmlInput::IsTailOfJump(const pugi::xml_node direction, const std::string &text)

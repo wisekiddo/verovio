@@ -360,6 +360,10 @@ private:
     static bool MeasureHoldsToCoda(const pugi::xml_node measure);
     /** Whether [measure] holds a D.C. or D.S.: by a <sound>, or in its words (MuseNote RC80) */
     static bool MeasureHoldsJumpBack(const pugi::xml_node measure);
+    /** Whether [measure] holds a [kind] sign (coda, segno) in a direction of its own, with no words (MuseNote W76) */
+    static bool MeasureHoldsSign(const pugi::xml_node measure, const std::string &kind);
+    /** The label of the words in [measure] that name a [kind] sign (coda, segno); empty where none do (MuseNote W76) */
+    static std::string NameOfSign(const pugi::xml_node measure, const std::string &kind);
     /**
      * Whether the words [text] of [direction] are "al Coda" written apart from the D.C. or D.S. of their measure
      * ("D.S. § al Coda ⊕" given as several directions): that jump's tail, no To Coda of their own (MuseNote RC80)
