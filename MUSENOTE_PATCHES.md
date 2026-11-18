@@ -2989,6 +2989,32 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 99. A coda or segno sign's name written beside it is its name (tb.46)
+
+Found by MuseNote plan V3_2_0_54's export gate (finding W76); fixed by plan V3_2_0_70 (root cause RC117). The MusicXML
+reader reads a jump or a target from its words alone (patch 66). A file that writes a coda sign and its name "coda"
+beside it, each in a direction of its own with no `<sound>` (Livin' La Vida Loca bar 68), was read as two targets in
+one bar: the sign (`repeatMark`) and the words (`dir type="coda"`). The ABC export wrote `!coda!!coda!` on one note.
+And since the order of play keeps one target label per measure, a name with a numeral ("Coda II") labelled the
+measure's target only when the words were read before the sign.
+
+Words that name a coda or segno whose sign the measure holds (in a direction of its own, with no words) are now that
+sign's name: printed as written, untyped. The sign is the one target, labelled by its name (`codaii`), in the MEI and
+in the order of play (`MeasureHoldsSign`, `NameOfSign`).
+
+Parity, against tb.45: 32 of 22,940 outputs differ, all of 8 MuseNote songs (6 live): in each, the name's `dir` loses
+its `type`, and its page the class with it. No element is added or removed (no id moves); no timemap, MIDI or pitch map
+changes. Seeded ids 3,215 of 3,215; every input reads back from its MEI.
+
+**Cases**: `test/native/test_tb46_sign_names_engine.cpp`: a coda or segno sign and its name, the name written after
+or before it, at its beat or offset (one target, the words printed); "Coda II" beside a sign written first (the mark
+labelled, and "To Coda II" after "D.C. al Coda II" lands there); five shapes that must not change (a name alone, a sign
+alone, a sign and its name in one direction, a To Coda's sign, a segno in a To Coda II's bar, unlabelled). The first
+two fail on tb.45. Each part broken and caught: the words still a target, the order of play or the mark unlabelled, a
+sign with words counted as a sign, any jump's label taken for the name.
+
+**Upstream status**: not offered.
+
 ### 98. A forward is time in its voice wherever it stands (tb.45)
 
 Found by MuseNote's finding W35 and traced by plan V3_2_0_66 (root cause RC3); fixed by plan V3_2_0_68. The MusicXML
