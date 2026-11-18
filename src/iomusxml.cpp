@@ -2731,7 +2731,16 @@ void MusicXmlInput::ReadMusicXmlDirection(
     // the jump or sign of the sound that this direction's own mark carries (another the sound gives is marked apart)
     std::string carried;
 
-    if (voice) m_prevLayer = SelectLayer(node, measure);
+    if (voice) {
+        // The voice of a direction only tells where it belongs. It must not select the layer of the notes that follow:
+        // a direction of voice 1 between the notes of voice 2 would otherwise move them into layer 1.
+        Layer *currentLayer = m_currentLayer;
+        const bool isLayerInitialized = m_isLayerInitialized;
+        m_isLayerInitialized = false;
+        m_prevLayer = this->SelectLayer(node, measure);
+        m_currentLayer = currentLayer;
+        m_isLayerInitialized = isLayerInitialized;
+    }
 
     // Bracket
     pugi::xml_node bracket = typeNode.child("bracket");
