@@ -29337,18 +29337,22 @@ void HumdrumInput::addMordent(Object *linked, hum::HTp token)
 int HumdrumInput::getNoteStaff(hum::HTp token, int homestaff)
 {
     hum::HumRegex hre;
+    // Only a staff the score has: above the top staff, or below the bottom one, the note stays on its own, and so do
+    // its ornaments. (The top staff's gave staff 0, the bottom staff's one past the last, as the reader already keeps a
+    // hairpin from: MuseNote W127, RC151)
+    const int staffCount = (int)m_staffstarts.size();
     if (!m_signifiers.above.empty()) {
         std::string sstring = "[A-Ga-g]+[-#n]*";
         sstring += m_signifiers.above;
         if (hre.search(token, sstring)) {
-            return homestaff - 1;
+            return (homestaff > 1) ? homestaff - 1 : homestaff;
         }
     }
     if (!m_signifiers.below.empty()) {
         std::string sstring = "[A-Ga-g]+[-#n]*";
         sstring += m_signifiers.below;
         if (hre.search(token, sstring)) {
-            return homestaff + 1;
+            return (homestaff < staffCount) ? homestaff + 1 : homestaff;
         }
     }
 
