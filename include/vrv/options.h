@@ -791,6 +791,8 @@ public:
     OptionBool m_loadSelectedMdivOnly;
     OptionBool m_mdivAll;
     OptionString m_mdivXPathQuery;
+    // MuseNote (patch 129): read MusicXML and ABC with the frozen readers of this upstream release ("6.2.0")
+    OptionString m_legacyReaders;
     OptionBool m_ossiaHidden;
     OptionArray m_substXPathQuery;
     OptionString m_transpose;

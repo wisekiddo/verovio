@@ -1623,6 +1623,13 @@ Options::Options()
     m_mdivXPathQuery.Init("");
     this->Register(&m_mdivXPathQuery, "mdivXPathQuery", &m_selectors);
 
+    // MuseNote (patch 129): the frozen readers of upstream 6.2.0 (iomusxml620, ioabc620). MuseNote 2.1 to 3.0.1 named
+    // notes by the ids their objects got; a score read with them names its notes so again, for the marks stored then.
+    m_legacyReaders.SetInfo("Legacy readers",
+        "Read MusicXML and ABC with the readers of this upstream release (\"6.2.0\"), for the ids they generated");
+    m_legacyReaders.Init("");
+    this->Register(&m_legacyReaders, "legacyReaders", &m_selectors);
+
     m_ossiaHidden.SetInfo("Ossia hidden", "Hide ossias when rendering");
     m_ossiaHidden.Init(false);
     this->Register(&m_ossiaHidden, "ossiaHidden", &m_selectors);

@@ -24,12 +24,14 @@
 #include "filereader.h"
 #include "findfunctor.h"
 #include "ioabc.h"
+#include "ioabc620.h"
 #include "iocmme.h"
 #include "iodarms.h"
 #include "iogabc.h"
 #include "iohumdrum.h"
 #include "iomei.h"
 #include "iomusxml.h"
+#include "iomusxml620.h"
 #include "iopae.h"
 #include "iovolpiano.h"
 #include "layer.h"
@@ -621,9 +623,20 @@ bool Toolkit::LoadData(const std::string &data, bool resetLogBuffer)
     if (inputFrom == AUTO) {
         inputFrom = IdentifyInputFrom(data);
     }
+    // MuseNote (patch 129): the frozen readers of upstream 6.2.0, for the ids MuseNote 2.1 to 3.0.1 stored
+    const std::string legacyReaders = m_options->m_legacyReaders.GetValue();
+    if (!legacyReaders.empty() && (legacyReaders != "6.2.0")) {
+        LogError("Unknown legacyReaders '%s': only \"6.2.0\" is kept", legacyReaders.c_str());
+        return false;
+    }
     if (inputFrom == ABC) {
 #ifndef NO_ABC_SUPPORT
-        input = new ABCInput(&m_doc);
+        if (!legacyReaders.empty()) {
+            input = new v620::ABCInput(&m_doc);
+        }
+        else {
+            input = new ABCInput(&m_doc);
+        }
 #else
         LogError("ABC import is not supported in this build.");
         return false;
@@ -734,7 +747,12 @@ bool Toolkit::LoadData(const std::string &data, bool resetLogBuffer)
     }
     else if (inputFrom == MUSICXML) {
         // This is the direct converter from MusicXML to MEI using iomusicxml:
-        input = new MusicXmlInput(&m_doc);
+        if (!legacyReaders.empty()) {
+            input = new v620::MusicXmlInput(&m_doc);
+        }
+        else {
+            input = new MusicXmlInput(&m_doc);
+        }
     }
 #ifndef NO_HUMDRUM_SUPPORT
     else if (inputFrom == MUSICXMLHUM) {
