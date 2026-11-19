@@ -4030,6 +4030,8 @@ void MusicXmlInput::ReadMusicXmlNote(
             }
             if (!chord) {
                 LogError("MusicXML import: Chord starting point has not been found");
+                // (the note is no one's: it was lost to memory. MuseNote RC155, upstream f1998d2b0)
+                delete note;
                 return;
             }
             // Mark a chord as cue=true if and only if all its child notes are cue.
