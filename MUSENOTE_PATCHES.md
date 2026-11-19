@@ -2989,6 +2989,122 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 128. A rest inside a tab group is timed by its group (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC156, finding W140), ours (550b604). `InitOnsetOffsetFunctor` timed a rest inside a
+tabGrp twice: the group's end added the group's duration, and the rest, visited as a layer element of its own, added
+its own as well, so what followed it was played late and the bar ran long (an MEI guitar-tab file's
+`<tabGrp dur="4"><tabDurSym/><rest/></tabGrp>`: the next note at quarter 3, not 2). Upstream has it from 6.2.0 to
+develop; its e2f797f22 (patch 121) puts such a rest into each rest of a single TAB staff from MusicXML, so this patch
+comes before it. A rest in a tab group now takes its group's time, as the group's notes do, and adds none.
+
+### 127. A `<chord/>` note whose chord is not found is deleted (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC155, finding W126), ours (8866238), crediting upstream f1998d2b0 (6.4.0): patch
+28 returned from a `<chord/>` note whose chord the reader could not find ("Chord starting point has not been found")
+without deleting the note it built. That commit's `delete note;` alone: its other half passes over a chord note after
+a rest at a measure's start in another way, which builds other objects and moves ids; patch 28 already reads that case.
+
+### 126. A direction's voice does not move the voice-less notes after it (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC154, finding W125); upstream 53584d697 (develop), cherry-picked.
+`ReadMusicXmlDirection` let a direction's `<voice>` select the current layer, so the voice-less notes after it went to
+that voice's layer (patch 95, RC112, sends back a note that names its own voice; one that names none stayed).
+
+### 125. Nested slurs are adjusted innermost first (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC153, finding W139); upstream eb00ec45a (develop), cherry-picked onto patch 91:
+both keep the outer slurs in the order of the positioners (patch 91's code and comment are kept in the two conflicting
+hunks), and upstream's stable sort, innermost first, is taken. In document order an outer slur was placed before the
+slur inside it had risen over its own inner one, and was drawn through it (three nested slurs, the inner over high
+notes: 41 units of overlap; now clear by 38).
+
+### 124. A Humdrum trill line that ends at a grace chord names the chord (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC152, finding W138); upstream 828f7264d (develop), cherry-picked. `addTrill` ended
+the extension line at a grace token by a note id; a grace chord's id is a chord's, so the line named an element that
+does not exist and was not drawn.
+
+### 123. A Humdrum ornament follows its note above or below, to a staff the score has (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC151, findings W137, W127). Upstream 992d2e644 (6.4.0), cherry-picked:
+`getNoteStaff` looked for the above/below mark after lowercase pitch letters only, so the ornaments of a note below
+middle C stayed home while the note moved. And ours (d50c0fe): it returned the note's staff plus or minus one with no
+bound: on the top staff an ornament marked above got staff 0, and with 992d2e644 one marked below on the bottom staff
+got one past the last, while the note stays on its own. The staff is now one the score has, as a hairpin's already is.
+
+### 122. Humdrum unpitched notes are not taken for errors (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC150, finding W136); upstream 2fee90407 (6.3.0, its issue 4350), cherry-picked:
+an unpitched note (`R`) on a `*clefX` staff was coloured as an error, and a chord's unpitched notes were placed on one
+line.
+
+### 121. A TAB staff's content is built as a TAB staff's (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC149, finding W135). Upstream, cherry-picked: e2f797f22 (6.3.0) keeps the rests
+of a part of a single TAB staff, which were dropped (each a `<rest>` in its tabGrp, timed by its group: patch 128);
+d7b74259b (6.4.0) has an arpeggio name every note of a tab chord, not the first; 90a440db7 (6.4.0) gives a stemless
+tab note no duration sign; 20c1936cc (6.4.0), its articulation half: a note's `<articulations>` are not given to its
+tabGrp, which holds none (its verse half guards the verses upstream adds at lyric extender stops, 92b03ade9, which this
+branch does not have). And ours (cac6aa3), the same class: a `<technical>` mark other than a string, fret, fingering or
+thumb position (a hammer-on, a bend, a harmonic) went the same way, refused by the tabGrp with an error and lost to
+memory; it is left out as an articulation is. Upstream develop still does.
+
+### 120. An MEI grace group may stand in a tuplet (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC148, finding W134); upstream 0b4b78a9b (6.4.0), cherry-picked: the MEI reader
+refused a `<graceGrp>` inside a `<tuplet>`, and its grace notes were dropped.
+
+### 119. Two clefs at one place keep the file's order (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC147, finding W133); upstream e2e5cd302 (6.4.0), cherry-picked: a clef inserted
+after an element inside a chord or a beam was recorded at the wrong time, and one inserted before a measure's first
+element was recorded at all, so a second clef at the same place went before the first.
+
+### 118. A tuplet whose notations are not printed is drawn with none (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC146, finding W132); upstream e2c687382 (6.3.0), cherry-picked: the `print-object`
+of the `<notations>` holding a tuplet's start was not read, so a hidden tuplet was drawn with its number and bracket.
+
+### 117. An unpitched note on the percussion channel plays its instrument's key (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC145, finding W131); upstream 3d744d933 (6.4.0), cherry-picked: an unpitched note
+got its place on the staff only, so the MIDI writer played every percussion note at key 0. For a part on MIDI channel
+10, the key of its instrument's `<midi-unpitched>` is its `@pnum`, played untransposed and untuned; patch 6 records it,
+so the pitch map has it. The drawing is the same (unpitched notes still compare alike).
+
+### 116. A circle-x notehead is drawn as one (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC144, finding W130); upstream 378720075, 0c9330162, 60a4472dc (6.4.0),
+cherry-picked (CHANGELOG.md left out): `circle-x` was mapped to a slash; it is noteheadCircleX. They also map
+`triangle` to `isotriangle` in place of `rtriangle`: the MEI value only. Neither is drawn: `GetNoteheadGlyph` has the
+triangle cases commented out (here and upstream to develop), and the font data has no triangle glyph (MuseNote RC157,
+W141, open).
+
+### 115. A no-chord shows what its file shows (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC143, finding W129); upstream ede5a0f20 (6.4.0), cherry-picked (CHANGELOG.md left
+out): `root-step@text` and, for the kind "none", `kind@text` were not read, so a "C" was drawn where the file shows
+"N.C." or nothing.
+
+### 114. A breath mark or caesura stands at the end of its note (tb.52)
+
+MuseNote plan V3_2_0_78 (root cause RC142, finding W128); upstream 44c85a898 and 75df1a822 (6.3.0), cherry-picked: a
+MusicXML `<breath-mark>` or `<caesura>` was placed at its note's start plus half a beat, so after a note longer than a
+beat it stood in the note's middle. It is placed at the note's end.
+
+**Gate of tb.52** (patches 114 to 128 together, MuseNote plan V3_2_0_78). Native: the 16 cases of
+`test/native/test_tb52_upstream_round_two_engine.cpp` fail on tb.51 where they test a fix, but RC155's, whose fix is
+shown by `leaks --atExit` on its case (18 leaks on tb.51, none on tb.52); each of the commits, undone alone, is caught
+by its own case (992d2e644 undone with patch 123's bound on it, by its subcase); the suite, 448 cases (15,954
+assertions), and under ASan 447 (15,937), no finding; a Debug engine (asserts on) over every input: 3,610, all through.
+Parity: 107 of 22,947 outputs differ, all of 27 songs (breath marks in 7, caesuras in 11, no-chords in 8, a triangle
+notehead's value in Honky-Tonk Woman: their MEI, its locator copies, and page 1 of 26 of them); no generated id moves,
+no timemap, MIDI or pitch map changes; seeded ids 3,216 of 3,216; every input reads back from its MEI. The locator
+gate: 0 failures. MuseNote's export gate in every format, with its MusicXML export's breath and caesura rule moved with
+patch 114 (it found such a mark's note by this branch's old placement): Cambalache's four no-chords, now empty, are not
+exported (declared); its four reader guards give tb.51's results; MuseSync's 24 starters play the same.
+
 ### 113. Order of play: the part after the part played before is found past what plays nothing (tb.51)
 
 MuseNote plan V3_2_0_77 (root cause RC139, finding W79). `ExpansionMap::Expand` moves a part the order names for the
@@ -4597,7 +4713,8 @@ half of af2adb2a7 (104); 8339461f8 (105); c8582c622 (106, develop); 61866183d (1
   patch 50 stands on 18; 6.4.1 has a regression of it, #4567 (an accidental-mark changes the next note's pitch), mended
   on develop by 6b49a5a66;
 - patches 28 and 40: 3fe7f1ad3 and f1998d2b0 (6.4.0), the same faults mended otherwise;
-- patch 91: eb00ec45a (develop), the same fault (nested slurs) mended otherwise;
+- patch 91: eb00ec45a (develop), the same fault (nested slurs) mended otherwise, and innermost first: its sort taken at
+  tb.52 (patch 125);
 - patch 93: a96989225 (develop), the same fault (a chord's beam), narrower than ours.
 
 **Upstream goes the other way:** 8817c3033 (6.3.0) drops a trailing forward's space; patch 98 keeps the forward's time.
@@ -4620,6 +4737,25 @@ page, which neither app calls); develop's font rewrite (it moves `data/` and wri
 **Found by the audits of tb.49's classes, upstream develop still has it:** a tablature note's course sized the MIDI
 writer's hold list (patch 107, ours); a `<staff>` the score does not have read past `m_octDis` (patch 103, ours); a
 part's first `<staff-details print-object>` is never read (MuseNote's W116, open).
+
+**Round 2, taken at tb.52 (2026-11-19, MuseNote plan V3_2_0_78; patches 114 to 128).** First a trial: upstream 6.4.1,
+with this branch's patches 2, 88 and 6 only, against MuseNote's 422 native cases: on every one this branch is never
+worse than 6.4.1; 6.4.1 mends 33 of them, partly 11, still fails 321, and crashes on 50 of their inputs. So the picks
+are upstream fixes for faults the cases never covered, each found in this branch by a probe: 2fee90407, 44c85a898,
+75df1a822, e2c687382, e2f797f22, 378720075, 0c9330162, 60a4472dc, 0b4b78a9b, d7b74259b, 20c1936cc (its articulation
+half), 3d744d933, 90a440db7, 992d2e644, ede5a0f20, e2e5cd302 (6.3.0 and 6.4.0), 828f7264d, eb00ec45a (its sort),
+53584d697 (develop), and f1998d2b0's delete (patch 127). None moves a generated id of MuseNote's songs; in three
+shapes of file, ids after the fix move, as it builds what was dropped or drops what was wrong (a single TAB staff's
+rests, a stemless tab note's duration sign, a grace group in an MEI tuplet). At the base move they drop, the develop
+ones when upstream releases them; ours stay: patches 128, 123's bound, 121's technical guard.
+
+**Left for the base move:** 975f7c28d (harmony text runs: every chord symbol's tspans change, no gain from MusicXML);
+57f56d0da (an ending's `@label` drawn: no effect from MusicXML). **Not needed:** d1a5c019a (patch 62 already ties tab
+notes), 8497ed330 (it needs 92b03ade9), 1712ca6f8.
+
+**Found by the audits of tb.52's classes, upstream develop still has it:** a rest in a tab group timed twice (patch
+128, ours; e2f797f22 brings it to MusicXML); a technical mark offered to a tabGrp (patch 121, ours); an ornament's staff
+unbounded (patch 123, ours); no triangle notehead is drawn, `isotriangle` or any (MuseNote RC157, W141, open).
 
 ## Rules for this branch
 
