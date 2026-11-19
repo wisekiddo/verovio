@@ -2989,6 +2989,40 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 101. Humdrum export: only a tie is a tie's middle (tb.47)
+
+MuseNote plan V3_2_0_72 (root cause RC121, finding W79). `Tool_mei2hum::parseTieStart` took any link ending at a tie's
+start note for a tie arriving there (a tie's middle, written `_` by `parseTieStop`), and `parseTieStop` any link starting
+at its end note for one leaving. A slur ending where a tie starts lost the tie's start `[`, one starting where it ends
+lost its end `]`, and a reader of the Humdrum struck the held note again (A Teenager in Love). Only a tie is taken so
+now.
+
+### 100. Humdrum export: a layer number a staff has no layer of is a rest not seen (tb.47)
+
+MuseNote plan V3_2_0_72 (root cause RC120, finding W79). `Tool_mei2hum::parseStaff` placed a layer at the spine its number
+names, and made a spine for every number up to the largest. A staff whose layers are numbered with a gap (its one layer
+its 2, a file's second voice, as the app's two-staff scales are written) got a spine of null tokens only, with no time,
+and a reader timed the staff by nothing: the music came back a beat late and five times as long (Alle Jahre Wieder:
+quarters 0 to 32 read back as 1 to 152). Each layer number the staff has no layer of is now filled with a rest not seen
+(`ryy`), the length of the staff, after the short layers are filled to it (patch 96). The converter's own note, "need to
+add invisible rests in un-specified layers", was a warning only and is gone. (The mensural twin fills no layer at all
+and is left as it is.)
+
+Both, measured by MuseNote's export gate over every song, the Humdrum export read back by the engine, against tb.46:
+songs whose notes or times differ 238 to 60, how loud 328 to 154, channel 339 to 165; no song worse in any aspect; 178
+better. Parity: 0 of 22,940 outputs differ (no reader or drawing changes); seeded ids 3,215 of 3,215; every input reads
+back from its MEI.
+
+**Cases**: `test/native/test_tb47_humdrum_layers_ties_engine.cpp`:
+- a staff whose one layer is its 2, the same under a staff of layer 1 (a two-staff scale), and layers 1 and 3: every
+  spine timed, the Humdrum read back playing as the MEI;
+- a tie from a note a slur ends on, and to one a slur starts on: one start, one end, played as the MEI;
+- must not change: a tie's middle (`[`, `_`, `]`), and a staff of layers 1 and 2 (no rest added).
+The first two fail on tb.46. Each part broken and caught: no fill, the rest always in the first spine, a tie's start or
+end taking any link.
+
+**Upstream status**: not offered.
+
 ### 99. A coda or segno sign's name written beside it is its name (tb.46)
 
 Found by MuseNote plan V3_2_0_54's export gate (finding W76); fixed by plan V3_2_0_70 (root cause RC117). The MusicXML
