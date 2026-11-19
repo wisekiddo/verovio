@@ -3646,8 +3646,12 @@ void MusicXmlInput::ReadMusicXmlNote(
         if (chord) duration = std::min(duration, chord->GetDurPpq());
     }
     const int noteStaffNum = node.child("staff").text().as_int();
-    // Staff the note is actually on (cross-staff aware), for control events anchored to this note
-    const int notationStaffN = (noteStaffNum > 0) ? noteStaffNum + staffOffset : staff->GetN();
+    // Staff the note is actually on (cross-staff aware), for control events anchored to this note.
+    // (Only a staff the score has: a <staff> it does not have leaves the note drawn on its layer's staff, and
+    // m_octDis has no place for it, which was read out of bounds. MuseNote RC125)
+    const int notationStaffN = ((noteStaffNum > 0) && (noteStaffNum < (int)m_octDis.size() - staffOffset))
+        ? noteStaffNum + staffOffset
+        : staff->GetN();
     const pugi::xml_node rest = node.child("rest");
     // A note or a rest that is drawn takes the next place of its voice, the next for the ties before it (a chord
     // takes one; a grace note stands with the note it leads to; a rest not drawn is a gap, as a <forward> is)
