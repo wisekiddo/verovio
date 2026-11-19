@@ -2989,6 +2989,32 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 102. Humdrum export: a grace note keeps its kind, and a grace chord is a grace (tb.48)
+
+MuseNote plan V3_2_0_73 (root cause RC122, finding W79). `Tool_mei2hum::parseNote` wrote every grace `q`, and the
+Humdrum reader reads `q` as a grace before the beat (`GRACE_unacc`) and `qq` as one on it (`GRACE_acc`; humlib: "qq
+means a grace note on the beat, and q means a grace note before the beat"). An MEI `@grace="acc"`, played on the beat,
+came back before it, and the notes around it moved (Radetzky-Marsch, Under the Bridge, Three Little Birds). An `acc`
+grace is now written `qq`; any other grace is still `q`. And a chord that is a grace by its own `@grace`, its notes
+saying none (as the MusicXML reader makes one), was written as a plain chord, with its duration, in the place of the
+note it stands before (Musetta's Waltz: `8e 8f` took an eighth and carried the bar's chord symbol). Its notes now take
+the chord's `@grace`, `parseChord` queues it with the grace notes, and the queue writes it as a grace token
+(`addGraceToken`), as it writes a grace note. (The mensural twins are left as they are. A grace written on a chord's
+notes only, the chord plain, is not handled; the MusicXML reader never writes it, and no song has it.)
+
+Measured by MuseNote's export gate over every song, the Humdrum export read back by the engine, against tb.47: 16
+exports change, each a song with an `acc` grace; songs whose notes or times differ 60 to 45, how loud 154 to 139,
+channel 165 to 153; no song worse in any aspect; 15 better. Parity: 0 of 22,940 outputs differ (no reader or drawing
+changes); seeded ids 3,215 of 3,215; every input reads back from its MEI.
+
+**Cases**: `test/native/test_tb48_humdrum_grace_kinds_engine.cpp`:
+- an eighth grace before a note, `acc` and `unacc`: written `qq` and `q`, the Humdrum read back playing as the MEI;
+- a chord that is a grace by its own `@grace`, `acc` and `unacc`: one grace token, the note after it in its place;
+- must not change: a chord that is no grace, written with its time.
+The first two fail on tb.47. Each part broken and caught: every grace `q`; the chord's notes not taking its grace (the
+queue is then written again from within itself, and the run ends); the chord not queued; the chord written as a data
+token.
+
 ### 101. Humdrum export: only a tie is a tie's middle (tb.47)
 
 MuseNote plan V3_2_0_72 (root cause RC121, finding W79). `Tool_mei2hum::parseTieStart` took any link ending at a tie's
