@@ -103902,7 +103902,11 @@ HumNum Tool_mei2hum::parseNote(xml_node note, xml_node chord, string& output,
 	HumNum duration;
 	int dotcount;
 
+	// (a note of a grace chord is a grace by the chord's @grace: MuseNote RC122)
 	string grace = note.attribute("grace").value();
+	if (grace.empty() && chord) {
+		grace = chord.attribute("grace").value();
+	}
 	bool graceQ = !grace.empty();
 
 	if (gracenumber == 0) {
@@ -103982,9 +103986,12 @@ HumNum Tool_mei2hum::parseNote(xml_node note, xml_node chord, string& output,
 	} else {
 		stemdir = "";
 	}
+	// A grace that takes its time from the note after it (MEI @grace="acc") is on the beat: qq, as the Humdrum reader
+	// reads it back (humlib: "qq means a grace note on the beat, and q means a grace note before the beat"). Written q,
+	// every grace came back before the beat (MuseNote RC122)
 	string gracelabel = "";
 	if (graceQ) {
-		gracelabel = "q";
+		gracelabel = (grace == "acc") ? "qq" : "q";
 	}
 
 	string tok = recip + gracelabel + humpitch + articulations + stemdir
@@ -105697,6 +105704,23 @@ HumNum Tool_mei2hum::parseChord(xml_node chord, HumNum starttime, int gracenumbe
 	NODE_VERIFY(chord, starttime)
 	MAKE_CHILD_LIST(children, chord);
 
+	// A chord that is a grace by its own @grace waits with the grace notes for the note it stands before, as one
+	// whose notes say so does: its notes said nothing, and it was written with its duration, taking time (MuseNote
+	// RC122)
+	if ((gracenumber == 0) && !string(chord.attribute("grace").value()).empty()) {
+		if (m_gracenotes.empty()) {
+			m_gracetime = starttime;
+		}
+		grace_info ginfo;
+		ginfo.node = chord;
+		ginfo.beamprefix = m_beamPrefix;
+		ginfo.beampostfix = m_beamPostfix;
+		m_beamPrefix.clear();
+		m_beamPostfix.clear();
+		m_gracenotes.push_back(ginfo);
+		return starttime;
+	}
+
 	processPreliminaryLinkedNodes(chord);
 
 	HumNum duration = getDuration(chord);
@@ -105724,6 +105748,13 @@ HumNum Tool_mei2hum::parseChord(xml_node chord, HumNum starttime, int gracenumbe
 		processFermataAttribute(tok, chord);
 	}
 
+	// (a grace chord is written as a grace note is, in a grace slice of its own, and takes no time: written as a
+	// note, it took the place of the note it stands before: MuseNote RC122)
+	if (gracenumber > 0) {
+		keepId(m_outdata.back()->addGraceToken(tok, starttime QUARTER_CONVERT, m_currentStaff-1,
+			0, m_currentLayer-1, m_staffcount, gracenumber), m_currentStaff-1, m_currentLayer-1, chord);
+		return starttime;
+	}
 	keepId(m_outdata.back()->addDataToken(tok, starttime QUARTER_CONVERT, m_currentStaff-1,
 		0, m_currentLayer-1, m_staffcount), m_currentStaff-1, m_currentLayer-1, chord);
 
