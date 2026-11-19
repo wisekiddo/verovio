@@ -105014,7 +105014,10 @@ void Tool_mei2hum::parseTieStart(string& output, xml_node node, xml_node tie) {
 		auto found = m_stoplinks.find(id);
 		if (found != m_stoplinks.end()) {
 			for (auto item : (*found).second) {
-				if (strcmp(tie.attribute("startid").value(), item.attribute("endid").value()) == 0) {
+				// (a tie that ends where this one starts: a slur or another mark ending on the note is none,
+				// and the tie's start was lost: MuseNote RC121)
+				if ((string(item.name()) == "tie")
+						&& (strcmp(tie.attribute("startid").value(), item.attribute("endid").value()) == 0)) {
 					// deal with tie middles in parseTieStop().
 					return;
 				}
@@ -105074,7 +105077,9 @@ void Tool_mei2hum::parseTieStop(string& output, xml_node node, xml_node tie) {
 		auto found = m_startlinks.find(id);
 		if (found != m_startlinks.end()) {
 			for (auto item : (*found).second) {
-				if (strcmp(tie.attribute("endid").value(), item.attribute("startid").value()) == 0) {
+				// (a tie that starts where this one ends; a slur or another mark is none: MuseNote RC121)
+				if ((string(item.name()) == "tie")
+						&& (strcmp(tie.attribute("endid").value(), item.attribute("startid").value()) == 0)) {
 					output += "_";
 					return;
 				}
