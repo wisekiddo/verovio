@@ -9,8 +9,10 @@
 #define __VRV_IOHUMDRUM_H__
 
 #include <map>
+#include <set>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 //----------------------------------------------------------------------------
@@ -778,6 +780,7 @@ protected:
     Tie *tieToPreviousItem(hum::HTp token, int subindex, hum::HumNum meterunit, Measure *measure = NULL);
     Tie *addHangingTieToNextItem(hum::HTp token, int subindex, hum::HumNum meterunit, Measure *measure);
     bool inDifferentEndings(hum::HTp token1, hum::HTp token2);
+    bool endingsApart(hum::HTp before, hum::HTp after);
     bool checkIfSlurIsInvisible(hum::HTp stoken, int snumber, hum::HTp etoken, int enumber);
     void checkForTupletMergesAndSplits(std::vector<int> &tupletgroups, std::vector<hum::HTp> &duritems,
         std::vector<hum::HumNum> &durations, std::vector<bool> &durforce);
@@ -1172,6 +1175,9 @@ private:
 
     // m_numberlesslabels == The last section label without a number at the end.
     std::vector<hum::HTp> m_numberlesslabels;
+
+    // m_labelsInTurn == each two section labels the expansion list plays one right after the other (MuseNote RC137).
+    std::set<std::pair<std::string, std::string>> m_labelsInTurn;
 
     // m_endingnum == keep track of current ending.
     int m_endingnum = 0;

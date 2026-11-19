@@ -2050,6 +2050,11 @@ void HumdrumInput::processHangingTieStart(humaux::HumdrumTie &tieinfo)
         if (tieends.size() > 0) {
             // try to find a matching tie end from a lower layer number
             auto found = ss[staffindex].tieends.end();
+            // A disjunct tie (its start [[ or __, its end ]] or __) takes an end of its pitch after it, as processTieEnd
+            // takes its start when that is read first. (Its end read first, in an earlier layer, was looked for by time
+            // alone, where a disjunct tie's notes are apart: both were left hanging. MuseNote RC141)
+            const bool disjunct
+                = (token->find("[[") != std::string::npos) || (token->find("__") != std::string::npos);
             // search for open tie in current layer
             for (auto it = ss[staffindex].tieends.begin(); it != ss[staffindex].tieends.end(); ++it) {
                 if (it->getPitch() != pitch) {
@@ -2059,7 +2064,12 @@ void HumdrumInput::processHangingTieStart(humaux::HumdrumTie &tieinfo)
                     found = it;
                     break;
                 }
-                // deal with disjunct ties as well
+                else if (disjunct && (it->getStartTime() > endtime) && it->getEndToken()
+                    && ((it->getEndToken()->find("]]") != std::string::npos)
+                        || (it->getEndToken()->find("__") != std::string::npos))) {
+                    found = it;
+                    break;
+                }
             }
 
             if (found != tieends.end()) {
@@ -2306,38 +2316,7 @@ bool HumdrumInput::atEndingBoundaryStart(hum::HTp token)
     if (!current) {
         return false;
     }
-    int line1 = current->getLineIndex();
-    int line2 = token->getLineIndex();
-    hum::HTp label1 = m_sectionlabels[line1];
-    hum::HTp label2 = m_sectionlabels[line2];
-    if (label1 == label2) {
-        return false;
-    }
-    if (label1 == NULL) {
-        return false;
-    }
-    if (label2 == NULL) {
-        return false;
-    }
-    hum::HumRegex hre;
-    int number1 = 0;
-    int number2 = 0;
-    if (hre.search(label1, "(\\d+)$")) {
-        number1 = hre.getMatchInt(1);
-    }
-    else {
-        return false;
-    }
-    if (hre.search(label2, "(\\d+)$")) {
-        number2 = hre.getMatchInt(1);
-    }
-    else {
-        return false;
-    }
-    if (number1 == number2) {
-        return false;
-    }
-    return true;
+    return endingsApart(m_sectionlabels[current->getLineIndex()], m_sectionlabels[token->getLineIndex()]);
 }
 
 //////////////////////////////
@@ -2358,38 +2337,7 @@ bool HumdrumInput::atEndingBoundaryEnd(hum::HTp token)
     if (!current) {
         return false;
     }
-    int line1 = current->getLineIndex();
-    int line2 = token->getLineIndex();
-    hum::HTp label1 = m_sectionlabels[line1];
-    hum::HTp label2 = m_sectionlabels[line2];
-    if (label1 == label2) {
-        return false;
-    }
-    if (label1 == NULL) {
-        return false;
-    }
-    if (label2 == NULL) {
-        return false;
-    }
-    hum::HumRegex hre;
-    int number1 = 0;
-    int number2 = 0;
-    if (hre.search(label1, "(\\d+)$")) {
-        number1 = hre.getMatchInt(1);
-    }
-    else {
-        return false;
-    }
-    if (hre.search(label2, "(\\d+)$")) {
-        number2 = hre.getMatchInt(1);
-    }
-    else {
-        return false;
-    }
-    if (number1 == number2) {
-        return false;
-    }
-    return true;
+    return endingsApart(m_sectionlabels[token->getLineIndex()], m_sectionlabels[current->getLineIndex()]);
 }
 
 //////////////////////////////
@@ -2399,38 +2347,38 @@ bool HumdrumInput::atEndingBoundaryEnd(hum::HTp token)
 
 bool HumdrumInput::inDifferentEndings(hum::HTp token1, hum::HTp token2)
 {
-    int line1 = token1->getLineIndex();
-    int line2 = token2->getLineIndex();
-    hum::HTp label1 = m_sectionlabels[line1];
-    hum::HTp label2 = m_sectionlabels[line2];
-    if (label1 == label2) {
-        return false;
-    }
-    if (label1 == NULL) {
-        return false;
-    }
-    if (label2 == NULL) {
+    return endingsApart(m_sectionlabels[token1->getLineIndex()], m_sectionlabels[token2->getLineIndex()]);
+}
+
+//////////////////////////////
+//
+// HumdrumInput::endingsApart -- Whether the section labelled after is another
+//   ending than the one labelled before: the two labels end in different
+//   numbers, and the expansion list does not play after right after
+//   before.  (By the numbers alone, an ending a file draws as two
+//   brackets, each labelled by its place, was taken for two endings: a tie
+//   from one bracket into the next was broken, and the note it holds was
+//   struck again.  MuseNote RC137)
+//
+
+bool HumdrumInput::endingsApart(hum::HTp before, hum::HTp after)
+{
+    if ((before == after) || (before == NULL) || (after == NULL)) {
         return false;
     }
     hum::HumRegex hre;
-    int number1 = 0;
-    int number2 = 0;
-    if (hre.search(label1, "(\\d+)$")) {
-        number1 = hre.getMatchInt(1);
-    }
-    else {
+    if (!hre.search(before, "(\\d+)$")) {
         return false;
     }
-    if (hre.search(label2, "(\\d+)$")) {
-        number2 = hre.getMatchInt(1);
-    }
-    else {
+    int number1 = hre.getMatchInt(1);
+    if (!hre.search(after, "(\\d+)$")) {
         return false;
     }
+    int number2 = hre.getMatchInt(1);
     if (number1 == number2) {
         return false;
     }
-    return true;
+    return m_labelsInTurn.count({ before->substr(2), after->substr(2) }) == 0;
 }
 
 //////////////////////////////
@@ -21987,9 +21935,10 @@ void HumdrumInput::addSystemClefKeyTimeChange(int startline, int endline)
         return;
     }
 
-    // A score def needs to be added for the clef/key/time sig changes:
+    // A score def needs to be added for the clef/key/time sig changes, right before the measure they start (MuseNote
+    // RC140: see setupSystemMeasure):
     ScoreDef *scoreDef = new ScoreDef();
-    m_sections.back()->AddChild(scoreDef);
+    m_measure->GetParent()->InsertBefore(m_measure, scoreDef);
 
     // Now need to identifiy if all staves on the system
     // change at the same time, in which case the change
@@ -30157,10 +30106,6 @@ void HumdrumInput::setupSystemMeasure(int startline, int endline)
 
     // fix for **mens ggg
 
-    if (!m_mens && (infile[startline].getDurationFromStart() > 0)) {
-        addSystemClefKeyTimeChange(startline, endline);
-    }
-
     std::string previoussection = m_lastsection;
     std::string currentsection;
     if (m_sectionlabels[startline]) {
@@ -30294,6 +30239,13 @@ void HumdrumInput::setupSystemMeasure(int startline, int endline)
         if (m_measure) {
             m_sections.back()->AddChild(m_measure);
         }
+    }
+
+    // A clef, key or time signature change goes where its measure has just gone, before it: in an ending, or a part
+    // of one, it stands there. (It was added to the enclosing section, after the ending, and the ending's measures
+    // after it kept the meter before: a whole-measure rest there took that meter's length. MuseNote RC140)
+    if (!m_mens && (infile[startline].getDurationFromStart() > 0)) {
+        addSystemClefKeyTimeChange(startline, endline);
     }
 
     m_endingnum = endnum;
@@ -32263,6 +32215,58 @@ std::vector<int> HumdrumInput::analyzeMultiRest(hum::HumdrumFile &infile)
 
 //////////////////////////////
 //
+// readExpansionList -- The labels of an expansion list (*>[A,A1,A,A2,B], or
+//    *>norep[A,B]), in their order, and its variant name, empty for the
+//    primary list.  False when the token holds no label.  (Read by
+//    storeExpansionList, and by prepareSections for the labels played one
+//    after the other: MuseNote RC137.)
+//
+
+static bool readExpansionList(const std::string &expansion, std::string &variant, std::vector<std::string> &labels)
+{
+    variant.clear();
+    labels.assign(1, "");
+    int startindex = -1;
+    for (int i = 2; i < (int)expansion.size(); ++i) {
+        if (expansion[i] == '[') {
+            startindex = i + 1;
+            break;
+        }
+        variant += expansion[i];
+    }
+    if (startindex < 0) {
+        return false;
+    }
+    for (int i = startindex; i < (int)expansion.size(); ++i) {
+        if (isspace(expansion[i])) {
+            continue;
+        }
+        else if (expansion[i] == '"') {
+            // invalid character
+            continue;
+        }
+        else if (expansion[i] == '\'') {
+            // invalid character
+            continue;
+        }
+        else if (expansion[i] == ',') {
+            if (!labels.back().empty()) {
+                // avoid syntax error from a null label.
+                labels.push_back("");
+            }
+        }
+        else if (expansion[i] == ']') {
+            break;
+        }
+        else {
+            labels.back() += expansion[i];
+        }
+    }
+    return !((labels.size() == 1) && labels[0].empty());
+}
+
+//////////////////////////////
+//
 // HumdrumInput::prepareSections --
 //
 
@@ -32331,6 +32335,38 @@ void HumdrumInput::prepareSections()
             if (numberlesslabels[i + 1]) {
                 numberlesslabels[i] = numberlesslabels[i + 1];
             }
+        }
+    }
+
+    // The labels the expansion list plays one right after the other, as storeExpansionLists takes the list: the one
+    // list before the first data line, or the primary one of several (MuseNote RC137)
+    m_labelsInTurn.clear();
+    std::vector<std::vector<std::string>> lists;
+    std::vector<std::string> variants;
+    for (int i = 0; i < infile.getLineCount(); ++i) {
+        if (infile[i].isData()) {
+            break;
+        }
+        if (!infile[i].isInterpretation()) {
+            continue;
+        }
+        hum::HTp token = infile.token(i, 0);
+        if ((token->compare(0, 2, "*>") != 0) || (token->find("[") == std::string::npos)) {
+            continue;
+        }
+        std::string variant;
+        std::vector<std::string> labels;
+        if (readExpansionList(*token, variant, labels)) {
+            lists.push_back(labels);
+            variants.push_back(variant);
+        }
+    }
+    for (int k = 0; k < (int)lists.size(); ++k) {
+        if ((lists.size() == 1) || variants[k].empty()) {
+            for (int j = 1; j < (int)lists[k].size(); ++j) {
+                m_labelsInTurn.insert({ lists[k][j - 1], lists[k][j] });
+            }
+            break;
         }
     }
 }
@@ -32439,50 +32475,9 @@ void HumdrumInput::storeExpansionListsInChoice(Section *section, std::vector<hum
 
 template <class ELEMENT> void HumdrumInput::storeExpansionList(ELEMENT *parent, hum::HTp etok)
 {
-    std::string expansion = *etok;
     std::string variant;
-    int startindex = -1;
-    for (int i = 2; i < (int)expansion.size(); ++i) {
-        if (expansion[i] == '[') {
-            startindex = i + 1;
-            break;
-        }
-        variant += expansion[i];
-    }
-    if (startindex < 0) {
-        return;
-    }
-    std::vector<std::string> labels(1);
-    for (int i = startindex; i < (int)expansion.size(); ++i) {
-        if (isspace(expansion[i])) {
-            continue;
-        }
-        else if (expansion[i] == '"') {
-            // invalid character
-            continue;
-        }
-        else if (expansion[i] == '\'') {
-            // invalid character
-            continue;
-        }
-        else if (expansion[i] == ',') {
-            if (!labels.back().empty()) {
-                // avoid syntax error from a null label.
-                labels.push_back("");
-            }
-        }
-        else if (expansion[i] == ']') {
-            break;
-        }
-        else {
-            labels.back() += expansion[i];
-        }
-    }
-
-    if (labels.empty()) {
-        return;
-    }
-    if ((labels.size() == 1) && labels[0].empty()) {
+    std::vector<std::string> labels;
+    if (!readExpansionList(*etok, variant, labels)) {
         return;
     }
 
