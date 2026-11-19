@@ -4307,6 +4307,9 @@ void MusicXmlInput::ReadMusicXmlNote(
                     }
                 }
                 else {
+                    // A tab group holds no articulation: a technical mark on a tab note is left out, as an
+                    // articulation is (20c1936cc). (It was refused with an error, and lost to memory: MuseNote RC149)
+                    if (element->Is(TABGRP)) continue;
                     pugi::xml_node articulation = technicalChild;
                     Artic *artic = new Artic();
                     data_ARTICULATION articVal = ConvertArticulations(articulation.name());
