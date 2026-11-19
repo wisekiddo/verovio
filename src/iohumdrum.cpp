@@ -13118,6 +13118,9 @@ bool HumdrumInput::checkForTremolo(
         notes[0]->setValue("auto", "tremolo", "1");
         notes[0]->setValue("auto", "recip", recip);
         notes[0]->setValue("auto", "slashes", slashes);
+        // (how many strokes: a tremolo of strokes of a tuplet's value is said by their count, which no unit says:
+        // MuseNote RC132)
+        notes[0]->setValue("auto", "strokes", (int)notes.size());
         for (int i = 1; i < (int)notes.size(); ++i) {
             notes[i]->setValue("auto", "suppress", "1");
         }
@@ -14428,6 +14431,11 @@ bool HumdrumInput::fillContentsOfLayer(int track, int startline, int endline, in
                         case 4: btrem->SetUnitdur(DURATION_64); break;
                         case 5: btrem->SetUnitdur(DURATION_128); break;
                     }
+                    // strokes of a tuplet's value (12, 24…): their count, as the MIDI writer reads it; the unit, a power of
+                    // two, made fewer strokes (MuseNote RC132)
+                    if (!hum::Convert::recipToDuration(token).isPowerOfTwo()) {
+                        btrem->SetNum(token->getValueInt("auto", "strokes"));
+                    }
                     appendElement(btrem, chord);
                     appendElement(elements, pointers, btrem);
                 }
@@ -14685,6 +14693,11 @@ bool HumdrumInput::fillContentsOfLayer(int track, int startline, int endline, in
                     case 3: btrem->SetUnitdur(DURATION_32); break;
                     case 4: btrem->SetUnitdur(DURATION_64); break;
                     case 5: btrem->SetUnitdur(DURATION_128); break;
+                }
+                // strokes of a tuplet's value (12, 24…): their count, as the MIDI writer reads it; the unit, a power of
+                // two, made fewer strokes (MuseNote RC132)
+                if (!hum::Convert::recipToDuration(token).isPowerOfTwo()) {
+                    btrem->SetNum(token->getValueInt("auto", "strokes"));
                 }
                 appendElement(btrem, note);
                 appendElement(elements, pointers, btrem);
@@ -24211,6 +24224,14 @@ void HumdrumInput::mergeTupletsCuttingBeam(std::vector<humaux::HumdrumBeamAndTup
 
         newtg.at(i)->tupletend = 0;
         newtg.at(i + 1)->tupletstart = 0;
+        // The second tuplet's end takes the merged tuplet's number, the first's, as every later number moves down
+        // one: a second tuplet of one element (a space of a tuplet's value, after a beam's first notes) ends on the
+        // element after the first's end, which the loop below passed over. Its end kept the old number, the merged
+        // tuplet ended under none, and it was opened around the beam, taking in the beam's notes after the space,
+        // which lost their length (MuseNote RC135)
+        if (newtg.at(i + 1)->tupletend) {
+            newtg.at(i + 1)->tupletend--;
+        }
         for (int j = i + 2; j < (int)newtg.size(); j++) {
             if (newtg.at(j)->tupletstart) {
                 newtg.at(j)->tupletstart--;
