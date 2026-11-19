@@ -498,10 +498,15 @@ Object *ExpansionMap::Expand(Expansion *expansion, std::set<std::string> &existi
                 // check re-order when within same parent
                 if (currSect->GetParent()->GetID() == prevSect->GetParent()->GetID()) {
                     // If prevSect has a next element and if it is different than the currSect or has no next element,
-                    // move it to after the currSect.
-                    if (prevIdx < childCount - 1) {
-                        Object *nextElement = prevSect->GetParent()->GetChild(prevIdx + 1);
-                        assert(nextElement);
+                    // move it to after the currSect. What plays nothing (a system or page break, a score definition)
+                    // is looked past: the very next element was taken, and a break after prevSect left a
+                    // part written ahead of its turn where it stands, played out of the order (MuseNote RC139)
+                    Object *nextElement = NULL;
+                    for (int i = prevIdx + 1; (i < childCount) && !nextElement; ++i) {
+                        Object *child = prevSect->GetParent()->GetChild(i);
+                        if (!child->Is({ SB, PB, SCOREDEF })) nextElement = child;
+                    }
+                    if (nextElement) {
                         if (nextElement->Is({ SECTION, ENDING, LEM, RDG }) && nextElement != currSect) {
                             moveCurrentElement = true;
                         }
