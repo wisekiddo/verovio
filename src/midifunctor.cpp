@@ -765,7 +765,7 @@ FunctorCode GenerateMIDIFunctor::VisitLayer(const Layer *layer)
 FunctorCode GenerateMIDIFunctor::VisitLayerEnd(const Layer *layer)
 {
     // stop all previously held notes
-    for (auto &held : m_heldNotes) {
+    for (auto &[course, held] : m_heldNotes) {
         if (held.m_pitch > 0) {
             m_midiFile->addNoteOff(
                 m_midiTrack, std::max(0.0, held.m_stopTime * m_midiFile->getTPQ() - 1), m_midiChannel, held.m_pitch);
@@ -875,18 +875,16 @@ FunctorCode GenerateMIDIFunctor::VisitNote(const Note *note)
             // on that course is required, or until a default hold duration is reached.
 
             const int course = note->GetTabCourse();
-            if (m_heldNotes.size() < static_cast<size_t>(course)) {
-                m_heldNotes.resize(course); // make room
-            }
+            MIDIHeldNote &onCourse = m_heldNotes[course];
 
             // if a previously held note on this course is already sounding, end it now.
-            if (m_heldNotes[course - 1].m_pitch > 0) {
-                m_heldNotes[course - 1].m_stopTime = startTime; // stop now
+            if (onCourse.m_pitch > 0) {
+                onCourse.m_stopTime = startTime; // stop now
             }
 
             // end all previously held notes that have reached their stoptime
             // or if the new pitch is already sounding, on any course
-            for (auto &held : m_heldNotes) {
+            for (auto &[heldCourse, held] : m_heldNotes) {
                 if ((held.m_pitch > 0) && ((held.m_stopTime <= startTime) || (held.m_pitch == pitch))) {
                     m_midiFile->addNoteOff(
                         m_midiTrack, std::max(0.0, held.m_stopTime * tpq - 1), channel, held.m_pitch);
@@ -898,8 +896,8 @@ FunctorCode GenerateMIDIFunctor::VisitNote(const Note *note)
             // hold this note until the greater of its rhythm sign and the default duration.
             // TODO optimize the default hold duration
             const double defaultHoldTime = 4; // quarter notes
-            m_heldNotes[course - 1].m_pitch = pitch;
-            m_heldNotes[course - 1].m_stopTime = m_totalTime
+            onCourse.m_pitch = pitch;
+            onCourse.m_stopTime = m_totalTime
                 + std::max(defaultHoldTime,
                     note->GetScoreTimeOffset().ToDouble() + note->GetScoreTimeTiedDuration().ToDouble());
 

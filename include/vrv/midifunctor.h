@@ -463,8 +463,9 @@ private:
     std::list<OctaveInfo> m_octaves;
     // Indicates whether cue notes should be included
     bool m_noCue;
-    // Tablature held notes indexed by (course - 1)
-    std::vector<MIDIHeldNote> m_heldNotes;
+    // Tablature held notes by course. (A map, so the memory follows the notes played: a vector sized by the course
+    // a file gives ended the process on a course of 2,000,000,000. MuseNote RC129)
+    std::map<int, MIDIHeldNote> m_heldNotes;
     // A flag indicating we want to process control events
     bool m_controlEvents;
     // Current instrument definition
