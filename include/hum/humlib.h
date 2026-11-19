@@ -60,6 +60,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -9282,6 +9283,9 @@ class Tool_mei2hum : public HumTool {
 		HumNum parseNote_mensural   (xml_node note, xml_node chord, string& output, HumNum starttime, int gracenumber);
 		HumNum parseBeam            (xml_node note, HumNum starttime);
 		HumNum parseTuplet          (xml_node note, HumNum starttime);
+		HumNum parseLayerElement    (xml_node node, xml_node parent, HumNum starttime);
+		HumNum parseTremolo         (xml_node tremolo, HumNum starttime);
+		string getTremoloMarkup     (xml_node tremolo);
 		void   parseClef            (xml_node clef, HumNum starttime);
 		void   parseDynam           (xml_node dynam, HumNum starttime);
 		void   parseHarm            (xml_node harm, HumNum starttime);
@@ -9378,6 +9382,8 @@ class Tool_mei2hum : public HumTool {
 		string         m_pendingTimeSig;
 		string         m_beamPrefix;
 		string         m_beamPostfix;
+		string         m_tremoloMarkup;      // Tool_tremolo's markup for the next note or chord written (MuseNote RC132)
+		bool           m_hasTremolo = false; // a tremolo's markup was written: Tool_tremolo expands it
 		bool           m_aboveQ = false;
 		bool           m_belowQ = false;
 		bool           m_editorialAccidentalQ = false;
@@ -12051,6 +12057,7 @@ class Tool_tremolo : public HumTool {
 		void    storeFirstTremoloNoteInfo(HTp token);
 		void    storeLastTremoloNoteInfo(HTp token);
 		HTp     getNextNote        (HTp token);
+		int     getOpenBeamCount   (HTp token);
 
 	private:
 		bool    m_keepQ      = false;
@@ -12058,6 +12065,8 @@ class Tool_tremolo : public HumTool {
 		std::vector<HTp> m_markup_tokens;
 		std::vector<HumNum> m_first_tremolo_time;
 		std::vector<HumNum> m_last_tremolo_time;
+		// each tremolo's own track, start and end (MuseNote RC132)
+		std::vector<std::tuple<int, HumNum, HumNum>> m_regions;
 
 };
 

@@ -25319,6 +25319,12 @@ HLp HumdrumFileBase::insertNullInterpretationLineAbove(HumNum timestamp) {
 	// int afteri = -1;
 	HumNum current;
 	for (int i=0; i<infile.getLineCount(); i++) {
+		// A line of no spines (a global comment) gives no structure for the new line: the first line with spines at the
+		// timestamp is the one it goes above (a global comment at a tremolo's end made a line of one field, and the file
+		// could not be read: MuseNote RC132)
+		if (!infile[i].hasSpines()) {
+			continue;
+		}
 		current = infile[i].getDurationFromStart();
 		if (current == timestamp) {
 			beforei = i;
@@ -101070,6 +101076,8 @@ bool Tool_mei2hum::convert(ostream& out, const char* input) {
 
 bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 	initialize();
+	m_tremoloMarkup.clear();
+	m_hasTremolo = false;
 
 	bool status = true; // for keeping track of problems in conversion process.
 
@@ -101219,6 +101227,15 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 
 	for (int i=0; i<outfile.getLineCount(); i++) {
 		outfile[i].createLineFromTokens();
+	}
+	// A tremolo's markup is written out by Tool_tremolo into its strokes, inside *tremolo, as the MusicXML converter
+	// does (MuseNote RC132). It reads the file's rhythm, so the file is read again first.
+	if (m_hasTremolo) {
+		stringstream text;
+		text << outfile;
+		outfile.readString(text.str());
+		Tool_tremolo tremolo;
+		tremolo.run(outfile);
 	}
 	out << outfile;
 
@@ -103432,30 +103449,9 @@ HumNum Tool_mei2hum::parseLayer(xml_node layer, HumNum starttime, vector<bool>& 
 	}
 
 	HumNum  starting = starttime;
-	string dummy;
 
 	for (int i=0; i<(int)children.size(); i++) {
-		string nodename = children[i].name();
-		if (nodename == "note") {
-			starttime = parseNote(children[i], xml_node(NULL), dummy, starttime, 0);
-		} else if (nodename == "chord") {
-			starttime = parseChord(children[i], starttime, 0);
-		} else if (nodename == "rest") {
-			starttime = parseRest(children[i], starttime);
-		} else if (nodename == "space") {
-			starttime = parseRest(children[i], starttime);
-		} else if ((nodename == "mRest") || (nodename == "multiRest")) {
-			// One measure of a multi-measure rest: see parseSection().
-			starttime = parseMRest(children[i], starttime);
-		} else if (nodename == "beam") {
-			starttime = parseBeam(children[i], starttime);
-		} else if (nodename == "tuplet") {
-			starttime = parseTuplet(children[i], starttime);
-		} else if (nodename == "clef") {
-			parseClef(children[i], starttime);
-		} else {
-			cerr << DKHTP << layer.name() << "/" << nodename << CURRLOC << endl;
-		}
+		starttime = parseLayerElement(children[i], layer, starttime);
 	}
 
 	if (!m_gracenotes.empty()) {
@@ -103698,43 +103694,204 @@ HumNum Tool_mei2hum::parseTuplet(xml_node tuplet, HumNum starttime) {
 		m_beamPostfix.clear();
 	}
 
+	// (the end of a beam the tuplet stands in goes to its last note, rest, chord, beam, tuplet or tremolo: MuseNote RC131)
 	xml_node lastnoterestchord;
 	for (int i=(int)children.size() - 1; i>=0; i--) {
 		string nodename = children[i].name();
-		if (nodename == "note") {
-			lastnoterestchord = children[i];
-			break;
-		} else if (nodename == "rest") {
-			lastnoterestchord = children[i];
-			break;
-		} else if (nodename == "chord") {
+		if ((nodename == "note") || (nodename == "rest") || (nodename == "chord") || (nodename == "beam")
+				|| (nodename == "tuplet") || (nodename == "bTrem") || (nodename == "fTrem")) {
 			lastnoterestchord = children[i];
 			break;
 		}
 	}
 
-	string dummy;
 	for (int i=0; i<(int)children.size(); i++) {
 		if (children[i] == lastnoterestchord) {
 			m_beamPostfix = stored_beamPostfix;
 		}
-		string nodename = children[i].name();
-		if (nodename == "note") {
-			starttime = parseNote(children[i], xml_node(NULL), dummy, starttime, 0);
-		} else if (nodename == "rest") {
-			starttime = parseRest(children[i], starttime);
-		} else if (nodename == "chord") {
-			starttime = parseChord(children[i], starttime, 0);
-		} else if (nodename == "beam") {
-			starttime = parseBeam(children[i], starttime);
-		} else {
-			cerr << DKHTP << tuplet.name() << "/" << nodename << CURRLOC << endl;
-		}
+		starttime = parseLayerElement(children[i], tuplet, starttime);
+	}
+	if (!lastnoterestchord) {
+		m_beamPostfix = stored_beamPostfix;
 	}
 
 	m_tupletfactor /= newfactor;
 
 	return starttime;
+}
+
+
+
+//////////////////////////////
+//
+// Tool_mei2hum::parseLayerElement -- One element of a layer's content, in a layer, a beam, a tuplet or a tremolo,
+//     read the same way in each.  Each read a list of its own, and dropped what it did not list, with its time: a
+//     space in a tuplet or a beam, a beam in a beam, an mSpace, a tremolo (MuseNote RC131).
+//
+
+HumNum Tool_mei2hum::parseLayerElement(xml_node node, xml_node parent, HumNum starttime) {
+	string nodename = node.name();
+	if (nodename == "note") {
+		string dummy;
+		return parseNote(node, xml_node(NULL), dummy, starttime, 0);
+	} else if (nodename == "chord") {
+		return parseChord(node, starttime, 0);
+	} else if ((nodename == "rest") || (nodename == "space")) {
+		return parseRest(node, starttime);
+	} else if ((nodename == "mRest") || (nodename == "multiRest") || (nodename == "mSpace")) {
+		// One measure of a multi-measure rest: see parseSection().
+		return parseMRest(node, starttime);
+	} else if (nodename == "beam") {
+		return parseBeam(node, starttime);
+	} else if (nodename == "tuplet") {
+		return parseTuplet(node, starttime);
+	} else if ((nodename == "bTrem") || (nodename == "fTrem")) {
+		return parseTremolo(node, starttime);
+	} else if (nodename == "clef") {
+		parseClef(node, starttime);
+		return starttime;
+	}
+	cerr << DKHTP << parent.name() << "/" << nodename << CURRLOC << endl;
+	return starttime;
+}
+
+
+
+//////////////////////////////
+//
+// Tool_mei2hum::parseTremolo -- A tremolo's notes, the first of them with Tool_tremolo's markup when the MIDI writer
+//     plays it as strokes (getTremoloMarkup): Tool_tremolo writes the strokes, inside *tremolo, and a reader draws the
+//     tremolo of them.  A tremolo had no case: it was dropped, with its time (MuseNote RC132).
+//
+
+HumNum Tool_mei2hum::parseTremolo(xml_node tremolo, HumNum starttime) {
+	// (a bTrem or an fTrem: NODE_VERIFY would ask for an element named "tremolo")
+	if (!tremolo) {
+		return starttime;
+	}
+	MAKE_CHILD_LIST(children, tremolo);
+
+	string markup = getTremoloMarkup(tremolo);
+	bool fingered = (string(tremolo.name()) == "fTrem");
+	// A fingered tremolo's two notes together last the value each is written with, as the engine times them: each is
+	// half of it here, as a tuplet's notes are scaled
+	if (fingered) {
+		m_tupletfactor *= HumNum(1, 2);
+	}
+	for (int i=0; i<(int)children.size(); i++) {
+		string nodename = children[i].name();
+		if ((!markup.empty()) && ((nodename == "note") || (nodename == "chord"))) {
+			m_tremoloMarkup = markup;
+			m_hasTremolo = true;
+			markup.clear();
+		}
+		starttime = parseLayerElement(children[i], tremolo, starttime);
+	}
+	m_tremoloMarkup.clear();
+	if (fingered) {
+		m_tupletfactor *= 2;
+	}
+
+	return starttime;
+}
+
+
+
+//////////////////////////////
+//
+// Tool_mei2hum::getTremoloMarkup -- Tool_tremolo's markup for a tremolo's first note or chord, `@N@`: strokes of an
+//     N-th, as GenerateMIDIFunctor::VisitBTrem plays a bowed tremolo.  @num strokes over the note (an enclosing
+//     tuplet's @num where the tremolo has none); else strokes of its @unitdur; else of the note's value, a quarter at
+//     the longest, made shorter by one for each slash (BTrem::CalcIndividualNoteDuration).  None for an unmeasured
+//     tremolo (MuseNote RC132).
+//
+
+string Tool_mei2hum::getTremoloMarkup(xml_node tremolo) {
+	// A fingered tremolo: `@@N@@` on its first note, strokes of its @unitdur, else of as many beams as its @beams says
+	// (one an eighth); Tool_tremolo alternates them over the two notes, and a reader draws the fingered tremolo of them
+	if (string(tremolo.name()) == "fTrem") {
+		int value = 0;
+		string unitdur = tremolo.attribute("unitdur").value();
+		if ((!unitdur.empty()) && isdigit(unitdur[0])) {
+			value = stoi(unitdur);
+		} else if (tremolo.attribute("beams")) {
+			int beams = tremolo.attribute("beams").as_int();
+			if ((beams >= 1) && (beams <= 8)) {
+				value = 1 << (beams + 2);
+			}
+		}
+		if ((value < 8) || ((value & (value - 1)) != 0)) {
+			return "";
+		}
+		return "@@" + to_string(value) + "@@";
+	}
+	if (string(tremolo.name()) != "bTrem") {
+		return "";
+	}
+	if (string(tremolo.attribute("form").value()) == "unmeas") {
+		return "";
+	}
+	xml_node child = tremolo.child("chord");
+	if (!child) {
+		child = tremolo.child("note");
+	}
+	if (!child) {
+		return "";
+	}
+	HumNum quarters = getDuration(child);
+	quarters *= 4;
+	if (quarters <= 0) {
+		return "";
+	}
+
+	int num = 0;
+	xml_node ancestor = tremolo.parent();
+	while (ancestor && (string(ancestor.name()) != "tuplet") && (string(ancestor.name()) != "layer")) {
+		ancestor = ancestor.parent();
+	}
+	if (ancestor && (string(ancestor.name()) == "tuplet")) {
+		num = std::max(0, ancestor.attribute("num").as_int());
+	}
+	if (tremolo.attribute("num")) {
+		num = std::clamp(tremolo.attribute("num").as_int(), 0, 256);
+	}
+
+	HumNum value;
+	if (num > 0) {
+		value = num * 4;
+		value /= quarters;
+	} else {
+		string unitdur = tremolo.attribute("unitdur").value();
+		if ((!unitdur.empty()) && isdigit(unitdur[0])) {
+			value = stoi(unitdur);
+		} else {
+			string dur = child.attribute("dur").value();
+			string stemmod = child.attribute("stem.mod").value();
+			int slashes = 0;
+			if ((stemmod.size() == 6) && isdigit(stemmod[0]) && (stemmod.substr(1) == "slash")) {
+				slashes = stemmod[0] - '0';
+			}
+			if ((slashes < 1) || (slashes > 6) || dur.empty() || (dur == "maxima")) {
+				return "";
+			}
+			int level = 2; // a quarter
+			if (isdigit(dur[0])) {
+				int den = stoi(dur);
+				int lg = 0;
+				while ((1 << (lg + 1)) <= den) {
+					lg++;
+				}
+				level = std::max(2, lg);
+			}
+			level = std::min(level + slashes, 10); // a 1024th at the shortest
+			value = 1 << level;
+		}
+	}
+	// (Tool_tremolo takes strokes of an eighth or shorter, and of a whole number)
+	if ((!value.isInteger()) || (value.getNumerator() < 8)) {
+		return "";
+	}
+	return "@" + to_string(value.getNumerator()) + "@";
 }
 
 
@@ -103751,49 +103908,33 @@ HumNum Tool_mei2hum::parseBeam(xml_node beam, HumNum starttime) {
 	bool isvalid = beamIsValid(children);
 	// bool isgrace = beamIsGrace(children);
 
+	// A beam in a beam, or one its container ends on, ends where its container's end goes, after its own end: the
+	// container's end was set for this beam's first note, and this beam's start took the place of a start not yet
+	// written (MuseNote RC131: a beam in a beam was dropped, with its notes)
+	string stored_beamPostfix = m_beamPostfix;
+	m_beamPostfix.clear();
 	if (isvalid) {
-		m_beamPrefix = "L";
+		m_beamPrefix += "L";
 	}
 
 	xml_node lastnoterestchord;
 	for (int i=(int)children.size()-1; i>=0; i--) {
 		string nodename = children[i].name();
-		if (nodename == "note") {
-			lastnoterestchord = children[i];
-			break;
-		} else if (nodename == "rest") {
-			lastnoterestchord = children[i];
-			break;
-		} else if (nodename == "chord") {
-			lastnoterestchord = children[i];
-			break;
-		} else if (nodename == "tuplet") {
+		if ((nodename == "note") || (nodename == "rest") || (nodename == "chord") || (nodename == "tuplet")
+				|| (nodename == "beam") || (nodename == "bTrem") || (nodename == "fTrem")) {
 			lastnoterestchord = children[i];
 			break;
 		}
 	}
 
-	string dummy;
 	for (int i=0; i<(int)children.size(); i++) {
 		if (children[i] == lastnoterestchord) {
-			if (isvalid) {
-				m_beamPostfix = "J";
-			}
+			m_beamPostfix = stored_beamPostfix + (isvalid ? "J" : "");
 		}
-		string nodename = children[i].name();
-		if (nodename == "note") {
-			starttime = parseNote(children[i], xml_node(NULL), dummy, starttime, 0);
-		} else if (nodename == "rest") {
-			starttime = parseRest(children[i], starttime);
-		} else if (nodename == "chord") {
-			starttime = parseChord(children[i], starttime, 0);
-		} else if (nodename == "tuplet") {
-			starttime = parseTuplet(children[i], starttime);
-		} else if (nodename == "clef") { //drizo
-			parseClef(children[i], starttime);
-		} else {
-			cerr << DKHTP << beam.name() << "/" << nodename << CURRLOC << endl;
-		}
+		starttime = parseLayerElement(children[i], beam, starttime);
+	}
+	if (!lastnoterestchord) {
+		m_beamPostfix = stored_beamPostfix;
 	}
 
 	return starttime;
@@ -103998,6 +104139,12 @@ HumNum Tool_mei2hum::parseNote(xml_node note, xml_node chord, string& output,
 			+ m_beamPrefix + m_beamPostfix;
 	m_beamPrefix.clear();
 	m_beamPostfix.clear();
+	// (a tremolo's first note carries its markup, for Tool_tremolo; a chord's note leaves it to its chord: MuseNote
+	// RC132)
+	if ((!chord) && (!m_tremoloMarkup.empty())) {
+		tok += m_tremoloMarkup;
+		m_tremoloMarkup.clear();
+	}
 
 	m_fermata = false;
 	processLinkedNodes(tok, note);
@@ -104427,6 +104574,11 @@ HumNum Tool_mei2hum::parseMRest(xml_node mrest, HumNum starttime) {
 		}
 	}
 	string tok = recip + "r";
+	// A whole bar of space (mSpace), and a whole-bar rest the score does not draw, is a rest not drawn (MuseNote
+	// RC131: an mSpace had no case, and was dropped with its time)
+	if ((string(mrest.name()) == "mSpace") || (string(mrest.attribute("visible").value()) == "false")) {
+		tok += "yy";
+	}
 	// Add fermata on whole-measure rest if needed.
 
 	// Deal here with calculating number of dots needed for
@@ -104464,14 +104616,20 @@ HumNum Tool_mei2hum::parseRest(xml_node rest, HumNum starttime) {
 	HumNum duration = getDuration(rest);
 	int dotcount = getDotCount(rest);
 	string recip = getHumdrumRecip(duration, dotcount);
+	// A rest the score does not draw (@visible="false") is not drawn either, as a space (MuseNote RC131); and a space
+	// takes no beam mark, which the note after it takes: a beam started on a space a reader does not draw
 	string invisible;
-	if (nodename == "space") {
+	bool hidden = (nodename == "space") || (string(rest.attribute("visible").value()) == "false");
+	if (hidden) {
 		invisible = "yy";
 	}
 
-	string output = recip + "r" + invisible + m_beamPrefix + m_beamPostfix;
-	m_beamPrefix.clear();
-	m_beamPostfix.clear();
+	string output = recip + "r" + invisible;
+	if (nodename != "space") {
+		output += m_beamPrefix + m_beamPostfix;
+		m_beamPrefix.clear();
+		m_beamPostfix.clear();
+	}
 
 	processLinkedNodes(output, rest);
 	processFermataAttribute(output, rest);
@@ -105755,6 +105913,11 @@ HumNum Tool_mei2hum::parseChord(xml_node chord, HumNum starttime, int gracenumbe
 			0, m_currentLayer-1, m_staffcount, gracenumber), m_currentStaff-1, m_currentLayer-1, chord);
 		return starttime;
 	}
+	// (a tremolo's first chord carries its markup, for Tool_tremolo: MuseNote RC132)
+	if (!m_tremoloMarkup.empty()) {
+		tok += m_tremoloMarkup;
+		m_tremoloMarkup.clear();
+	}
 	keepId(m_outdata.back()->addDataToken(tok, starttime QUARTER_CONVERT, m_currentStaff-1,
 		0, m_currentLayer-1, m_staffcount), m_currentStaff-1, m_currentLayer-1, chord);
 
@@ -105821,6 +105984,20 @@ void Tool_mei2hum::buildIdLinkMap(xml_document& doc) {
 						(*startlinks)[value].push_back(node);
 					}
 
+				}
+				// An arpeggio said by @plist alone, as the MusicXML reader writes one, starts at each element its list names: it
+				// was linked to none, and no arpeggio was written (MuseNote RC134)
+				if ((!startid) && (strcmp(node.name(), "arpeg") == 0)) {
+					stringstream list(node.attribute("plist").value());
+					string id;
+					while (list >> id) {
+						if ((!id.empty()) && (id[0] == '#')) {
+							id = id.substr(1);
+						}
+						if (!id.empty()) {
+							(*startlinks)[id].push_back(node);
+						}
+					}
 				}
 				if (endid) {
 
@@ -106273,7 +106450,10 @@ void Tool_mei2hum::parseTempo(xml_node tempo, HumNum starttime) {
 	bool found = false;
 	double value = 0.0;
 
-	xml_attribute bpm = tempo.attribute("bpm");
+	// MEI says a tempo's beats per minute in @midi.bpm, and its microseconds per beat in @midi.mspb: read as @bpm and
+	// @mspb, which MEI does not have, a tempo said so was never written, and the music was read back at 120 (MuseNote
+	// RC133). (And a beat of mspb microseconds is 60,000,000 / mspb a minute: mspb was multiplied.)
+	xml_attribute bpm = tempo.attribute("midi.bpm");
 	if (bpm) {
 		value = bpm.as_double();
 		if (value > 0.0) {
@@ -106282,8 +106462,8 @@ void Tool_mei2hum::parseTempo(xml_node tempo, HumNum starttime) {
 	}
 
 	if (!found) {
-		xml_attribute mspb   = tempo.attribute("mspb");
-		value = mspb.as_double() * 60.0 / 1000000.0;
+		double mspb = tempo.attribute("midi.mspb").as_double();
+		value = (mspb > 0.0) ? 60000000.0 / mspb : 0.0;
 		if (value > 0.0) {
 			found = true;
 		}
@@ -141527,6 +141707,7 @@ void Tool_tremolo::processFile(HumdrumFile& infile) {
 	m_keepQ = getBoolean("keep");
 	m_first_tremolo_time.clear();
 	m_last_tremolo_time.clear();
+	m_regions.clear();
 	int maxtrack = infile.getMaxTrack();
 	m_first_tremolo_time.resize(maxtrack+1);
 	m_last_tremolo_time.resize(maxtrack+1);
@@ -141606,52 +141787,66 @@ void Tool_tremolo::processFile(HumdrumFile& infile) {
 
 void Tool_tremolo::addTremoloInterpretations(HumdrumFile& infile) {
 
-	// Insert starting *tremolo
-	for (int i=0; i<(int)m_first_tremolo_time.size(); i++) {
-		if (m_first_tremolo_time[i] < 0) {
+	// Each tremolo gets its own *tremolo and *Xtremolo, tremolos that meet in a track sharing one; they went before the
+	// track's first tremolo and after its last, and every beamed group of one repeated value between them was read as
+	// a tremolo (MuseNote RC132)
+	vector<std::tuple<int, HumNum, HumNum>> regions = m_regions;
+	std::sort(regions.begin(), regions.end());
+	vector<std::tuple<int, HumNum, HumNum>> merged;
+	for (auto& region : regions) {
+		if ((!merged.empty()) && (std::get<0>(merged.back()) == std::get<0>(region))
+				&& (std::get<1>(region) <= std::get<2>(merged.back()))) {
+			if (std::get<2>(region) > std::get<2>(merged.back())) {
+				std::get<2>(merged.back()) = std::get<2>(region);
+			}
 			continue;
 		}
-		HLp line = infile.insertNullInterpretationLine(m_first_tremolo_time[i]);
-		if (line != NULL) {
-			for (int j=0; j<line->getFieldCount(); j++) {
-				HTp token = line->token(j);
-				int track = token->getTrack();
-				int subtrack = token->getSubtrack();
-				if (subtrack > 1) {
-					// Currently *tremolo affects all subtracks, but this
-					// will probably change in the future.
-					continue;
-				}
-				if (track == i) {
-					token->setText("*tremolo");
-					line->createLineFromTokens();
-				}
-			}
-		}
+		merged.push_back(region);
 	}
 
-	// Insert ending *Xtremolo
-	for (int i=0; i<(int)m_last_tremolo_time.size(); i++) {
-		if (m_last_tremolo_time[i] < 0) {
+	// each start and end time with the tracks there
+	map<HumNum, vector<int>> starts;
+	map<HumNum, vector<int>> ends;
+	for (auto& region : merged) {
+		starts[std::get<1>(region)].push_back(std::get<0>(region));
+		ends[std::get<2>(region)].push_back(std::get<0>(region));
+	}
+
+	// Insert ending *Xtremolo first, from the last time on, then starting *tremolo: at a time where a tremolo ends and
+	// another starts, the *Xtremolo comes before the *tremolo
+	for (auto it = ends.rbegin(); it != ends.rend(); it++) {
+		HLp line = infile.insertNullInterpretationLineAbove(it->first);
+		if (line == NULL) {
 			continue;
 		}
-		HLp line = infile.insertNullInterpretationLineAbove(m_last_tremolo_time[i]);
-		if (line != NULL) {
-			for (int j=0; j<line->getFieldCount(); j++) {
-				HTp token = line->token(j);
-				int track = token->getTrack();
-				int subtrack = token->getSubtrack();
-				if (subtrack > 1) {
-					// Currently *tremolo affects all subtracks, but this
-					// will probably change in the future.
-					continue;
-				}
-				if (track == i) {
-					token->setText("*Xtremolo");
-					line->createLineFromTokens();
-				}
+		for (int j=0; j<line->getFieldCount(); j++) {
+			HTp token = line->token(j);
+			if (token->getSubtrack() > 1) {
+				// Currently *tremolo affects all subtracks, but this
+				// will probably change in the future.
+				continue;
+			}
+			if (std::find(it->second.begin(), it->second.end(), token->getTrack()) != it->second.end()) {
+				token->setText("*Xtremolo");
 			}
 		}
+		line->createLineFromTokens();
+	}
+	for (auto it = starts.rbegin(); it != starts.rend(); it++) {
+		HLp line = infile.insertNullInterpretationLine(it->first);
+		if (line == NULL) {
+			continue;
+		}
+		for (int j=0; j<line->getFieldCount(); j++) {
+			HTp token = line->token(j);
+			if (token->getSubtrack() > 1) {
+				continue;
+			}
+			if (std::find(it->second.begin(), it->second.end(), token->getTrack()) != it->second.end()) {
+				token->setText("*tremolo");
+			}
+		}
+		line->createLineFromTokens();
 	}
 }
 
@@ -141685,7 +141880,6 @@ void Tool_tremolo::expandTremolo(HTp token) {
 	HumNum duration;
 	HumNum repeat;
 	HumNum increment;
-	bool addBeam = false;
 	int tnotes = -1;
 	if (hre.search(token, "@(\\d+)@")) {
 		value = hre.getMatchInt(1);
@@ -141699,18 +141893,6 @@ void Tool_tremolo::expandTremolo(HTp token) {
 			cerr << "Error: tremolo notes can only be eighth-notes or shorter" << endl;
 			return;
 		}
-		if (duration.getFloat() > 0.5) {
-			// needs to be less that one for tuplet quarter note tremolos
-			addBeam = true;
-		}
-
-		// There are cases where duration < 1 need added beams
-		// when the note is not already in a beam.  Such as
-		// a plain 8th note with a slash.  This needs to be
-		// converted into two 16th notes with a beam so that
-		// *tremolo can reduce it back into a tremolo, since
-		// it will only reduce beam groups.
-
 		repeat = duration;
 		repeat *= value;
 		repeat /= 4;
@@ -141732,35 +141914,26 @@ void Tool_tremolo::expandTremolo(HTp token) {
 	string base = token->getText();
 	hre.replaceDestructive(base, "", markup, "g");
 
-	// complicated beamings are not allowed yet (no internal L/J markers in tremolo beam)
-	bool hasBeamStart = base.find('L') != string::npos;
-	bool hasBeamStop  = base.find('J') != string::npos;
-
-	if (addBeam) {
-		hasBeamStart = true;
-		hasBeamStop = true;
+	// The strokes have as many beams as their value: the beams open where the note stands give some, and the note's own
+	// starts; the rest open on the first stroke and close on the last, and the note's own ends close on the last. (A
+	// note's own start or end was kept on that side only, with every beam of the strokes: in a beam of the score the
+	// strokes' beams did not close, and a reader lost the beams from there; and the strokes of a note of an eighth in
+	// no beam had none, and were not read as a tremolo: MuseNote RC132)
+	int ownStarts = (int)std::count(base.begin(), base.end(), 'L');
+	int ownEnds   = (int)std::count(base.begin(), base.end(), 'J');
+	int extra = std::max(0, beams - (getOpenBeamCount(token) + ownStarts));
+	if (tnotes < 2) {
+		extra = 0;
 	}
-
-	// Currently not allowed to add tremolo to beamed notes, so remove all beaming:
 	hre.replaceDestructive(base, "", "[LJKk]+", "g");
-	string startbeam;
-	string endbeam;
-	for (int i=0; i<beams; i++) {
-		startbeam += 'L';
-		endbeam   += 'J';
-	}
+	string startbeam(ownStarts + extra, 'L');
+	string endbeam(extra + ownEnds, 'J');
 	// Set the rhythm of the tremolo notes.
 	// Augmentation dot is expected adjacent to regular rhythm value.
 	// Maybe allow anywhere?
 	hre.replaceDestructive(base, to_string(value.getNumerator()), "\\d+%?\\d*\\.*", "g");
-	string initial = base;
-	if (hasBeamStart) {
-		initial += startbeam;
-	}
-	string terminal = base;
-	if (hasBeamStop) {
-		terminal += endbeam;
-	}
+	string initial = base + startbeam;
+	string terminal = base + endbeam;
 	// remove slur end from start of tremolo:
 	hre.replaceDestructive(initial, "", "[)]+[<>]?", "g");
 	if (m_keepQ) {
@@ -141849,6 +142022,26 @@ HTp Tool_tremolo::getNextNote(HTp token) {
 }
 
 
+
+//////////////////////////////
+//
+// Tool_tremolo::getOpenBeamCount -- The beams open where the token stands in its spine: each L of a token before it
+//    opens one, each J closes one (a grace note's beams, its own, are not counted) (MuseNote RC132).
+//
+
+int Tool_tremolo::getOpenBeamCount(HTp token) {
+	int open = 0;
+	for (HTp current = token->getPreviousToken(); current; current = current->getPreviousToken()) {
+		if ((!current->isData()) || current->isNull() || current->isGrace()) {
+			continue;
+		}
+		open += (int)std::count(current->begin(), current->end(), 'L');
+		open -= (int)std::count(current->begin(), current->end(), 'J');
+	}
+	return std::max(0, open);
+}
+
+
 //////////////////////////////
 //
 // Tool_tremolo::expandFingerTremolos --
@@ -141899,14 +142092,14 @@ void Tool_tremolo::expandFingerTremolo(HTp token1) {
 
 	string base1 = token1->getText();
 	hre.replaceDestructive(base1, "", markup, "g");
-	// Currently not allowed to add tremolo to beamed notes, so remove all beaming:
+	// (the strokes' beams as a bowed tremolo's: those open at the first note, and its own starts and the second
+	// note's own ends kept: MuseNote RC132)
+	int ownStarts = (int)std::count(base1.begin(), base1.end(), 'L');
+	int ownEnds   = (int)std::count(token2->begin(), token2->end(), 'J');
+	int extra = std::max(0, beams - (getOpenBeamCount(token1) + ownStarts));
 	hre.replaceDestructive(base1, "", "[LJKk]+", "g");
-	string startbeam;
-	string endbeam;
-	for (int i=0; i<beams; i++) {
-		startbeam += 'L';
-		endbeam   += 'J';
-	}
+	string startbeam(ownStarts + extra, 'L');
+	string endbeam(extra + ownEnds, 'J');
 
 	// Set the rhythm of the tremolo notes.
 	// Augmentation dot is expected adjacent to regular rhythm value.
@@ -142009,6 +142202,7 @@ void Tool_tremolo::removeMarkup(void) {
 void Tool_tremolo::storeFirstTremoloNoteInfo(HTp token) {
 	int track = token->getTrack();
 	HumNum timestamp = token->getDurationFromStart();
+	m_regions.emplace_back(track, timestamp, timestamp);
 	if (m_first_tremolo_time.at(track) < 0) {
 		m_first_tremolo_time.at(track) = timestamp;
 	} else if (timestamp < m_first_tremolo_time.at(track)) {
@@ -142035,6 +142229,9 @@ void Tool_tremolo::storeLastTremoloNoteInfo(HTp token) {
 	}
 	HumNum timestamp = token->getDurationFromStart();
 	timestamp += Convert::recipToDuration(token);
+	if ((!m_regions.empty()) && (std::get<0>(m_regions.back()) == track)) {
+		std::get<2>(m_regions.back()) = timestamp;
+	}
 	if (m_last_tremolo_time.at(track) < 0) {
 		m_last_tremolo_time.at(track) = timestamp;
 	} else if (timestamp > m_last_tremolo_time.at(track)) {
