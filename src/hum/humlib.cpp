@@ -103184,19 +103184,6 @@ HumNum Tool_mei2hum::parseStaff(xml_node staff, HumNum starttime) {
 // cerr << "============= LAYER COUNT " << layerPresent.size() << endl;
 // }
 
-	bool complete = true;
-	for (int i=0; i<(int)layerPresent.size(); i++) {
-// ggg
-// if ((m_currentMeasure == 12) && (m_currentStaff == 6)) {
-// cerr << "============= LAYER " << i+1 << " : " << layerPresent[i] << endl;
-// }
-		complete &= layerPresent[i];
-	}
-	if (!complete) {
-		// need to add invisible rests in un-specified layers.
-		cerr << "INCOMPLETE LAYERS IN STAFF" << endl;
-	}
-
 	// Check that the duration of each layer is the same here.
 
 	if (durations.empty()) {
@@ -103229,6 +103216,20 @@ HumNum Tool_mei2hum::parseStaff(xml_node staff, HumNum starttime) {
 		spacer += "ryy";
 		m_outdata.back()->addDataToken(spacer, starttime QUARTER_CONVERT + durations[i] QUARTER_CONVERT,
 				m_currentStaff-1, 0, layerNumbers[i]-1, m_staffcount);
+	}
+	// A layer number the staff has no layer of (a staff whose one layer is its 2, as a file's second voice gives it)
+	// is a spine all the same, beside the numbered ones: it is filled with a rest that is not seen, the length of the
+	// staff. Left empty, its spine held no time, and a reader of the Humdrum timed the staff by nothing: the music came
+	// back late and long (MuseNote RC120)
+	if (staffdur > 0) {
+		for (int j=0; j<(int)layerPresent.size(); j++) {
+			if (layerPresent[j]) {
+				continue;
+			}
+			string spacer = Convert::durationToRecip(staffdur QUARTER_CONVERT);
+			spacer += "ryy";
+			m_outdata.back()->addDataToken(spacer, starttime QUARTER_CONVERT, m_currentStaff-1, 0, j, m_staffcount);
+		}
 	}
 	m_currentStaff = 0;
 
