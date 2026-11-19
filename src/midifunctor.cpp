@@ -98,18 +98,29 @@ FunctorCode InitOnsetOffsetFunctor::VisitLayerElement(LayerElement *layerElement
     Fraction incrementScoreTime;
 
     if (element->Is(REST) || element->Is(SPACE)) {
-        incrementScoreTime = element->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
+        Rest *rest = element->Is(REST) ? vrv_cast<Rest *>(element) : NULL;
+        // A rest inside a tab group is timed by its group, as the group's notes are: the group's end adds the time
+        // (VisitTabGrpEnd), and the rest adds none of its own. (It added its own as well: what followed it was played
+        // late, and the bar ran long. MuseNote RC156)
+        TabGrp *tabGrp = rest ? vrv_cast<TabGrp *>(rest->GetFirstAncestor(TABGRP, MAX_TABGRP_DEPTH)) : NULL;
+        if (tabGrp && !rest->HasDur() && !rest->HasDurGes()) {
+            incrementScoreTime = tabGrp->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
+        }
+        else {
+            incrementScoreTime = element->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
+        }
         // For rests to be possibly added to the timemap
-        if (element->Is(REST)) {
-            Rest *rest = vrv_cast<Rest *>(element);
+        if (rest) {
             double realTimeIncrementSeconds = incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
             rest->SetScoreTimeOnset(m_currentScoreTime);
             rest->SetRealTimeOnsetSeconds(m_currentRealTimeSeconds);
             rest->SetScoreTimeOffset(m_currentScoreTime + incrementScoreTime);
             rest->SetRealTimeOffsetSeconds(m_currentRealTimeSeconds + realTimeIncrementSeconds);
         }
-        m_currentScoreTime = m_currentScoreTime + incrementScoreTime;
-        m_currentRealTimeSeconds += incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+        if (!tabGrp) {
+            m_currentScoreTime = m_currentScoreTime + incrementScoreTime;
+            m_currentRealTimeSeconds += incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+        }
     }
     else if (element->Is(NOTE)) {
         Note *note = vrv_cast<Note *>(element);
