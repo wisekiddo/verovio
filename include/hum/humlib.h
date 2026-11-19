@@ -9277,7 +9277,7 @@ class Tool_mei2hum : public HumTool {
 		int    extractStaffCountByScoreDef        (xml_node element);
 		HumNum parseRest            (xml_node chord, HumNum starttime);
 		HumNum parseRest_mensural   (xml_node chord, HumNum starttime);
-		HumNum parseMRest           (xml_node mrest, HumNum starttime);
+		HumNum parseMRest           (xml_node mrest, HumNum starttime, HumNum length = 0);
 		HumNum parseChord           (xml_node chord, HumNum starttime, int gracenumber);
 		HumNum parseNote            (xml_node note, xml_node chord, string& output, HumNum starttime, int gracenumber);
 		HumNum parseNote_mensural   (xml_node note, xml_node chord, string& output, HumNum starttime, int gracenumber);
@@ -9314,6 +9314,8 @@ class Tool_mei2hum : public HumTool {
 		void   parseSb              (xml_node sb, HumNum starttime);
 		void   parsePb              (xml_node pb, HumNum starttime);
 		void   processLinkedNodes   (string& output, xml_node node);
+		void   markTiesApart        (string& output, xml_node note, HumNum start, HumNum end);
+		void   markTieApartInGrid   (xml_node note);
 		int    getDotCount          (xml_node node);
 		void   processFermataAttribute(string& output, xml_node node);
 		string getNoteArticulations (xml_node note, xml_node chord);
@@ -9384,6 +9386,13 @@ class Tool_mei2hum : public HumTool {
 		string         m_beamPostfix;
 		string         m_tremoloMarkup;      // Tool_tremolo's markup for the next note or chord written (MuseNote RC132)
 		bool           m_hasTremolo = false; // a tremolo's markup was written: Tool_tremolo expands it
+		// Each tie's ends seen so far, by the tie: the time its start's note ends, the time its end's note starts, and
+		// the note (MuseNote RC136)
+		map<xml_node, pair<HumNum, xml_node>> m_tieStarts;
+		map<xml_node, pair<HumNum, xml_node>> m_tieEnds;
+		// In the measure being written, each layer (staff index, layer index) whose whole-measure rest took no time
+		// and was not written, with what its filler is written as: a rest seen, or not (MuseNote RC138)
+		map<pair<int, int>, string> m_untimedRests;
 		bool           m_aboveQ = false;
 		bool           m_belowQ = false;
 		bool           m_editorialAccidentalQ = false;

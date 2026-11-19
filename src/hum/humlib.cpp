@@ -101276,7 +101276,15 @@ static bool readNumber(const string& text, double& number) {
 static void keepId(GridSlice* slice, int staffindex, int voiceindex, xml_node node) {
 	// (No line is given back for a grace note at the start of a measure.)
 	if (slice) {
-		slice->at(staffindex)->at(0)->at(voiceindex)->getToken()->setValue("auto", "xmlid", node.attribute("xml:id").value());
+		HTp token = slice->at(staffindex)->at(0)->at(voiceindex)->getToken();
+		token->setValue("auto", "xmlid", node.attribute("xml:id").value());
+		// and a chord's notes, by their places in it: a tie names a note, and a chord need have no id (MuseNote RC136)
+		if (strcmp(node.name(), "chord") == 0) {
+			int place = 0;
+			for (xml_node note = node.child("note"); note; note = note.next_sibling("note")) {
+				token->setValue("auto", "noteid" + to_string(place++), note.attribute("xml:id").value());
+			}
+		}
 	}
 }
 
@@ -102898,6 +102906,7 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 
 	GridMeasure* gm = m_outdata.addMeasureToBack();
 	gm->setTimestamp(starttime QUARTER_CONVERT);
+	m_untimedRests.clear();
 
 	// A change of key or of meter that this measure starts with: written
 	// in it, after the barline of the measure before.  (Written before
@@ -102976,41 +102985,22 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 		}
 	}
 
+	// A measure lasts as long as its longest staff, as the engine plays it, and each shorter staff is filled to that
+	// with a rest not seen (seen where the staff's whole-measure rest took no time: m_untimedRests). A shorter staff was
+	// filled to the meter: a measure no staff fills, as a pickup, came back as long as the meter, and beside a staff
+	// longer than the meter a shorter one was filled twice (MuseNote RC138)
 	HumNum measuredur = durations[0];
 	HumNum targetDur = m_measureDuration.at(0) / 4;
 	HumNum maxdur = 0;
-	bool overfilledQ = false;
+	for (int i=0; i<(int)durations.size(); i++) {
+		if (durations[i] > maxdur) {
+			maxdur = durations[i];
+		}
+	}
 	if (!allequal) {
-		measuredur = targetDur;
+		measuredur = maxdur;
 		for (int i=0; i<(int)durations.size(); i++) {
-			if (durations[i] > maxdur) {
-				maxdur = durations[i];
-			}
-			if (durations[i] == targetDur) {
-				continue;
-			}
-			if (durations[i] < targetDur) {
-
-				HumNum difference = targetDur - durations[i];
-				string spacer = Convert::durationToRecip(difference QUARTER_CONVERT);
-				spacer += "ryy";
-
-				std::ostringstream message;
-				message << "Error: measure " << m_currentMeasure;
-				message << ", staff " << i+1 << " is underfilled: ";
-				message << "adding token " << spacer;
-				message << " at end of measure to complete its duration.";
-				cerr << message.str() << endl;
-
-				// Add an invisible rest to fill in the problem spot.
-				// staff with multiple layers will have to be addressed as well...
-				m_outdata.back()->addDataToken(spacer, starttime QUARTER_CONVERT +
-						durations[i] QUARTER_CONVERT, i, 0, 0, m_staffcount);
-
-				// put an error message at the start of the measure warning about being underfilled
-				m_outdata.back()->addGlobalComment("!!" + message.str(), starttime QUARTER_CONVERT);
-
-			} else if (durations[i] > targetDur) {
+			if (durations[i] > targetDur) {
 				std::ostringstream message;
 				message << "Error: measure " << m_currentMeasure;
 				message << " staff " << i+1 << " is overfilled: ";
@@ -103019,29 +103009,21 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 				message << targetDur.getFloat() * 4 << ".";
 				cerr << message.str() << endl;
 				m_outdata.back()->addGlobalComment("!!" + message.str(), starttime QUARTER_CONVERT);
-
-				overfilledQ = true;
 			}
-		}
-	}
-
-	if (overfilledQ) {
-		// pad measures that are not under filled so that all
-		// parts have the same maximum overfilling.
-		for (int i=0; i<(int)durations.size(); i++) {
 			if (durations[i] == maxdur) {
 				continue;
 			}
 			HumNum difference = maxdur - durations[i];
 			string spacer = Convert::durationToRecip(difference QUARTER_CONVERT);
-			spacer += "ryy";
+			auto untimed = m_untimedRests.find(std::make_pair(i, 0));
+			spacer += (untimed != m_untimedRests.end()) ? untimed->second : string("ryy");
 
 			std::ostringstream message;
-			message << "Warning: measure " << m_currentMeasure;
-			message << ", staff " << i+1 << " padded. ";
+			message << "Error: measure " << m_currentMeasure;
+			message << ", staff " << i+1 << " is underfilled: ";
 			message << "adding token " << spacer;
-			message << " at end ot measure to extend its duration.";
-			// cerr << message.str() << endl;
+			message << " at end of measure to complete its duration.";
+			cerr << message.str() << endl;
 
 			// Add an invisible rest to fill in the problem spot.
 			// staff with multiple layers will have to be addressed as well...
@@ -103050,7 +103032,6 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 
 			// put an error message at the start of the measure warning about being underfilled
 			m_outdata.back()->addGlobalComment("!!" + message.str(), starttime QUARTER_CONVERT);
-
 		}
 	}
 
@@ -103076,11 +103057,7 @@ HumNum Tool_mei2hum::parseMeasure(xml_node measure, HumNum starttime) {
 		gm->setInvisibleBarline();
 	}
 
-	if (overfilledQ) {
-		return starttime + maxdur;
-	} else {
-		return starttime + measuredur;
-	}
+	return starttime + measuredur;
 }
 
 
@@ -103230,7 +103207,9 @@ HumNum Tool_mei2hum::parseStaff(xml_node staff, HumNum starttime) {
 		}
 		HumNum difference = staffdur - durations[i];
 		string spacer = Convert::durationToRecip(difference QUARTER_CONVERT);
-		spacer += "ryy";
+		// (seen, where the layer's whole-measure rest took no time: parseLayer, MuseNote RC138)
+		auto untimed = m_untimedRests.find(std::make_pair(m_currentStaff-1, layerNumbers[i]-1));
+		spacer += (untimed != m_untimedRests.end()) ? untimed->second : string("ryy");
 		m_outdata.back()->addDataToken(spacer, starttime QUARTER_CONVERT + durations[i] QUARTER_CONVERT,
 				m_currentStaff-1, 0, layerNumbers[i]-1, m_staffcount);
 	}
@@ -103450,7 +103429,30 @@ HumNum Tool_mei2hum::parseLayer(xml_node layer, HumNum starttime, vector<bool>& 
 
 	HumNum  starting = starttime;
 
+	// In a measure its meter does not fill (@metcon="false") the engine gives a whole-measure rest no time: the measure
+	// lasts as long as its other content (LayerElement::GetAlignmentDuration). The space right after it in its layer is
+	// that time, and the rest is written over it, as long as it; with no space after it, it is not written, and the
+	// filler of its layer, or of its staff, is the rest (m_untimedRests). It was written as long as the meter, and the
+	// space after it as well: the measure came back longer by the meter (MuseNote RC138)
+	bool notFull = (strcmp(layer.parent().parent().attribute("metcon").value(), "false") == 0);
 	for (int i=0; i<(int)children.size(); i++) {
+		string name = children[i].name();
+		if (notFull && ((name == "mRest") || (name == "mSpace") || (name == "multiRest"))) {
+			HumNum over = 0;
+			int next = i + 1;
+			while ((next < (int)children.size()) && (strcmp(children[next].name(), "space") == 0)) {
+				over += getDuration(children[next]);
+				next++;
+			}
+			if (over > 0) {
+				starttime = parseMRest(children[i], starttime, over);
+			} else {
+				bool seen = (name != "mSpace") && (string(children[i].attribute("visible").value()) != "false");
+				m_untimedRests[std::make_pair(m_currentStaff-1, m_currentLayer-1)] = seen ? "r" : "ryy";
+			}
+			i = next - 1;
+			continue;
+		}
 		starttime = parseLayerElement(children[i], layer, starttime);
 	}
 
@@ -104148,6 +104150,8 @@ HumNum Tool_mei2hum::parseNote(xml_node note, xml_node chord, string& output,
 
 	m_fermata = false;
 	processLinkedNodes(tok, note);
+	// (its ties, by when it starts and ends; a grace note takes no time: MuseNote RC136)
+	markTiesApart(tok, note, starttime, starttime + ((gracenumber > 0) ? HumNum(0) : duration));
 	if (!m_fermata) {
 		processFermataAttribute(tok, note);
 	}
@@ -104549,10 +104553,13 @@ string Tool_mei2hum::accidToKern(const string& accid) {
 // Tool_mei2hum::parseMRest -- Full-measure rest.
 //
 
-HumNum Tool_mei2hum::parseMRest(xml_node mrest, HumNum starttime) {
+HumNum Tool_mei2hum::parseMRest(xml_node mrest, HumNum starttime, HumNum length) {
 	HumNum duration = m_measureDuration.at(m_currentStaff-1);
 	duration /= 4;
-	if (duration == 0) {
+	if (length > 0) {
+		// as long as the space it is written over, in a measure its meter does not fill (parseLayer, MuseNote RC138)
+		duration = length;
+	} else if (duration == 0) {
 		// No meter is known (none given, or one this converter does not
 		// read): a whole note, as such a rest is written.  (A rest of no
 		// length came out as "1%0r", and the barline after it was lost.)
@@ -104890,6 +104897,138 @@ void Tool_mei2hum::processLinkedNodes(string& output, xml_node node) {
 		found = m_stoplinks.find(id);
 		if (found != m_stoplinks.end()) {
 			processNodeStopLinks(output, node, (*found).second);
+		}
+	}
+}
+
+
+
+//////////////////////////////
+//
+// doubleTieMark -- A token's (or a chord note's) tie mark made a disjunct
+//    tie's: [ to [[, _ to __, ] to ]] (one already doubled is kept).
+//
+
+static void doubleTieMark(string& text) {
+	if ((text.find("[[") != string::npos) || (text.find("__") != string::npos)
+			|| (text.find("]]") != string::npos)) {
+		return;
+	}
+	for (char mark : string("[_]")) {
+		size_t at = text.find(mark);
+		if (at != string::npos) {
+			text.insert(at, 1, mark);
+			return;
+		}
+	}
+}
+
+
+
+//////////////////////////////
+//
+// Tool_mei2hum::markTiesApart -- A tie whose second note does not start
+//    where its first ends (a rest, a space or another note between them)
+//    is a disjunct tie in Humdrum: [[ and ]], a middle __.  A reader joins
+//    a [ only to the ] that starts where its note ends: such a tie was
+//    broken in two, and the note it holds struck again.  Each end is
+//    known as its note is written (start, end: when it starts and ends);
+//    once both are, the note written now is marked in its token, and the
+//    other in the token it was written as.  (MuseNote RC136)
+//
+
+void Tool_mei2hum::markTiesApart(string& output, xml_node note, HumNum start, HumNum end) {
+	string id = note.attribute("xml:id").value();
+	bool apart = false;
+	auto starts = m_startlinks.find(id);
+	if (starts != m_startlinks.end()) {
+		for (xml_node link : starts->second) {
+			if (strcmp(link.name(), "tie") != 0) {
+				continue;
+			}
+			m_tieStarts[link] = std::make_pair(end, note);
+			auto other = m_tieEnds.find(link);
+			if ((other != m_tieEnds.end()) && (other->second.first != end)) {
+				apart = true;
+				markTieApartInGrid(other->second.second);
+			}
+		}
+	}
+	auto stops = m_stoplinks.find(id);
+	if (stops != m_stoplinks.end()) {
+		for (xml_node link : stops->second) {
+			if (strcmp(link.name(), "tie") != 0) {
+				continue;
+			}
+			m_tieEnds[link] = std::make_pair(start, note);
+			auto other = m_tieStarts.find(link);
+			if ((other != m_tieStarts.end()) && (other->second.first != start)) {
+				apart = true;
+				markTieApartInGrid(other->second.second);
+			}
+		}
+	}
+	if (apart) {
+		doubleTieMark(output);
+	}
+}
+
+
+
+//////////////////////////////
+//
+// Tool_mei2hum::markTieApartInGrid -- A note written before, its tie mark
+//    made a disjunct tie's in the token it was written as, found by the
+//    note's id as keepId keeps it (a chord's note by its place in the
+//    chord).
+//
+
+void Tool_mei2hum::markTieApartInGrid(xml_node note) {
+	string key = "xmlid";
+	int subtoken = -1;
+	if (strcmp(note.parent().name(), "chord") == 0) {
+		subtoken = 0;
+		for (xml_node other = note.parent().child("note"); other && (other != note); other = other.next_sibling("note")) {
+			subtoken++;
+		}
+		key = "noteid" + to_string(subtoken);
+	}
+	string id = note.attribute("xml:id").value();
+	if (id.empty()) {
+		return;
+	}
+	for (auto gm = m_outdata.rbegin(); gm != m_outdata.rend(); ++gm) {
+		for (auto slice = (*gm)->rbegin(); slice != (*gm)->rend(); ++slice) {
+			for (int p=0; p<(int)(*slice)->size(); p++) {
+				for (GridVoice* voice : *(*slice)->at(p)->at(0)) {
+					HTp token = voice ? voice->getToken() : NULL;
+					if ((!token) || (token->getValue("auto", key) != id)) {
+						continue;
+					}
+					string text = *token;
+					if (subtoken < 0) {
+						doubleTieMark(text);
+					} else {
+						vector<string> notes(1);
+						for (char c : text) {
+							if (c == ' ') {
+								notes.emplace_back();
+							} else {
+								notes.back() += c;
+							}
+						}
+						if (subtoken < (int)notes.size()) {
+							doubleTieMark(notes[subtoken]);
+						}
+						text.clear();
+						for (int k=0; k<(int)notes.size(); k++) {
+							text += (k ? " " : "") + notes[k];
+						}
+					}
+					token->setText(text);
+					return;
+				}
+			}
 		}
 	}
 }
