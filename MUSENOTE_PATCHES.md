@@ -2989,6 +2989,73 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 113. Order of play: the part after the part played before is found past what plays nothing (tb.51)
+
+MuseNote plan V3_2_0_77 (root cause RC139, finding W79). `ExpansionMap::Expand` moves a part the order names for the
+first time to just after the part played before it, where the element after that part is another one. It took the very
+next element only: a system break, a page break or a score definition there left the part where it is written, and the
+score played it out of its turn. I Saw Her Standing There (an `<sb/>` after bar 44) played its endings 43, 44, 45 where
+its order says 44, 43, 45. Those elements, which play nothing, are looked past. Upstream's line is the same at 6.4.1
+(renamed `IsAnyOf`: a textual conflict at the base move, nothing more).
+
+### 112. Humdrum reader: brackets played in turn are no two endings; a change stays in its ending; a disjunct tie read end first (tb.51)
+
+MuseNote plan V3_2_0_77 (root causes RC137, RC140 and RC141, finding W79).
+
+- **RC137.** `inDifferentEndings`, `atEndingBoundaryStart` and `atEndingBoundaryEnd` judged two sections different
+  endings by the numbers their labels end in alone. An ending a file draws as two brackets is two sections, labelled by
+  their places (B1, B2), and a tie from the first bracket into the second, which the expansion list plays right after
+  it, was broken: its note struck again (Crying In The Chapel, Coconuts, Here I Am Lord). One check for the three,
+  `endingsApart`: the numbers differ, and the primary expansion list never plays the second right after the first. The
+  pairs are read by `prepareSections`, as `storeExpansionLists` takes the list (the one before the first data line, or
+  the primary of several); the list's parsing is shared, `readExpansionList`. A tie hanging at such a bracket's edge is
+  drawn as any tie with no other end is.
+- **RC140.** `addSystemClefKeyTimeChange` added a change's score definition to the enclosing section: inside an ending
+  it landed after the ending, whose later measures kept the meter before, and a whole-measure rest there took that
+  meter's length (The Fool On The Hill, Bohemian Rhapsody; eight more drew the change after the ending). It is inserted
+  right before its measure, in the measure's container, once `setupSystemMeasure` has placed the measure.
+- **RC141.** `processHangingTieStart` looked for a tie's end read first, in an earlier layer of the measure, by time
+  alone (upstream's note there: "deal with disjunct ties as well"), and a disjunct tie's notes are apart: both were left
+  hanging. A disjunct start (`[[`, `__`) takes a disjunct end (`]]`, `__`) of its pitch that comes after it.
+
+### 111. Humdrum export: a tie whose notes are apart is disjunct; a measure as long as the engine plays it (tb.51)
+
+MuseNote plan V3_2_0_77 (root causes RC136 and RC138, finding W79).
+
+- **RC136.** `Tool_mei2hum` wrote every tie `[` and `]`. The Humdrum reader joins those only where the second note
+  starts as the first ends (`processTieEnd`): a tie across a rest or a space was broken in two, and its second note
+  struck again (Superstar, Birdland, A-Tisket, Chaka Khan, Good Riddance, Long Cool Woman, Stop and Stare). A tie's ends
+  are kept as their notes are written (`markTiesApart`, called from `parseNote`: when its start ends, when its end
+  starts; a grace note takes no time); once both are known and they differ, both marks are made a disjunct tie's, `[[`
+  and `]]` (a middle `__`): the note being written in its own token, the other in the token it was written as, found by
+  `keepId`'s id. `keepId` keeps a chord's notes by their places, so a chord needs no id of its own for it.
+- **RC138.** The converter timed a measure by its meter, where the engine times it by what it holds. In a measure its
+  meter does not fill (`@metcon="false"`) the engine gives a whole-measure rest no time
+  (`LayerElement::GetAlignmentDuration`); it was written as long as the meter, and the space after it as well (Viva la
+  Vida, Guantanamera, Apologize and five more, all files of a forward past the barline: the measure came back a bar
+  longer each pass). Such a rest is written over the plain space after it in its layer, as long as it; with no space
+  after it, it is not written, and the filler of its layer or of its staff is the rest, seen as it was
+  (`m_untimedRests`). `parseMeasure` makes a measure as long as its longest staff and fills each shorter staff once to
+  it: it filled them to the meter (a pickup no staff fills came back as long as the meter; and beside a staff longer
+  than the meter a shorter one had two fillers).
+
+All three, measured by MuseNote's export gate over every song, the Humdrum export read back by the engine, against
+tb.50: songs whose notes or times differ 22 to 0 (7 live to 0), how long 22 to 0, how loud 11 to 1, channel 12 to 2;
+tempo and instrument unchanged; no song differs anew in any aspect. Parity: 2 of 22,947 outputs differ, I Saw Her
+Standing There's MIDI and timemap (patch 113: its endings in its order's turn); no Humdrum sample's MEI changes; seeded
+ids 3,216 of 3,216; every input reads back from its MEI. None of the six functions changes upstream at 6.3.0, 6.4.0,
+6.4.1 or on develop.
+
+**Cases**: `test/native/test_tb51_humdrum_last_kinds_engine.cpp` (10 cases): a tie across a space at the barline and
+across a rest, a middle apart on either side, the second note of a chord with no id, a tie whose end is written first
+in an earlier layer, a grace tied to its note (must stay plain); a tie from one bracket of an ending into the next, a
+tie hanging at such a bracket's edge, the primary of two expansion lists; a whole-measure rest over the space after it
+(a measure of the meter and one of half), a pickup's rest on another staff and in another layer, a measure of space
+there, a pickup of unequal staves tied into the next measure, a staff longer than the meter; endings written 2, 1, 3
+with a system break, a page break, a score definition before the last; a meter change inside an ending and at a
+section's start. On tb.50 eight fail (41 checks); the two must-not-change cases pass. Twenty-nine breaks, each part of
+the three patches alone: every one caught.
+
 ### 110. Humdrum reader: a merged tuplet ends where its second part does; a tremolo of tuplet strokes has their count (tb.50)
 
 MuseNote plan V3_2_0_76 (root causes RC135 and RC132, finding W79). `HumdrumInput::mergeTupletsCuttingBeam` renumbered
