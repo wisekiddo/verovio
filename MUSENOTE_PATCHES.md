@@ -2989,6 +2989,59 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 110. Humdrum reader: a merged tuplet ends where its second part does; a tremolo of tuplet strokes has their count (tb.50)
+
+MuseNote plan V3_2_0_76 (root causes RC135 and RC132, finding W79). `HumdrumInput::mergeTupletsCuttingBeam` renumbered
+the tuplets after a merge from two elements on: a second tuplet of one element (a space of a tuplet's value after a
+beam's first notes, which patch 109 now writes) kept its end's old number, the merged tuplet ended under none, and it was
+opened around the beam, the beam's notes after it losing their length (Your Song v2: 784 notes otherwise with patch 109
+alone, none with this). Its end is renumbered too. And a tremolo the reader makes of strokes of a tuplet's value (12,
+24...) is given their count, `@num`, as the MIDI writer reads it: its `@unitdur`, a power of two, made fewer strokes.
+
+### 109. Humdrum export: what a container holds keeps its time; tremolos, tempos and arpeggios written (tb.50)
+
+MuseNote plan V3_2_0_76 (root causes RC131 to RC134, finding W79).
+
+- **RC131.** `Tool_mei2hum` read a layer's content with a list of its own in the layer, the beam and the tuplet, and
+  dropped what a list lacked, with its time and a warning only: a space in a tuplet or a beam, a beam in a beam, an
+  `mSpace` (Superstar, Boogie Woogie, Give Me One Reason, Fatback). One dispatch now, `parseLayerElement`; a beam in a
+  beam stacks its starts and ends, its container's end deferred as a tuplet's is; a space takes no beam mark (a beam
+  started on a space a reader does not draw); an `mSpace`, and a rest the score does not draw (`@visible="false"`), is
+  a rest not drawn (`ryy`).
+- **RC132.** A tremolo had no case, and was dropped (Le mille bolle blu). `parseTremolo` writes it with `Tool_tremolo`'s
+  markup, as `GenerateMIDIFunctor::VisitBTrem` plays it: a bowed tremolo `@N@` from its `@num`, an enclosing tuplet's
+  num, its `@unitdur`, or its note's value and slashes (`BTrem::CalcIndividualNoteDuration`); a fingered one `@@N@@`, its
+  two notes halved, as the engine times them. The file is read again, and `Tool_tremolo` writes the strokes. In
+  `Tool_tremolo`: the strokes' beams are counted from the beams open where the note stands (`getOpenBeamCount`), the
+  note's own starts and ends kept (in a beam of the score the strokes' beams did not close, and a reader lost the beams
+  from there); each tremolo has its own `*tremolo` and `*Xtremolo` (one went from a spine's first tremolo to its last,
+  and plain beamed pairs of one pitch between were read as tremolos). `HumdrumFileBase::insertNullInterpretationLineAbove`
+  passes over lines with no spines: a global comment at a tremolo's end (a system break) was copied for the new line's
+  fields, a line of one field, and the file could not be read.
+- **RC133.** `parseTempo` read a tempo's `@bpm` and `@mspb`, which MEI does not have: `@midi.bpm`, then `@midi.mspb`
+  (60,000,000 / mspb; it was multiplied). A tempo the MusicXML reader writes was never written (William Tell).
+- **RC134.** `buildIdLinkMap` linked a control event by `@startid` only: an `<arpeg>` given by `@plist` alone, as the
+  MusicXML reader writes one, is linked to each element it names (Ashokan Farewell, Help!, Money Money Money).
+
+Both, measured by MuseNote's export gate over every song, the Humdrum export read back by the engine, against tb.49:
+songs whose notes or times differ 45 to 22 (25 live to 7), tempo 119 to 23, how long 45 to 22, how loud and channel
+better by 12 and 14; counted note by note, no song worse, 29 better, 23 now as the song; MusicXML and ABC unchanged.
+Parity: 2 of 22,947 outputs differ, the locator dumps of two of the parity set's damaged Humdrum samples (written by the
+6.2.0 converter: All You Need Is Love, The Imperial March), their tuplets now inside the beam; the locator gate's 8
+notes of All You Need Is Love's measure 6 with them. Seeded ids 3,216 of 3,216; every input reads back from its MEI.
+
+**Cases**: `test/native/test_tb50_humdrum_kept_engine.cpp` (8 cases): a space in a tuplet and in a beam, a beam in a
+beam (in the middle, first and last), a beam starting with a space, a bar of space; hidden rests; tremolos (an eighth
+in no beam, a quarter's chord, in a beam and at its end, @num 3, fingered), each read back as the MIDI plays it, and
+drawn as a tremolo again; a *tremolo for each of two tremolos, one before a system break; tempos by @midi.bpm and
+@midi.mspb; an arpeggio by @plist; Your Song's beam; must not change: plain beams and tuplets, a tempo in @mm, a chord
+with no arpeggio, six triplets in one beam. On tb.49 seven fail. Sixteen breaks, each caught. Three cases of
+`test_mei_to_humdrum_engine.cpp` that pinned the lost bar of an `mSpace` now hold its rest, and play as their scores.
+
+Not handled (drawing only; each played right; MuseNote W122): a tremolo sharing a beam with other notes is not folded
+by the reader (`checkForTremolo` takes whole beam groups); an unmeasured tremolo is written as its note; a fingered
+tremolo with neither `@unitdur` nor `@beams` as its two notes, halved. The MIDI writer reads no `@midi.mspb` (W121).
+
 ### 108. getMIDIValuesForElement builds the timemap of the document it reads (tb.49)
 
 MuseNote plan V3_2_0_75 (root cause RC130, finding W119); upstream ad1570a6d (develop, after 6.4.1), cherry-picked.
