@@ -2989,6 +2989,78 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 108. getMIDIValuesForElement builds the timemap of the document it reads (tb.49)
+
+MuseNote plan V3_2_0_75 (root cause RC130, finding W119); upstream ad1570a6d (develop, after 6.4.1), cherry-picked.
+`Toolkit::GetMIDIValuesForElement` read the document for playback (`m_midiDoc`) and, where it had no timemap, built
+the timemap of the loaded document (`m_doc`): where the document for playback is a copy (a score with no order of its
+own), its values were empty until a timemap had been rendered. MuseNote's `noteDetail` asks it first. The other timed
+queries (`GetElementsAtTime`, `GetTimeForElement`, `GetTimesForElement`) already build on the document they read.
+
+### 107. A bow tremolo's count of notes, and a tablature note's course, ask for no memory past what is played (tb.49)
+
+MuseNote plan V3_2_0_75 (root cause RC129, finding W118). Upstream 61866183d (6.4.0), cherry-picked: the MIDI writer
+expanded a bow tremolo into a list of notes as long as a count it worked out unchecked (negative or huge for a secondary
+tied note, a note shortened by graces, a huge `@num`, a mensural unit), and the list asked for memory until the process
+ended; secondary tied notes are now passed over, `@num` is held to 256, and a unit below a 2048th is not expanded. And
+ours (8a2125c), the same class found by the audit: `VisitNote` resized the tablature hold list to the note's course, a
+number the file gives (MusicXML `<string>`, MEI `@tab.course`; upstream develop still does), so a course of
+2,000,000,000 ended the process the same way. The held notes are kept by course in a `std::map`, walked in course order
+as the vector was; a course with no note held has no entry where the vector had one of pitch 0, which every walk
+passed over, so the MIDI written is the same.
+
+### 106. The MIDI writer keeps octave lines by span (tb.49)
+
+MuseNote plan V3_2_0_75 (root cause RC128, finding W117); upstream c8582c622 (develop, after 6.4.1), cherry-picked.
+`GenerateMIDIFunctor::HandleOctave` started a line at the first element of its layer at or after its start, its end not
+looked at, and ended or started one line at each element: a layer with nothing inside a line had the next note after it
+moved, and of two lines ending on one note the second stayed on. Every line of the layer that ends before the element
+now ends, and every line that holds it starts; a grace comes before the note it shares its place with. Patch 6 records
+the pitch the MIDI plays, so the pitch map has the same pitches.
+
+### 105. Each staff's visibility is its own <staff-details> (tb.49)
+
+MuseNote plan V3_2_0_75 (root cause RC127, finding W116); upstream 8339461f8 (6.4.0), cherry-picked.
+`ReadMusicXmlMeasure` set every staff's visibility from the part's first `<staff-details>`: hiding staff 2 hid staff 1
+and its notes. Each staff now reads the `<staff-details>` of its number, else one with no number. The same cause, not
+mended here (MuseNote's W120, its own plan): mid-score `<key>` and `<time>` are read from the first part only and set
+for every staff.
+
+### 104. A grace's slash by its value, and a direction's offset in an int (tb.49)
+
+MuseNote plan V3_2_0_75 (root cause RC126, finding W115). Upstream 8300807c9 (6.3.0), cherry-picked: `grace@slash`
+was read by its presence, so `slash="no"` made a slashed grace, played before the beat. Upstream af2adb2a7 (6.4.0),
+its direction half by hand: a direction's `<offset>` was read into a `short`, and one past 32,767 divisions wrapped.
+(Its other half reads the offset of a `<sound>`'s tempo, which 6.4.0 added and this branch does not have.) The class
+audited: every other yes/no attribute is read with `as_bool()`; every other `short` holds a staff, voice, line or
+number, no count of divisions.
+
+### 103. The staff a cross-staff note is on, for its notations and its octave (tb.49)
+
+MuseNote plan V3_2_0_75 (root cause RC125, finding W114). Upstream 6d5d4f85a (6.3.0; by hand: the marks stay filed by
+the bar they were read in, patch 68), 15c17a299 and 2387e3807 (6.4.0), cherry-picked: the MusicXML reader took a
+cross-staff note's staff from its layer for its notations (fingering, breath, caesura, dynamics, fermata, glissando,
+mordents, trill, turn), for the octave-shift that sets its written octave (under an 8va on its own staff it was drawn
+an octave off), and for whether it gets `@oct.ges` (with only its layer's staff shifted it was played at that shift).
+And ours (3e58a6a): upstream reads `m_octDis` at the note's `<staff>` whatever it names, past the vector's end for a
+staff the score does not have (tb.9 closed the same read for an octave-shift); such a note is drawn on its layer's
+staff, so its notations and octave are now that staff's.
+
+**Gate of tb.49** (patches 103 to 108 together, MuseNote plan V3_2_0_75). Native: the cases of
+`test/native/test_tb49_upstream_fixes_engine.cpp` fail on tb.48 where they test a fix (the tremolo of `@num` 100,000
+plays 100,000 notes; the course of 2,000,000,000 passed 2 GB under a watchdog and was stopped), and each of the eleven
+commits, undone alone, is caught by its own case (our bound of patch 103 also stops the hardened ASan build, in
+`ReadMusicXmlNote`); the suite, 414 cases (15,152 assertions), and under ASan 413 (15,135), no finding. Parity: 14 of
+22,940 outputs differ, all of three songs: Sing (MEI, page, MIDI, timemap: its 14 graces marked `slash="no"` are `acc`,
+patch 104) and both versions of Non, je ne regrette rien (MEI, page: the "rall." where its file's offset of -70,400
+divisions puts it, before the song, so at the left barline of bar 1; tb.48 read the offset wrapped, bar 21. The file is
+wrong: MuseNote corrects it as its v3). No generated id moves; seeded ids 3,215 of 3,215; every input reads back from
+its MEI. The locator gate: 28 failures, one change, Sing's 14 graces in both MusicXML kinds, their position and id kept
+and their fingerprint's grace kind `unacc` to `acc`: the declared change, accepted by the owner (2026-11-19); a mark
+stored by id finds them, one stored by position and fingerprint (development builds only) does not. MuseNote's export
+gate in every format and its four reader guards give tb.48's results; MuseSync's 24 starters play the same. A Debug
+engine (asserts on) over every input: 3,609, all through.
+
 ### 102. Humdrum export: a grace note keeps its kind, and a grace chord is a grace (tb.48)
 
 MuseNote plan V3_2_0_73 (root cause RC122, finding W79). `Tool_mei2hum::parseNote` wrote every grace `q`, and the
@@ -4383,6 +4455,51 @@ tb.19 played rightly); 11 deliberate breaks, each caught; clean under
 AddressSanitizer with libc++ hardening.
 
 **Upstream status**: not offered.
+
+## Upstream fixes judged (2026-11-19)
+
+MuseNote's review of upstream 6.2.1, 6.3.0, 6.4.0, 6.4.1 and develop to 7f9e3651d (2026-11-18), for its W112, the base
+move, which waits for MuseNote 3.3.0 (the owner, 2026-11-19). Taken onto this branch at tb.49: patches 103 to 108.
+For the base move: the target is 6.4.1. Tools and notes: `tb14-durable/verovio-upstream-notes` (merge-tree of this
+branch onto each release, the conflicts blamed hunk by hunk).
+
+**Taken at tb.49** (none moves a generated id): 6d5d4f85a, 15c17a299, 2387e3807 (patch 103); 8300807c9, the direction
+half of af2adb2a7 (104); 8339461f8 (105); c8582c622 (106, develop); 61866183d (107); ad1570a6d (108, develop).
+
+**Upstream has the fault this branch's patch mends (the patch drops or is replaced at the base move):**
+- patch 3: beeeb2150 (6.3.0), the same commit;
+- patch 7: 485b6018a (6.4.0, an octave without its end); its toolkit half was already replaced by patch 84;
+- patch 9: e918f18ec (6.4.0, a pedal without its start), short of the alignment check; the layer check is ours alone;
+- patch 68: 1f51c826a (6.3.0), the same fault (RC54) mended by bar count, not by bar; patches 64 to 66, 69, 94, 98,
+  99 and some of 80 to 83 take a bar and are re-ported to it;
+- patch 18: the `<alter>` series (d11c392fb, 2d0dea2d3, 4d76e16af, e59ec90d6, a761ed4bd in 6.3.0; c2f730f00 in 6.4.0),
+  the same rule (the file's alter is the sound) built otherwise: it drops empty and natural accids, so ids move;
+  patch 50 stands on 18; 6.4.1 has a regression of it, #4567 (an accidental-mark changes the next note's pitch), mended
+  on develop by 6b49a5a66;
+- patches 28 and 40: 3fe7f1ad3 and f1998d2b0 (6.4.0), the same faults mended otherwise;
+- patch 91: eb00ec45a (develop), the same fault (nested slurs) mended otherwise;
+- patch 93: a96989225 (develop), the same fault (a chord's beam), narrower than ours.
+
+**Upstream goes the other way:** 8817c3033 (6.3.0) drops a trailing forward's space; patch 98 keeps the forward's time.
+
+**Upstream changes that move generated ids (MusicXML):** 7e02fe4ea (no empty accid; 97.9 % of MusicXML note ids, the
+fork study), a761ed4bd, 92b03ade9 and 7d781df87 (a verse at an extender's stop), bd1515b1a (a tempo from a bare
+`<sound tempo>`), c2f730f00, f1998d2b0. The Score/Part split of 6.4.0 builds the same objects.
+
+**To mend at the base move:** libmei reads numbers with `stof` and `stoi` from 6.3.0 (04cf3e934): an empty or
+non-numeric number in an MEI file throws past every catch, and a double is read as a float (patch 90's read side);
+6.4.0 draws an SVG placeholder (a circle) at every scoreDef, sb, pb and section inside a system, hidden only by the
+stylesheet, which MuseNote's SvgPatcher removes; 6.3.0's new glyphs (Turkish accidentals) for the app's assets.
+
+**Not taken, not needed by MuseNote or MuseSync:** the editor API and cursor; show-hidden; neume, mensural and
+tablature work; page-based MEI; `<parts>`; `staffDef@num`; `--convert-attributes`; the `svgAdditionalAttribute` speed
+work; 1712ca6f8 and 5e8dc3db8 (thread safety of the custom tuning and the object factory: one engine worker, and none
+of the factory's users is used; 1712ca6f8 applies cleanly if it is ever needed); da57e000e (`getElementsAtTime`'s
+page, which neither app calls); develop's font rewrite (it moves `data/` and writes text as text).
+
+**Found by the audits of tb.49's classes, upstream develop still has it:** a tablature note's course sized the MIDI
+writer's hold list (patch 107, ours); a `<staff>` the score does not have read past `m_octDis` (patch 103, ours); a
+part's first `<staff-details print-object>` is never read (MuseNote's W116, open).
 
 ## Rules for this branch
 
