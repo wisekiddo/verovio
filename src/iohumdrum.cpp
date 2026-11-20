@@ -7433,32 +7433,27 @@ void HumdrumInput::addMidiTempo(ScoreDef *scoreDef, hum::HTp kernpart, int top, 
     if (m_mens) {
         bot = 1;
     }
+    // MuseNote patch 133 (RC169): the tempo the music starts at is the last *MM before its first note: a file that
+    // says two there (a score with two tempos at its start is written so) plays the second, and the first was kept.
     // MuseNote patch 132 (RC168): its number is read whole, its fraction too (stoi read 79.9998 as 79).
     bool foundtempo = false;
+    hum::HTp scanned = kernpart;
     hum::HumRegex hmm;
     while (kernpart != NULL) {
         if (kernpart->isData()) {
             break;
         }
-        if (!kernpart->isInterpretation()) {
-            kernpart = kernpart->getNextToken();
-            continue;
-        }
-        if (kernpart->compare(0, 3, "*MM") == 0) {
-            if (hmm.search(kernpart, "^\\*MM(\\d+\\.?\\d*)")) {
-                double tempo = hmm.getMatchDouble(1);
-                if (tempo > 0.0) {
-                    scoreDef->SetMidiBpm(tempo * m_globalTempoScaling * m_localTempoScaling.getFloat());
-                    foundtempo = true;
-                }
+        scanned = kernpart;
+        if (kernpart->isInterpretation() && hmm.search(kernpart, "^\\*MM(\\d+\\.?\\d*)")) {
+            double tempo = hmm.getMatchDouble(1);
+            if (tempo > 0.0) {
+                scoreDef->SetMidiBpm(tempo * m_globalTempoScaling * m_localTempoScaling.getFloat());
+                foundtempo = true;
             }
-            break;
         }
         kernpart = kernpart->getNextToken();
-        if (!kernpart) {
-            break;
-        }
     }
+    kernpart = scanned;
     if (kernpart && !foundtempo) {
         hum::HumdrumFile &infile = *(kernpart->getOwner()->getOwner());
         hum::HumRegex hre;
