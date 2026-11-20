@@ -5,17 +5,24 @@
 // Copyright (c) Authors and others. All rights reserved.
 /////////////////////////////////////////////////////////////////////////////
 // MuseNote (fork patch 129): upstream Verovio 6.2.0's iomusxml.cpp (43f806031), frozen. It differs from upstream's file
-// only by its include guard or its include of the frozen header, and the namespace vrv::v620 around its own
-// definitions; it is never edited. MuseNote 2.1 to 3.0.1 shipped this reader: the marks they stored name notes
-// by the ids its objects got, and the option legacyReaders "6.2.0" reads a score with it to find them again.
+// by its include guard or its include of the frozen header, the namespace vrv::v620 around its own definitions, and the
+// guards marked "MuseNote patch 129": each takes from a later fork patch only what keeps an input from ending the
+// process, reading out of bounds or never coming back. For a file 6.2.0 read, none changes the objects the reader
+// builds (the ledger, patch 129, says what each changes). Nothing else in it is ever edited. MuseNote 2.1 to 3.0.1
+// shipped this reader: the marks they stored name notes by the ids its objects got, and the option legacyReaders
+// "6.2.0" reads a score with it to find them again.
 
 #include "iomusxml620.h"
 
 //----------------------------------------------------------------------------
 
 #include <cassert>
+#include <climits>
+#include <cmath>
 #include <numeric>
+#include <optional>
 #include <regex>
+#include <set>
 #include <sstream>
 
 //----------------------------------------------------------------------------
@@ -37,6 +44,7 @@
 #include "doc.h"
 #include "dynam.h"
 #include "ending.h"
+#include "expansionmap.h"
 #include "f.h"
 #include "fb.h"
 #include "fermata.h"
@@ -96,6 +104,17 @@
 namespace vrv {
 
 namespace v620 {
+
+// MuseNote patch 129 (from patch 28): the whole number [text] begins with, if it begins with one that an int holds.
+// std::stoi threw for a text that is no number or one too large, out of the library, and the process ended; for every
+// text it read, this gives the same number.
+static std::optional<int> ToInt620(const std::string &text)
+{
+    char *end = NULL;
+    const long long number = std::strtoll(text.c_str(), &end, 10);
+    if ((end == text.c_str()) || (number < INT_MIN) || (number > INT_MAX)) return std::nullopt;
+    return static_cast<int>(number);
+}
 
 // Using flags mordent can be easily visualized with the value. E.g.
 // 0x212 - approach and depart are both below and form is normal
@@ -862,8 +881,10 @@ void MusicXmlInput::PrintMetronome(pugi::xml_node metronome, Tempo *tempo)
                 std::string matches("0123456789");
                 std::size_t offset = iter->second.find_first_of(matches);
                 if (offset < iter->second.length()) {
-                    const double mmval = std::stod(iter->second.substr(offset));
-                    tempo->SetMm(mmval);
+                    // MuseNote patch 129 (from patch 28): std::stod threw for a number too large or too small for
+                    // a double
+                    const double mmval = std::strtod(iter->second.c_str() + offset, NULL);
+                    if (std::isfinite(mmval)) tempo->SetMm(mmval);
                 }
                 if (!iter->second.empty()) {
                     Text *text = new Text();
@@ -1059,7 +1080,9 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
                 m_staffGrpStack.push_back(staffGrp);
             }
             // this is the end of a part-group - we assume each opened part-group to be closed
-            else {
+            // MuseNote patch 129 (from patch 8): one without a start does not take the root group off the stack (the
+            // score-parts that follow were added to back() of nothing)
+            else if (m_staffGrpStack.size() > 1) {
                 m_staffGrpStack.pop_back();
             }
         }
@@ -1256,6 +1279,21 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
         staffDef->SetLines(5);
         staffGrp->AddChild(staffDef);
     }
+    // MuseNote patch 129 (from patch 28): every staff the measures hold has a staffDef. A part whose first measure
+    // begins with a note had none (but the one staff of a score of one part, given one just above), and the engine
+    // then read the staffDef that was not there. Such a staff is given five lines, as that one is
+    std::set<int> staffNs620;
+    for (Object *object : section->FindAllDescendantsByType(STAFF)) {
+        const Staff *staff = vrv_cast<Staff *>(object);
+        if (!staff->IsOssia()) staffNs620.insert(staff->GetN());
+    }
+    for (const int n : staffNs620) {
+        if (score->GetScoreDef()->GetStaffDef(n)) continue;
+        StaffDef *staffDef = new StaffDef();
+        staffDef->SetN(n);
+        staffDef->SetLines(5);
+        staffGrp->AddChild(staffDef);
+    }
 
     // finalize document
     m_doc->ExpandExpansions();
@@ -1327,6 +1365,12 @@ void MusicXmlInput::CreateExpansion(Section *section)
 
     Expansion *expansion = new Expansion();
     section->InsertChild(expansion, 0);
+    // MuseNote patch 129 (from patch 27): the order is written into a list of its own and given to the expansion once
+    // (each reference copied the whole order twice, and a long one took the square of its length), and the references
+    // a repeat's times write are counted: they are written no further than past what the engine follows
+    // (OrderOfPlay::s_maxCost), and such an order is refused whole. A repeat marked times="100000000" never came back
+    xsdAnyURI_List refs620;
+    size_t repeated620 = 0;
 
     // iterate on sections to create expansion
     // prepopulate the labels map because there are forward jumps (tocoda)
@@ -1352,14 +1396,15 @@ void MusicXmlInput::CreateExpansion(Section *section)
         if (iter->first.m_classId == SECTION) {
             // add the section
             std::string ref = "#" + iter->first.m_target->GetID();
-            expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+            refs620.push_back(ref);
 
             // repeat the sections, beginning with the repeat start
             int times = (jumpBack && !iter->first.m_repeatInfo.m_afterJump) ? 1 : iter->first.m_repeatInfo.m_times;
-            for (int t = 2; t <= times; ++t) {
+            for (int t = 2; (t <= times) && (repeated620 <= OrderOfPlay::s_maxCost); ++t) {
                 for (auto it = rptIter; it != std::next(iter); ++it) {
                     std::string ref = "#" + it->first.m_target->GetID();
-                    expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+                    refs620.push_back(ref);
+                    ++repeated620;
                 }
             }
 
@@ -1397,11 +1442,11 @@ void MusicXmlInput::CreateExpansion(Section *section)
                 if (ending != endings.begin()) {
                     for (auto it = rptIter; it != std::next(secIter); ++it) {
                         std::string ref = "#" + it->first.m_target->GetID();
-                        expansion->GetPlistInterface()->AddRefAllowDuplicate(ref);
+                        refs620.push_back(ref);
                     }
                 }
                 std::string endref = "#" + ending->second->first.m_target->GetID();
-                expansion->GetPlistInterface()->AddRefAllowDuplicate(endref);
+                refs620.push_back(endref);
             }
 
             // set the repetition to the (latest) nested one
@@ -1438,6 +1483,7 @@ void MusicXmlInput::CreateExpansion(Section *section)
             }
         }
     }
+    expansion->GetPlistInterface()->SetPlist(refs620);
 }
 
 void MusicXmlInput::ReadMusicXmlTitle(pugi::xml_node root)
@@ -1539,7 +1585,10 @@ short int MusicXmlInput::ReadMusicXmlPartAttributesAsStaffDef(
     short int nbStaves = 1;
     pugi::xpath_node staves = node.select_node("attributes[1]/staves");
     if (staves) {
-        nbStaves = staves.node().text().as_int();
+        // MuseNote patch 129 (from patch 28): a part has one staff at the least (a <staves> below 1 left the part
+        // with no staff, and its first note was put on the staff that was not there)
+        const int count = staves.node().text().as_int();
+        nbStaves = ((count >= 1) && (count <= SHRT_MAX)) ? count : 1;
     }
     if (nbStaves > 1) {
         if (m_label) staffGrp->AddChild(m_label);
@@ -2075,7 +2124,9 @@ void MusicXmlInput::ReadMusicXmlAttributes(
         short int staffNum = clef.attribute("number").as_int();
         staffNum = (staffNum < 1) ? 1 : staffNum;
         Staff *staff = vrv_cast<Staff *>(measure->GetChild(staffNum - 1, STAFF));
-        assert(staff);
+        // MuseNote patch 129 (from patch 17): a clef for a staff the part does not have is passed over (its staff,
+        // null, was read when the clef was placed)
+        if (!staff) continue;
         Clef *meiClef = ConvertClef(clef);
         if (meiClef) {
             const bool afterBarline = clef.attribute("after-barline").as_bool();
@@ -2614,8 +2665,11 @@ void MusicXmlInput::ReadMusicXmlDirection(
     pugi::xml_node xmlShift = typeNode.child("octave-shift");
     if (xmlShift) {
         const short int staffNum = (!staffNode) ? 1 : staffNode.text().as_int() + staffOffset;
+        // MuseNote patch 129 (from patch 11): a staff the score does not have has no place in m_octDis, which was
+        // written out of bounds; the line is built as 6.2.0 built it
+        const bool hasOctDis = (staffNum >= 0) && (staffNum < (short int)m_octDis.size());
         if (HasAttributeWithValue(xmlShift, "type", "stop")) {
-            m_octDis[staffNum] = 0;
+            if (hasOctDis) m_octDis[staffNum] = 0;
             for (auto iter = m_controlElements.begin(); iter != m_controlElements.end(); ++iter) {
                 if (iter->second->Is(OCTAVE)) {
                     Octave *octave = dynamic_cast<Octave *>(iter->second);
@@ -2640,10 +2694,10 @@ void MusicXmlInput::ReadMusicXmlDirection(
             octave->SetN(xmlShift.attribute("number").as_string());
             const short int octDisNum = xmlShift.attribute("size") ? xmlShift.attribute("size").as_int() : 8;
             octave->SetDis(octave->AttOctaveDisplacement::StrToOctaveDis(std::to_string(octDisNum)));
-            m_octDis[staffNum] = (octDisNum + 2) / 8;
+            if (hasOctDis) m_octDis[staffNum] = (octDisNum + 2) / 8;
             if (HasAttributeWithValue(xmlShift, "type", "up")) {
                 octave->SetDisPlace(STAFFREL_basic_below);
-                m_octDis[staffNum] *= -1;
+                if (hasOctDis) m_octDis[staffNum] *= -1;
             }
             else {
                 octave->SetDisPlace(STAFFREL_basic_above);
@@ -3015,7 +3069,8 @@ void MusicXmlInput::ReadMusicXmlNote(
     int duration = node.child("duration").text().as_int();
     // In chords, make sure a note does not extend first note's duration.
     // See https://github.com/rism-digital/verovio/issues/4225
-    if (isChord && duration && m_elementStackMap.at(layer).back()->Is(CHORD)) {
+    // MuseNote patch 129 (from patch 28): with a <chord/> on the first note of its layer nothing is before it
+    if (isChord && duration && !m_elementStackMap.at(layer).empty() && m_elementStackMap.at(layer).back()->Is(CHORD)) {
         Chord *chord = vrv_cast<Chord *>(m_elementStackMap.at(layer).back());
         if (chord) duration = std::min(duration, chord->GetDurPpq());
     }
@@ -3070,7 +3125,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                 element = mRest;
                 if (cue) mRest->SetCue(BOOLEAN_true);
                 if (!stepStr.empty()) mRest->SetPloc(ConvertStepToPitchName(stepStr));
-                if (!octaveStr.empty()) mRest->SetOloc(std::stoi(octaveStr));
+                if (const std::optional<int> octave = ToInt620(octaveStr)) mRest->SetOloc(*octave);
                 if (!noteID.empty()) {
                     mRest->SetID(noteID);
                 }
@@ -3097,7 +3152,7 @@ void MusicXmlInput::ReadMusicXmlNote(
                 if (dots > 0) rest->SetDots(dots);
                 if (cue) rest->SetCue(BOOLEAN_true);
                 if (!stepStr.empty()) rest->SetPloc(ConvertStepToPitchName(stepStr));
-                if (!octaveStr.empty()) rest->SetOloc(std::stoi(octaveStr));
+                if (const std::optional<int> octave = ToInt620(octaveStr)) rest->SetOloc(*octave);
                 if (!noteID.empty()) {
                     rest->SetID(noteID);
                 }
@@ -3148,8 +3203,12 @@ void MusicXmlInput::ReadMusicXmlNote(
             const std::string stepStr = pitch.child("step").text().as_string();
             const int octaveNum = pitch.child("octave").text().as_int();
             if (!stepStr.empty()) note->SetPname(ConvertStepToPitchName(stepStr));
-            if (m_octDis[staff->GetN()] != 0) {
-                note->SetOct(octaveNum - m_octDis[staff->GetN()]);
+            // MuseNote patch 129 (from patch 28): a staff the octave-line table has no place for (a part that begins
+            // with a note) was read past the table's end; it has no line
+            const int octDis620
+                = ((staff->GetN() >= 0) && (staff->GetN() < (int)m_octDis.size())) ? m_octDis[staff->GetN()] : 0;
+            if (octDis620 != 0) {
+                note->SetOct(octaveNum - octDis620);
                 note->SetOctGes(octaveNum);
             }
             else {
@@ -5051,7 +5110,7 @@ std::string MusicXmlInput::ConvertDegreeToText(pugi::xml_node harmony)
 
                 if (result != Kind2FirstAddable.end()) {
                     int firstAddable = result->second;
-                    if (std::stoi(degreeValue) >= firstAddable) {
+                    if (ToInt620(degreeValue).value_or(0) >= firstAddable) {
                         degreeText += "add";
                     }
                 }

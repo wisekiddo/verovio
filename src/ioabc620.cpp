@@ -4,16 +4,23 @@
 // Created:     2017
 // Copyright (c) Klaus Rettinghaus. All rights reserved.
 /////////////////////////////////////////////////////////////////////////////
-// MuseNote (fork patch 129): upstream Verovio 6.2.0's ioabc.cpp (43f806031), frozen. It differs from upstream's file
-// only by its include guard or its include of the frozen header, and the namespace vrv::v620 around its own
-// definitions; it is never edited. MuseNote 2.1 to 3.0.1 shipped this reader: the marks they stored name notes
-// by the ids its objects got, and the option legacyReaders "6.2.0" reads a score with it to find them again.
+// MuseNote (fork patch 129): upstream Verovio 6.2.0's ioabc.cpp (43f806031), frozen. It differs from upstream's file by
+// its include guard or its include of the frozen header, the namespace vrv::v620 around its own definitions, and the
+// code marked "MuseNote patch 129": a load begins as 6.2.0's first load in a process began, and each guard takes from a
+// later fork patch only what keeps an input from ending the process, reading out of bounds or never coming back. None
+// changes the objects the reader builds for a file 6.2.0 read so, but where 6.2.0 took a sign from past the end of an
+// "I:decoration" that names none (the ledger, patch 129, says what each changes). Nothing else in it is ever edited.
+// MuseNote 2.1 to 3.0.1 shipped this reader: the marks they stored name notes by the ids its objects got, and the
+// option legacyReaders "6.2.0" reads a score with it to find them again.
 
 #include "ioabc620.h"
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
 #include <cassert>
+#include <climits>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -100,8 +107,7 @@ ABCInput::~ABCInput() {}
 bool ABCInput::Import(const std::string &abc)
 {
     std::istringstream in_stream(abc);
-    this->ParseABC(in_stream);
-    return true;
+    return this->ParseABC(in_stream);
 }
 
 //////////////////////////////
@@ -109,11 +115,18 @@ bool ABCInput::Import(const std::string &abc)
 // parseABC --
 //
 
-void ABCInput::ParseABC(std::istream &infile)
+bool ABCInput::ParseABC(std::istream &infile)
 {
     // initialize doc
     m_doc->Reset();
     m_doc->SetType(Raw);
+    // MuseNote patch 129: a load begins with no step of a key altered, as 6.2.0's first load in a process began. The
+    // steps a key alters are kept outside the reader, and a key with no sharps or flats does not empty them: a tune in
+    // C read after a tune in D kept D's sharps, and the accidentals they gave its notes moved every id after them. In
+    // a file they are carried from tune to tune, as 6.2.0 carried them; from one load to the next they were whatever
+    // the process had read before, which a later load cannot know (patch 24 empties them for each tune)
+    keyPitchAlter.clear();
+    keyPitchAlterAmount = 0;
 
     Score *score = NULL;
     Section *section = NULL;
@@ -134,6 +147,14 @@ void ABCInput::ParseABC(std::istream &infile)
             if (m_title.empty()) {
                 LogWarning("ABC import: Title field missing, creating empty title");
                 m_title.push_back(std::make_pair("", 0));
+            }
+            // MuseNote patch 129 (from patch 24): a first tune whose X names no number ("X", "X:", "X: ") is begun
+            // here, with the header it has. (The work entry asked the tune that was not there for its number. A later
+            // tune whose X names no number is read into the tune before it, as 6.2.0 read it)
+            if (!m_mdiv) {
+                m_mdiv = new Mdiv();
+                m_mdiv->SetVisibility(Visible);
+                m_doc->AddChild(m_mdiv);
             }
             // add work entry to meiHead
             this->CreateWorkEntry();
@@ -168,6 +189,9 @@ void ABCInput::ParseABC(std::istream &infile)
             this->ReadMusicCode(abcLine, section);
         }
     }
+    // MuseNote patch 129 (from patch 24): a file with no tune in it (no X, or an X and no key after it) is refused.
+    // (The tune that was not there was read)
+    if (!score || !section) return false;
     this->FlushControlElements(score, section);
 
     if (section && score && !section->GetParent()) {
@@ -179,6 +203,7 @@ void ABCInput::ParseABC(std::istream &infile)
     m_title.clear();
 
     m_doc->ConvertToPageBasedDoc();
+    return true;
 }
 
 /**********************************
@@ -263,11 +288,17 @@ void ABCInput::AddLayerElement()
     }
     // otherwise we can have beam or tuplet (for now)
     Beam *beam = new Beam();
-    // add stacked notes to the current element
-    for (LayerElement *element : m_noteStack) {
-        beam->AddChild(element);
-    }
-    if (beam->FindDescendantByType(NOTE)) {
+    // MuseNote patch 129 (from patch 24): where no note is among them (two changes of clef in a row) the elements go to
+    // the layer alone. (They were put into the beam first, and so had two parents. The beam is made all the same: 6.2.0
+    // made it, and it counts in the ids of everything after it.) A tuplet that waits for the rest of its notes is
+    // closed with those it has: it was deleted with them, and the line's lyrics then read a note that was gone
+    const bool hasNote = std::any_of(m_noteStack.begin(), m_noteStack.end(),
+        [](LayerElement *element) { return element->Is(NOTE) || element->FindDescendantByType(NOTE); });
+    if (hasNote) {
+        // add stacked notes to the current element
+        for (LayerElement *element : m_noteStack) {
+            beam->AddChild(element);
+        }
         LayerElement *element = NULL;
         if (m_containerElement.m_element && (ElementType::Tuplet == m_containerElement.m_type)) {
             element = m_containerElement.m_element;
@@ -282,6 +313,10 @@ void ABCInput::AddLayerElement()
         beam = NULL;
     }
     else {
+        if (m_containerElement.m_element && m_containerElement.m_element->GetChildCount()) {
+            m_layer->AddChild(m_containerElement.m_element);
+            m_containerElement.m_element = NULL;
+        }
         for (LayerElement *element : m_noteStack) {
             m_layer->AddChild(element);
         }
@@ -341,7 +376,9 @@ int ABCInput::ParseTuplet(const std::string &musicCode, int index)
     m_containerElement = { ElementType::Tuplet, tuplet, tupletNum };
 
     // return index of the last element in tuplet, so that we point to the actual notes when incrementing 'i'
-    return static_cast<int>(tupletEnd) - 1;
+    // (MuseNote patch 129, from patch 24: the end of the line, where the tuplet is the last thing on it. "Nowhere" was
+    // returned as -2, and the line was read from before its start)
+    return static_cast<int>((tupletEnd == std::string::npos) ? musicCode.length() : tupletEnd) - 1;
 }
 
 void ABCInput::AddAnnot(const std::string &remark)
@@ -609,7 +646,8 @@ void ABCInput::ParseInstruction(const std::string &instruction)
         }
     }
     else if (!strncmp(instruction.c_str(), "decoration", 10)) {
-        m_decoration = instruction[11];
+        // (MuseNote patch 129, from patch 24: with nothing after the word, the sign was read past the end of the text)
+        if (instruction.length() > 11) m_decoration = instruction[11];
     }
 }
 
@@ -703,7 +741,9 @@ void ABCInput::ParseKey(std::string &keyString)
 
         std::string keySig;
         unsigned long posStart = 0;
-        auto posEnd = static_cast<unsigned long>(abs(accidNum));
+        // (MuseNote patch 129, from patch 24: a key of more than seven flats alters all seven steps; for flats the
+        // steps were read from before the first of the seven, which threw. Seven at the most were read for sharps too)
+        const unsigned long posEnd = std::min<unsigned long>(abs(accidNum), pitch.size());
 
         if (accidNum < 0) {
             keySig = StringFormat("%df", abs(accidNum));
@@ -818,12 +858,16 @@ void ABCInput::ParseTempo(const std::string &tempoString)
 {
     Tempo *tempo = new Tempo();
     if (tempoString.find('=') != std::string::npos) {
-        const int numStart = int(tempoString.find('=') + 1);
-        tempo->SetMm(std::stof(tempoString.substr(numStart)));
+        // (MuseNote patch 129, from patch 24: std::stof threw where no number follows the "=", as in "Q:1/4=fast", or
+        // one too large)
+        const float mm = std::strtof(tempoString.c_str() + tempoString.find('=') + 1, NULL);
+        if (std::isfinite(mm)) tempo->SetMm(mm);
     }
     if (tempoString.find('\"') != std::string::npos) {
         std::string tempoWord = tempoString.substr(tempoString.find('\"') + 1);
-        tempoWord.resize(tempoWord.find('\"'));
+        // (MuseNote patch 129, from patch 24: to the closing quote, or to the end where there is none. resize threw for
+        // "no position")
+        tempoWord = tempoWord.substr(0, tempoWord.find('\"'));
         if (!tempoWord.empty()) {
             Text *text = new Text();
             text->SetText(UTF8to32(tempoWord));
@@ -1015,6 +1059,12 @@ void ABCInput::FlushControlElements(Score *score, Section *section)
         if (!layer) {
             LogWarning("ABC import: Element '%s' could not be assigned to layer '%s'",
                 iter.second->GetClassName().c_str(), iter.first.c_str());
+            // MuseNote patch 129 (from patch 24): it may still wait for its note or its end (a chord symbol, an open
+            // slur or a tie in a last measure that has no bar line, before the empty line that ends the tune): the next
+            // note then read it, or wrote its end into it, after it was deleted
+            std::erase(m_harmStack, iter.second);
+            std::erase(m_slurStack, iter.second);
+            std::erase(m_tieStack, iter.second);
             delete iter.second;
             iter.second = NULL;
             continue;
@@ -1152,7 +1202,9 @@ void ABCInput::ParseLyrics()
     // Iterate over notes and syllables simultaneously. Move through note array using counters for each syllable, moving
     // for several notes if syllable needs to be held
     for (int i = 0, j = 0; (i < (int)m_lineNoteArray.size()) && (j < (int)syllables.size()); ++j) {
-        while (m_lineNoteArray.at(i)->IsGraceNote() && (i < (int)m_lineNoteArray.size())) {
+        // (MuseNote patch 129, from patch 24: the note was read before the index was looked at, and a line that ends in
+        // grace notes threw)
+        while ((i < (int)m_lineNoteArray.size()) && m_lineNoteArray.at(i)->IsGraceNote()) {
             ++i;
         }
         if (i >= (int)m_lineNoteArray.size()) break;
@@ -1193,7 +1245,8 @@ void ABCInput::ReadInformationField(const char &dataKey, std::string value)
     if (comment != std::string::npos) {
         value.resize(comment);
     }
-    while (isspace(value[value.length() - 1])) value.pop_back();
+    // (MuseNote patch 129, from patch 15: a value of white space only was read one byte before its start)
+    while (!value.empty() && isspace(value[value.length() - 1])) value.pop_back();
     if (value.empty()) return;
     while (isspace(value.front())) value.erase(0, 1);
 
@@ -1274,7 +1327,9 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             ++i;
             ++i;
             std::string information;
-            while (musicCode.at(i) != ']') {
+            // (MuseNote patch 129, from patch 24: to its "]", or to the end of the line where it has none. The line was
+            // read past its end)
+            while ((i < (int)musicCode.length()) && (musicCode.at(i) != ']')) {
                 information.push_back(musicCode.at(i));
                 ++i;
             }
@@ -1300,14 +1355,16 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             this->ParseDecoration(shorthandDecorationString);
         }
         else if (musicCode.at(i) == m_decoration) {
-            ++i;
-            if (!isspace(musicCode.at(i))) {
-                std::string decorationString;
-                while (musicCode.at(i) != m_decoration) {
-                    decorationString.push_back(musicCode.at(i));
-                    ++i;
-                }
-                this->ParseDecoration(decorationString);
+            // MuseNote patch 129 (from patch 24): a sign that no other closes on its line, or that ends the line, is
+            // passed over (the line was read past its end for the other one); one before a space is none, and one that
+            // is closed is read as before
+            const size_t closing = musicCode.find(m_decoration, i + 1);
+            if ((i + 1 < (int)musicCode.length()) && isspace(musicCode.at(i + 1))) {
+                ++i;
+            }
+            else if (closing != std::string::npos) {
+                this->ParseDecoration(musicCode.substr(i + 1, closing - i - 1));
+                i = static_cast<int>(closing);
             }
         }
 
@@ -1357,7 +1414,9 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
                 this->AddRepeatMark(chord);
             }
         }
-        else if (i >= 1 && musicCode.at(i) == ']' && musicCode.at(i - 1) != '|') {
+        // (MuseNote patch 129, from patch 24: a "]" that closes no chord is passed over. The chord that was not there
+        // was read)
+        else if (chord && (i >= 1) && musicCode.at(i) == ']' && musicCode.at(i - 1) != '|') {
             // end chord
             if (chord->GetDur() < DURATION_8) {
                 // if chord cannot be beamed, write it directly to the layer
@@ -1481,13 +1540,17 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             }
             int num = (numStr.empty()) ? 1 : std::atoi(numStr.c_str());
             numbase = (numbaseStr.empty()) ? numbase : std::atoi(numbaseStr.c_str());
-            while ((num & (num - 1)) != 0) {
+            // (MuseNote patch 129, from patch 24: a number too long for an int comes out below zero, and this never
+            // ended; the smallest int ends it at once)
+            while ((num > 0) && ((num & (num - 1)) != 0)) {
                 ++dots;
                 // won't work for num > 12
                 num = num - num / 3;
             }
             if ((numbase & (numbase - 1)) != 0) LogError("ABC import: note length divider must be power of 2");
-            int dur = (num == 0) ? 4 : m_unitDur * numbase / num;
+            // (MuseNote patch 129, from patch 24: a length below zero did not come here, but for the smallest int,
+            // which is divided by as before. Minus one could make the division end the process)
+            int dur = ((num == 0) || ((num < 0) && (num != INT_MIN))) ? 4 : m_unitDur * numbase / num;
 
             // set grace
             if (grace != GRACE_NONE) {
@@ -1614,13 +1677,18 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             }
             int num = (numStr.empty()) ? 1 : std::atoi(numStr.c_str());
             numbase = (numbaseStr.empty()) ? numbase : std::atoi(numbaseStr.c_str());
-            while ((num & (num - 1)) != 0) {
+            // (MuseNote patch 129, from patch 24: a number too long for an int comes out below zero, and this never
+            // ended; the smallest int ends it at once)
+            while ((num > 0) && ((num & (num - 1)) != 0)) {
                 ++dots;
                 // won't work for num > 12
                 num = num - num / 3;
             }
             if ((numbase & (numbase - 1)) != 0) LogError("ABC import: note length divider must be power of 2");
-            int dur = m_unitDur * numbase / num;
+            // (MuseNote patch 129, from patch 24: a length of 0 is no length, 0, as the division by it gave on the
+            // arm64 processors MuseNote 3.0.1 ran on; where the processor traps it, it ended the process. A length
+            // below zero did not come here, but for the smallest int, which is divided by as before)
+            int dur = ((num == 0) || ((num < 0) && (num != INT_MIN))) ? 0 : m_unitDur * numbase / num;
 
             if (m_broken < 0) {
                 for (int i = 0; i != -m_broken; ++i) dur = dur * 2;
@@ -1696,13 +1764,18 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
             }
             int num = (numStr.empty()) ? 1 : std::atoi(numStr.c_str());
             numbase = (numbaseStr.empty()) ? numbase : std::atoi(numbaseStr.c_str());
-            while ((num & (num - 1)) != 0) {
+            // (MuseNote patch 129, from patch 24: a number too long for an int comes out below zero, and this never
+            // ended; the smallest int ends it at once)
+            while ((num > 0) && ((num & (num - 1)) != 0)) {
                 ++dots;
                 // won't work for num > 12
                 num = num - num / 3;
             }
             if ((numbase & (numbase - 1)) != 0) LogError("ABC import: note length divider must be power of 2");
-            int dur = m_unitDur * numbase / num;
+            // (MuseNote patch 129, from patch 24: a length of 0 is no length, 0, as the division by it gave on the
+            // arm64 processors MuseNote 3.0.1 ran on; where the processor traps it, it ended the process. A length
+            // below zero did not come here, but for the smallest int, which is divided by as before)
+            int dur = ((num == 0) || ((num < 0) && (num != INT_MIN))) ? 0 : m_unitDur * numbase / num;
 
             if (m_broken < 0) {
                 for (int i = 0; i != -m_broken; ++i) dur = dur * 2;
@@ -1736,13 +1809,17 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
         // text elements
         else if (musicCode.at(i) == '\"') {
             ++i;
-            if (musicCode.at(i) == '^' || musicCode.at(i) == '_' || musicCode.at(i) == '<' || musicCode.at(i) == '>'
-                || musicCode.at(i) == '@') {
+            // (MuseNote patch 129, from patch 24: a quote with nothing after it, or one that is not closed. The line
+            // was read past its end; the text now runs to the end of the line)
+            const int length = (int)musicCode.length();
+            if ((i < length)
+                && (musicCode.at(i) == '^' || musicCode.at(i) == '_' || musicCode.at(i) == '<' || musicCode.at(i) == '>'
+                    || musicCode.at(i) == '@')) {
                 LogWarning("ABC import: Annotations are not fully support yet");
                 ++i;
             }
             std::string chordSymbol;
-            while (musicCode.at(i) != '\"') {
+            while ((i < length) && (musicCode.at(i) != '\"')) {
                 chordSymbol.push_back(musicCode.at(i));
                 ++i;
             }
@@ -1813,7 +1890,9 @@ void ABCInput::ReadMusicCode(const std::string &musicCode, Section *section)
     // by default, line-breaks in the code generate line-breaks in the score
     // Verovio does not support line-breaks within a layer
     // has to be refined later
-    if (sysBreak && (m_linebreak != '\0') && !(section->GetLast())->Is(SB)) {
+    // (MuseNote patch 129, from patch 24: a section with nothing in it yet has no last child, as after line breaks set
+    // to "<none>" in the header and set back after it)
+    if (sysBreak && (m_linebreak != '\0') && !(section->GetLast() && section->GetLast()->Is(SB))) {
         this->AddLayerElement();
         Sb *sb = new Sb();
         sb->SetID(StringFormat("abcLine%02d", m_lineNum + 1));

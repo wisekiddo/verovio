@@ -4,10 +4,14 @@
 // Created:     2017
 // Copyright (c) Klaus Rettinghaus. All rights reserved.
 /////////////////////////////////////////////////////////////////////////////
-// MuseNote (fork patch 129): upstream Verovio 6.2.0's ioabc.h (43f806031), frozen. It differs from upstream's file
-// only by its include guard or its include of the frozen header, and the namespace vrv::v620 around its own
-// definitions; it is never edited. MuseNote 2.1 to 3.0.1 shipped this reader: the marks they stored name notes
-// by the ids its objects got, and the option legacyReaders "6.2.0" reads a score with it to find them again.
+// MuseNote (fork patch 129): upstream Verovio 6.2.0's ioabc.h (43f806031), frozen. It differs from upstream's file by
+// its include guard or its include of the frozen header, the namespace vrv::v620 around its own definitions, and the
+// code marked "MuseNote patch 129": a load begins as 6.2.0's first load in a process began, and each guard takes from a
+// later fork patch only what keeps an input from ending the process, reading out of bounds or never coming back. None
+// changes the objects the reader builds for a file 6.2.0 read so, but where 6.2.0 took a sign from past the end of an
+// "I:decoration" that names none (the ledger, patch 129, says what each changes). Nothing else in it is ever edited.
+// MuseNote 2.1 to 3.0.1 shipped this reader: the marks they stored name notes by the ids its objects got, and the
+// option legacyReaders "6.2.0" reads a score with it to find them again.
 
 #ifndef __VRV_IOABC620_H__
 #define __VRV_IOABC620_H__
@@ -60,7 +64,7 @@ public:
 private:
     // function declarations:
 
-    void ParseABC(std::istream &infile);
+    bool ParseABC(std::istream &infile);
 
     // parsing functions
     int SetBarLine(const std::string &musicCode, int index);
