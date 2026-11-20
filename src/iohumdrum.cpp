@@ -7433,7 +7433,9 @@ void HumdrumInput::addMidiTempo(ScoreDef *scoreDef, hum::HTp kernpart, int top, 
     if (m_mens) {
         bot = 1;
     }
+    // MuseNote patch 132 (RC168): its number is read whole, its fraction too (stoi read 79.9998 as 79).
     bool foundtempo = false;
+    hum::HumRegex hmm;
     while (kernpart != NULL) {
         if (kernpart->isData()) {
             break;
@@ -7443,10 +7445,9 @@ void HumdrumInput::addMidiTempo(ScoreDef *scoreDef, hum::HTp kernpart, int top, 
             continue;
         }
         if (kernpart->compare(0, 3, "*MM") == 0) {
-            if (kernpart->size() > 3) {
-                if (::isdigit((*kernpart)[3])) {
-                    int tempo = stoi(kernpart->substr(3));
-                    // std::string tempostr = to_string(tempo);
+            if (hmm.search(kernpart, "^\\*MM(\\d+\\.?\\d*)")) {
+                double tempo = hmm.getMatchDouble(1);
+                if (tempo > 0.0) {
                     scoreDef->SetMidiBpm(tempo * m_globalTempoScaling * m_localTempoScaling.getFloat());
                     foundtempo = true;
                 }
@@ -15455,7 +15456,8 @@ void HumdrumInput::handleTempoChange(hum::HTp token)
         return;
     }
 
-    double midibpm = int(hre.getMatchDouble(1) + 0.5);
+    // MuseNote patch 132 (RC168): the number is read whole, its fraction too (it was rounded to a whole number)
+    double midibpm = hre.getMatchDouble(1);
     if (midibpm <= 0) {
         return;
     }
