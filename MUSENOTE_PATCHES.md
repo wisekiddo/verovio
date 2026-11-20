@@ -2989,6 +2989,76 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 129. MusicXML and ABC: upstream 6.2.0's readers, kept as they were, for the ids MuseNote 2.1 to 3.0.1 stored (tb.53)
+
+MuseNote plan V3_2_0_80 (root causes RC162 and RC163, findings W99 and W146), ours (bad1637, amended by 8d220a4).
+MuseNote 2.1 to 3.0.1 shipped upstream 6.2.0 (43f806031) unpatched, and a mark they stored names its note by the id
+6.2.0's reader gave it: with `xmlIdSeed` 1 an id counts the objects built before it. The fork's MusicXML and ABC reader
+patches build other objects. Loaded with tb.52, 77 of the catalog's 3,087 songs name their notes otherwise (of their
+17,182 notes, 7,418 old ids name no note and 851 another, in 38 songs), and so does every ABC file of the parity set (of
+13,374 notes, 11,944 name none and 1,375 another). MEI without ids, the key form of PAE and Humdrum name them as 6.2.0
+did.
+
+- **6.2.0's readers beside today's.** `src/iomusxml620.cpp`, `src/ioabc620.cpp` and their headers are upstream's files
+  at 6.2.0 inside the namespace `vrv::v620`, where their file-local helpers stay (`parseInts`, which
+  `expansionmap.cpp` has too). The option `legacyReaders` ("" by default) set to "6.2.0" reads a MusicXML or ABC load
+  with them; any other value is refused (`LoadData` returns false, and logs why). No other load changes.
+- **Each load begins as 6.2.0's first load in a process began.** 6.2.0's ABC reader keeps the steps a key alters in a
+  variable of the process, and a key with no sharps or flats does not empty it: read after a tune in D, a tune in C
+  took D's sharps, as gestural accidentals, objects that move every id after them (40 of the parity set's 194 ABC
+  files name their notes otherwise when another was read before them; MuseNote root cause RC163). The frozen reader
+  empties it where a load begins; within a file it is carried from tune to tune, as 6.2.0 carried it. What a run of
+  3.0.1 had read before a mark was stored, no later load can know (MuseNote finding W146).
+- **What they take from the later patches.** Run with every MusicXML and ABC load forced through them, the native
+  suite (453 cases) had 21 cases end the process (an assertion, libc++'s checks, a fault), 8 throw out of the engine
+  and 2 never come back. MuseNote catches nothing the engine throws, so each would end the app; an old shared bundle
+  can bring any file. Each fault is guarded as the patch that mended it guards it, marked "MuseNote patch 129 (from
+  patch N)" (patches 8, 11, 15, 17, 24, 27 and 28). Where that guard would build other objects for a file 6.2.0 read,
+  it does not:
+  - an ABC group of elements with no note among them (two changes of clef in a row) goes to the layer alone, and the
+    beam 6.2.0 made for it is still made: its id counts in every id after it;
+  - an ABC rest or space of length 0 is 0 long, as the division by it gave on arm64; a length too long for an int
+    (it comes out below zero) counts no dots, and the smallest int is divided by as before;
+  - an ABC `[|:` is still a field named "|" up to its "]"; only a field with no "]" ends at the end of its line;
+  - a later ABC tune whose X names no number is read into the tune before it, as 6.2.0 read it (a first one is
+    begun: 6.2.0 ended the process);
+  - a MusicXML repeat writes the order of play up to past what the engine follows (`OrderOfPlay::s_maxCost`), and such
+    an order is refused whole, as the live reader's is (`times="100000000"` never came back); and the order is built
+    once, where each reference added copied it whole (a long order took the square of its length), the same order;
+  - a MusicXML staff with no `<staffDef>` is given one of five lines (a part that begins with a note had none, but
+    the one staff of a score of one part, which 6.2.0 gave one, and the engine read the one that was not there).
+
+  Two change what a file 6.2.0 read holds, and no id: a tuplet that waits for its notes at such a group of elements
+  is kept with them (6.2.0 deleted it with its notes, and the line's lyrics then read notes that were gone), and a
+  note of a part that begins with a note takes no octave from past the end of the octave-line table. One changes the
+  objects of a file 6.2.0 read: an `I:decoration` that names no sign, where 6.2.0 took the sign from past the end of
+  its text; the sign stays "!".
+- **Measured.** Upstream 6.2.0's native library as MuseNote 3.0.1 shipped it (built from the monorepo at 04dfe261,
+  loaded with 3.0.1's options) against tb.53 with the legacy readers, every note by its position: the catalog's 3,087
+  songs (496,454 notes), the 80 songs 3.0.1 bundled (11,361) and the 194 ABC files of the parity set (13,374, 6.2.0
+  reading each in a process of its own): every id the same.
+
+**Cases**: `test/native/test_tb53_legacy_readers_engine.cpp` in MuseNote's `corelib/verovio` (9 cases): the ids of
+two catalog songs and two ABC files pinned from 6.2.0's own load, a format the readers do not read, a release that is
+not kept, the state an ABC load begins with, and an input that reaches each guard. 5 of the first 6 fail on tb.52 (the
+sixth holds what does not change). Each part broken once, under the address, division and overflow sanitizers, is
+caught: the dispatch (5 breaks) and the guards and the state a load begins with (37 of 38); the 38th, the order built
+once, removes time only (copied for each reference, the three cases take 160 s under the sanitizers, built once 32 s),
+which no case without a clock holds.
+
+**Upstream status**: not offered (MuseNote's own ids).
+
+**Gate of tb.53** (patch 129, MuseNote plan V3_2_0_80). Native: the suite, 457 cases (16,360 assertions), and under
+ASan 456 (16,343), no finding; the 9 cases of `test/native/test_tb53_legacy_readers_engine.cpp` under the address,
+division and overflow sanitizers too. Every native case once more with every MusicXML and ABC load forced through the
+frozen readers (ASan, libc++'s checks, asserts): no crash, hang, exception or report. A Debug engine (asserts on) over
+every input: 3,610, all through, and through the legacy readers the 3,390 MusicXML and ABC inputs, all through.
+Parity: 22,947 outputs, 0 differ (the canonical load is untouched); seeded ids 3,216 of 3,216; every input reads back
+from its MEI (3,610). The locator gate: 0 failures. MuseSync's 24 starters: the same. MuseNote's export gate in every
+format: exit 0, no song-aspect worse than tb.52. The legacy-ids gate: every note keeps 6.2.0's id (496,454, 11,361
+and 13,374). The frozen readers' whole MEI with the guards against without them: the same for all 3,361 files, but
+for its timestamps.
+
 ### 128. A rest inside a tab group is timed by its group (tb.52)
 
 MuseNote plan V3_2_0_78 (root cause RC156, finding W140), ours (550b604). `InitOnsetOffsetFunctor` timed a rest inside a
