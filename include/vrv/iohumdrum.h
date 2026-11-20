@@ -823,6 +823,7 @@ protected:
     bool hasTempoTextAfter(hum::HTp token);
     bool isTempoishText(hum::HTp token);
     bool isLastStaffTempo(hum::HTp token);
+    bool isStartTempoPlayedAgain(hum::HTp token); // MuseNote patch 134 (RC170)
     void addMensuralQuality(Note *note, hum::HTp token);
     bool checkForMens(hum::HumdrumFile &infile);
     bool layerOnlyContainsNullStuff(std::vector<hum::HTp> &data);
@@ -1178,6 +1179,8 @@ private:
 
     // m_labelsInTurn == each two section labels the expansion list plays one right after the other (MuseNote RC137).
     std::set<std::pair<std::string, std::string>> m_labelsInTurn;
+    // m_labelsPlayed == the section labels of that expansion list, in its order (MuseNote patch 134, RC170).
+    std::vector<std::string> m_labelsPlayed;
 
     // m_endingnum == keep track of current ending.
     int m_endingnum = 0;

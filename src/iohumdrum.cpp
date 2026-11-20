@@ -7448,6 +7448,9 @@ void HumdrumInput::addMidiTempo(ScoreDef *scoreDef, hum::HTp kernpart, int top, 
             double tempo = hmm.getMatchDouble(1);
             if (tempo > 0.0) {
                 scoreDef->SetMidiBpm(tempo * m_globalTempoScaling * m_localTempoScaling.getFloat());
+                // MuseNote patch 134 (RC170): it is the tempo playing, which a *tscale or a tempo text after it
+                // takes (they took 120, the reader's own, whatever the file's first tempo was)
+                m_midibpm = tempo;
                 foundtempo = true;
             }
         }
@@ -7472,6 +7475,7 @@ void HumdrumInput::addMidiTempo(ScoreDef *scoreDef, hum::HTp kernpart, int top, 
             int guess = hum::Convert::tempoNameToMm(*omd, bot, top);
             if (guess > 0) {
                 scoreDef->SetMidiBpm(guess * m_globalTempoScaling * m_localTempoScaling.getFloat());
+                m_midibpm = guess; // MuseNote patch 134 (RC170): the tempo playing
             }
             else {
                 addDefaultTempo(scoreDef);
@@ -7496,6 +7500,9 @@ void HumdrumInput::addDefaultTempo(ScoreDef *scoreDef)
     const int tempo = hum::Convert::defaultMidiTempo(m_infiles[0], m_mens);
     if (tempo != 120) {
         scoreDef->SetMidiBpm(tempo * m_globalTempoScaling);
+        if (!m_mens) {
+            m_midibpm = tempo; // MuseNote patch 134 (RC170): the tempo playing
+        }
     }
     else if (m_globalTempoScaling != 1.0) {
         scoreDef->SetMidiBpm(120.0 * m_globalTempoScaling);
@@ -15445,9 +15452,10 @@ void HumdrumInput::handleTempoChange(hum::HTp token)
         return;
     }
     hum::HumNum ttime = token->getDurationFromStart();
-    if (ttime == 0) {
-        // ignore starting tempo setting since it is handled
-        // by scoreDef.
+    // A starting tempo is handled by the scoreDef, which plays it once.  MuseNote patch 134 (RC170): one that a
+    // section holds and has to be played again (isStartTempoPlayedAgain) is a <tempo> of its measure too, so that each
+    // time the expansion list plays the section it is played at it (it kept the tempo the play had reached).
+    if ((ttime == 0) && !isStartTempoPlayedAgain(token)) {
         return;
     }
 
@@ -15482,6 +15490,47 @@ void HumdrumInput::handleTempoChange(hum::HTp token)
     hum::HumNum tstamp = getMeasureTstamp(token, staffindex);
     tempo->SetTstamp(tstamp.getFloat());
     addChildMeasureOrSection(tempo);
+}
+
+//////////////////////////////
+//
+// HumdrumInput::isStartTempoPlayedAgain -- MuseNote patch 134 (RC170): whether the starting *MM [token] has to be
+//    played again: a section label (*>A, not an expansion list) stands above it in its spine, the expansion list the
+//    score is played by names that section more than once, and the score changes its tempo after its first note (a
+//    *MM or a *tscale), so that the section can be entered again at another tempo.  (Where none of that holds, the
+//    scoreDef, which plays it once, is all the tempo needs.)
+//
+
+bool HumdrumInput::isStartTempoPlayedAgain(hum::HTp token)
+{
+    std::string label;
+    for (hum::HTp above = token->getPreviousToken(); above != NULL; above = above->getPreviousToken()) {
+        if (above->isLabel()) {
+            label = above->substr(2);
+            break;
+        }
+    }
+    if (label.empty() || (std::count(m_labelsPlayed.begin(), m_labelsPlayed.end(), label) < 2)) {
+        return false;
+    }
+    hum::HumdrumFile &infile = *(token->getOwner()->getOwner());
+    bool music = false;
+    for (int i = 0; i < infile.getLineCount(); ++i) {
+        if (infile[i].isData()) {
+            music = true;
+            continue;
+        }
+        if (!music || !infile[i].isInterpretation()) {
+            continue;
+        }
+        for (int j = 0; j < infile[i].getFieldCount(); ++j) {
+            hum::HTp later = infile.token(i, j);
+            if ((later->compare(0, 3, "*MM") == 0) || (later->compare(0, 8, "*tscale:") == 0)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 //////////////////////////////
@@ -32334,6 +32383,7 @@ void HumdrumInput::prepareSections()
     // The labels the expansion list plays one right after the other, as storeExpansionLists takes the list: the one
     // list before the first data line, or the primary one of several (MuseNote RC137)
     m_labelsInTurn.clear();
+    m_labelsPlayed.clear();
     std::vector<std::vector<std::string>> lists;
     std::vector<std::string> variants;
     for (int i = 0; i < infile.getLineCount(); ++i) {
@@ -32359,6 +32409,7 @@ void HumdrumInput::prepareSections()
             for (int j = 1; j < (int)lists[k].size(); ++j) {
                 m_labelsInTurn.insert({ lists[k][j - 1], lists[k][j] });
             }
+            m_labelsPlayed = lists[k]; // MuseNote patch 134 (RC170)
             break;
         }
     }
