@@ -2989,6 +2989,87 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 135. A bar of a whole-bar rest reads its interpretations as a bar of notes does (tb.55)
+
+MuseNote plan V3_2_0_83 (root cause RC171, finding W79's tempo). `fillContentsOfLayer` reads a bar of a whole-bar rest
+in a branch of its own (`hasFullMeasureRest`), which took from its tokens their directions and pedal marks only
+(upstream: "Deal with time/clef/key changes in measures with whole-measure rests later"). A `*MM` there was lost (All
+By Myself, bar 30: the return to 58, three times in its order), and so were a `*tscale`, an ottava's end (no
+`<octave>` was made), a simile, a verse label, a join, the state of the staff and of its dynamics, and a color.
+
+- **One function.** What an interpretation sets for the music after it is read by `handleInterpretationState`, which
+  the note loop and that branch call (the note loop's code, moved). The branch has no note to pass: an ottava's end
+  takes the notes it kept.
+- **What stays.** A clef, key or meter change in such a bar was read already (at the bar's start, and the branch's
+  clef compensation), once, and still is (a case holds each).
+
+### 134. A section's starting tempo is played again where the section is entered again at another; the starting tempo is the tempo playing (tb.55)
+
+MuseNote plan V3_2_0_83 (root cause RC170, finding W79's tempo). The first `*MM` went into the scoreDef only ("handled
+by scoreDef"), which plays it once: a section that holds it, played again by the expansion list, kept the tempo the
+play had reached (Meeting of the Waters, `*>[A,A]`: its second pass kept the rallentando's 132 for 22 beats).
+
+- **Played again where it has to be.** A first `*MM` is also a `<tempo>` of its measure where a section label stands
+  above it in its spine, the expansion list the score is played by names that section more than once, and the score
+  changes its tempo after its first note (a `*MM` or a `*tscale`): `isStartTempoPlayedAgain`, with the list's labels
+  kept in `m_labelsPlayed` beside RC137's `m_labelsInTurn`. Three songs of the catalog (Meeting of the Waters, William
+  Tell and v2); elsewhere the scoreDef alone holds it, as before (made for every first `*MM` in a section, it gave 280
+  songs and the 104 Humdrum samples a `<tempo>` their play does not need, and the export gate's census 2,900
+  differences: the owner chose the narrower rule).
+- **The tempo playing.** The starting tempo was not the tempo playing (`m_midibpm`, which a `*tscale` and a tempo text
+  take): it stayed the reader's 120 whatever the file's first `*MM`, the tempo taken from a movement's name or the
+  default 400 was (`*MM100`, then `*tscale:2`, played 240). It is each of those now. Mensural music reads no `*tscale`:
+  its default is left as it was.
+
+### 133. The Humdrum reader starts at the last *MM before the first note (tb.55)
+
+MuseNote plan V3_2_0_83 (root cause RC169, finding W79's tempo). Of two `*MM` before the first note `addMidiTempo`
+stopped at the first, while the music plays the last: a score that gives two tempos at its start is exported so (Cello
+Suite No. 1, 79.9998 then 72, played its export at 79). The scan goes on to the first note, and the last one counts.
+
+### 132. The Humdrum reader reads a tempo's number whole (tb.55)
+
+MuseNote plan V3_2_0_83 (root cause RC168, finding W79's tempo). `addMidiTempo` read the first `*MM` with `stoi`
+(79.9998 read as 79), and `handleTempoChange` rounded a later one to a whole number (`int(x + 0.5)`). Both read it with
+its fraction (`^\*MM(\d+\.?\d*)`, `getMatchDouble`): Reality, This Masquerade and v2, Something's Got a Hold on Me.
+
+### 131. The Humdrum export writes the 120 a score with no tempo plays at, where the reader would give another (tb.55)
+
+MuseNote plan V3_2_0_83 (root cause RC167, finding W79's tempo). `Tool_mei2hum` wrote a `*MM` only for a tempo the
+score gives, and a score that gives none plays at 120, the engine's tempo for an MEI file without one. The Humdrum
+reader gives a file that names none a tempo of its own (`HumdrumInput::addDefaultTempo`, "a basic Renaissance
+default": 400 a minute when its lines last more than a half note on average, 280 for mensural music): 16 songs of the
+catalog played their Humdrum export at 400 (tb.54).
+
+- **One rule.** The reader's rule is humlib's, `Convert::defaultMidiTempo`, which `addDefaultTempo` asks: the same
+  tempos as before.
+- **Written where it is needed.** `writeTempoReadOtherwise`, as the file goes out: the converter reads it again for its
+  rhythm and, where the rule gives another tempo than 120 and the file names none before its first note, writes
+  `*MM120` after the clef, key and meter, above the expansion list and the first label (the start's tempo, no
+  section's), in each `**kern` or `**mens` spine as the grid writes a tempo, with the spines of the first line that
+  has them (a global comment, such as the grid's note of an underfilled measure, has none). Where the rule gives 120
+  the file says nothing, as before: 16 songs of the catalog are written so, and every mensural score.
+
+**Cases**: `test/native/test_tb55_humdrum_tempo_engine.cpp` in MuseNote's `corelib/verovio` (16 cases); the pinned
+exports of `test_mei_to_humdrum_engine.cpp` (4) and `test_tb14_N_engine.cpp` (2) hold the `*MM120` line where the
+rule gives another tempo (the chord symbols' half notes, none). 12 of the 16 fail on tb.54; the 4 that pass hold what
+must not change (no tempo where the reader plays 120; a score's own tempo alone; a section's tempo nothing changes, or
+of a section played once, in the scoreDef alone; a clef, key or meter change in a whole-rest bar read once). Each part
+of the five, undone once under the address, division and overflow sanitizers, is caught: 16 of 16. Two cases of tb.51
+are left out of those runs: they stop at signed overflows tb.53 has already (MuseNote finding W154).
+
+**Upstream status**: not offered (MuseNote's export round trip; 131's shared rule is a move of upstream's code).
+
+**Gate of tb.55** (patches 131 to 135 together, MuseNote plan V3_2_0_83). Native: the suite, 481 cases (16,604
+assertions), and under ASan with libc++'s checks 480, no finding. A Debug engine (asserts on) over every input and
+every song's Humdrum export: 6,806, all through. Parity: 22,961 outputs, none of tb.54's inputs otherwise (16 new, of
+the two songs list 16 added); seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612). The locator gate:
+0 failures. MuseSync's 24 starters: the same. MuseNote's export gate in every format: exit 0; the Humdrum export's 23
+tempo differences gone; no song-aspect worse than tb.54, 6 better (the tempo marks of Meeting of the Waters, William
+Tell and v2, 10,000 Reasons, I'm So Lonesome I Could Cry, Sweet Hour of Prayer); MusicXML and ABC as on tb.54.
+Found on the way, not this tag's: W154 (signed overflows where an offset is added to an unset place, `rest.cpp` and
+`boundingbox.h`, on tb.53 already) and W155 (an `<sb/>` before the first measure: the export's `*-` has one field).
+
 ### 130. A note's accidentals and accidental-marks in the file's order, kept together in a chord, the note sounding by the one next to it (tb.54)
 
 MuseNote plan V3_2_0_81 (root cause RC164, finding W147), upstream #4454 (1d437b90c, 225f86568, 0a2716e22, taken
