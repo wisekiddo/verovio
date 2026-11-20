@@ -5839,6 +5839,36 @@ string Convert::generateRandomId(int length) {
 
 //////////////////////////////
 //
+// Convert::defaultMidiTempo -- MuseNote patch 131 (RC167): the tempo
+//    Verovio's Humdrum reader gives a file that names none
+//    (HumdrumInput::addDefaultTempo, a "basic Renaissance default"): 280
+//    for mensural music, 400 when the file's lines last more than a half
+//    note on average, else 120, the tempo of a MIDI file that names none.
+//    [infile] is read for its rhythm.  The reader asks it, and so does the
+//    MEI-to-Humdrum converter, which writes the 120 an MEI file plays at
+//    where the reader would give another.
+//
+
+int Convert::defaultMidiTempo(HumdrumFile& infile, bool mensural) {
+	if (mensural) {
+		return 280;
+	}
+	double sum = 0.0;
+	int count = 0;
+	for (int i=0; i<infile.getLineCount(); i++) {
+		if (infile[i].getDuration() == 0) {
+			continue;
+		}
+		count++;
+		sum += infile[i].getDuration().getFloat();
+	}
+	return ((count > 0) && (sum / count > 2.0)) ? 400 : 120;
+}
+
+
+
+//////////////////////////////
+//
 // Convert::tempoNameToMm -- Guess what the MM tempo should be given
 //    a tempo name.  Returns 0 if no guess is made.
 //
@@ -101074,6 +101104,81 @@ bool Tool_mei2hum::convert(ostream& out, const char* input) {
 
 
 
+// MuseNote patch 131 (RC167): a score that gives no tempo at its start plays
+// at 120, the engine's tempo for an MEI file without one, and Verovio's
+// Humdrum reader gives a file that names none a tempo by its rule
+// (Convert::defaultMidiTempo: 400 a minute when its lines last more than a
+// half note on average, 280 for mensural music).  Where the rule gives
+// another tempo than 120, [outfile] is written with *MM120 at its start:
+// after the clef, key and meter of its staves, above the expansion list,
+// the first label and the first note, in each staff's spine, as the grid
+// writes a tempo, so that it is the start's tempo and no section's.  Where
+// the rule gives 120 the file says nothing, and is read at 120 as it is.
+static void writeTempoReadOtherwise(HumdrumFile& outfile) {
+	// read again, for its rhythm, as a reader reads it
+	stringstream text;
+	text << outfile;
+	HumdrumFile read;
+	read.readString(text.str());
+	bool mensural = false;
+	bool started = false;
+	int at = -1;
+	for (int i=0; i<read.getLineCount(); i++) {
+		HumdrumLine& line = read[i];
+		if (line.isData()) {
+			if (at < 0) {
+				at = i;
+			}
+			break;
+		}
+		if (line.isExclusiveInterpretation()) {
+			started = true;
+			for (int j=0; j<line.getFieldCount(); j++) {
+				mensural |= (*line.token(j) == "**mens");
+			}
+			continue;
+		}
+		if (!started) {
+			continue;
+		}
+		if (!line.isInterpretation() || (line.token(0)->compare(0, 2, "*>") == 0)) {
+			if (at < 0) {
+				at = i;
+			}
+			continue;
+		}
+		for (int j=0; j<line.getFieldCount(); j++) {
+			HTp token = line.token(j);
+			if ((token->compare(0, 3, "*MM") == 0) && (token->size() > 3) && isdigit((*token)[3])) {
+				// the file names its tempo before its first note
+				return;
+			}
+		}
+	}
+	if ((at < 0) || (Convert::defaultMidiTempo(read, mensural) == 120)) {
+		return;
+	}
+	// its spines are those of the first line with spines from there (a
+	// global comment, such as the grid's note of an underfilled measure,
+	// has none)
+	int shape = at;
+	while ((shape < read.getLineCount()) && read[shape].isGlobal()) {
+		shape++;
+	}
+	if (shape >= read.getLineCount()) {
+		return;
+	}
+	string tempo;
+	for (int j=0; j<read[shape].getFieldCount(); j++) {
+		const string type = read.token(shape, j)->getDataType();
+		tempo += (j ? "\t" : "");
+		tempo += ((type == "**kern") || (type == "**mens")) ? "*MM120" : "*";
+	}
+	outfile.insertLine(at, tempo);
+}
+
+
+
 bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 	initialize();
 	m_tremoloMarkup.clear();
@@ -101237,6 +101342,8 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 		Tool_tremolo tremolo;
 		tremolo.run(outfile);
 	}
+	// MuseNote patch 131 (RC167): the tempo a score that names none plays at, where a reader would give another
+	writeTempoReadOtherwise(outfile);
 	out << outfile;
 
 	return status;

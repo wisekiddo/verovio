@@ -4053,6 +4053,8 @@ class Convert {
 
 		// Tempo processing, defined in Convert-tempo.cpp
 		static int tempoNameToMm (const std::string& name, int bot = 4, int top = 4);
+		// MuseNote patch 131 (RC167): the tempo Verovio's Humdrum reader gives a file that names none
+		static int defaultMidiTempo (HumdrumFile& infile, bool mensural);
 
 		// Pitch processing, defined in Convert-pitch.cpp
 		static std::string  base40ToKern    (int b40);

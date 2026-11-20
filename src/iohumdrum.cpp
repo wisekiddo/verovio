@@ -7495,23 +7495,11 @@ void HumdrumInput::addMidiTempo(ScoreDef *scoreDef, hum::HTp kernpart, int top, 
 
 void HumdrumInput::addDefaultTempo(ScoreDef *scoreDef)
 {
-    if (m_mens) {
-        scoreDef->SetMidiBpm(280.0 * m_globalTempoScaling);
-        return;
-    }
-    double sum = 0.0;
-    int count = 0;
-    hum::HumdrumFile &infile = m_infiles[0];
-    for (int i = 0; i < infile.getLineCount(); ++i) {
-        if (infile[i].getDuration() == 0) {
-            continue;
-        }
-        count++;
-        sum += infile[i].getDuration().getFloat();
-    }
-    double avgdur = sum / count;
-    if (avgdur > 2.0) {
-        scoreDef->SetMidiBpm(400.0 * m_globalTempoScaling);
+    // MuseNote patch 131 (RC167): the rule is humlib's (hum::Convert::defaultMidiTempo), which the MEI-to-Humdrum
+    // converter asks too: it writes the tempo of a score that names none where this rule would give another
+    const int tempo = hum::Convert::defaultMidiTempo(m_infiles[0], m_mens);
+    if (tempo != 120) {
+        scoreDef->SetMidiBpm(tempo * m_globalTempoScaling);
     }
     else if (m_globalTempoScaling != 1.0) {
         scoreDef->SetMidiBpm(120.0 * m_globalTempoScaling);
