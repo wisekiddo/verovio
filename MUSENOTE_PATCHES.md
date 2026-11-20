@@ -2989,6 +2989,57 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 130. A note's accidentals and accidental-marks in the file's order, kept together in a chord, the note sounding by the one next to it (tb.54)
+
+MuseNote plan V3_2_0_81 (root cause RC164, finding W147), upstream #4454 (1d437b90c, 225f86568, 0a2716e22, taken
+with `cherry-pick -x`; the `#include` list of `src/iomusxml.cpp` settled by keeping ours and adding `<iterator>`).
+`MusicXmlInput::ReadMusicXmlNote` added a note's `<accidental>`s, and its `notations/accidental-mark`s, to the note in
+the file's order, while the engine draws a note's accidentals outward from the note in MEI order. MusicXML writes
+them left to right, so two accidentals or two marks of one note were drawn the other way round: a note written
+flat-sharp showed sharp-flat. And `Accid::AdjustX` left an accidental where it found room on its right also beside
+the other accidental of its own note, so in a chord a note's two accidentals could be drawn apart, with others
+between them. And a note sounds by its first accidental (`Note::GetChromaticAlteration`), which was the one furthest
+from it: an F sharp written natural-sharp played F. Probed on tb.53 (12 written inputs, 300 random chords): nothing
+drawn on top of anything; every pair without a natural reversed; 79 of 531 pairs split in the chords.
+
+- **Read from the last to the first.** A note's `<accidental>`s are added from the last one in the file to the first,
+  its accidental-marks in reverse document order (`xpath_node_set::sort(true)`). The accidentals are still read
+  before the marks, so one accidental with one mark keeps its order. The accidental next to the note is now its
+  first, and so its sound, as the page shows.
+- **No room taken beside the note's own accidental.** `Accid::AdjustX` keeps the shortcut "enough space on the right"
+  for accidentals of other notes only.
+- **What stays as it was.** A natural is still drawn next to the note, whatever the order in the file: the rule for
+  unisons in `AccidSpaceSort`, which upstream kept (0a2716e22 took back the comparator change of 1d437b90c). One
+  accidental per note, a chord's accidentals and an accidental with a mark are drawn, and sound, as before. After the
+  patch 61 of the 531 pairs are split, one of them further than before (a six-note chord with three pairs), as upstream
+  draws them.
+- No song of MuseNote's catalog or of MuseSync's has such a note (MusicXML allows one `<accidental>` per note); no id,
+  timemap, MIDI or pitch map of the songs moves. The frozen 6.2.0 reader (`iomusxml620.cpp`, patch 129) is not
+  touched.
+
+**Cases**: `test/native/test_tb54_upstream_features_one_engine.cpp` in MuseNote's `corelib/verovio` (8 cases): the
+order of two accidentals, alone and in a chord; the sound of an F sharp written natural-sharp; two accidental-marks; a
+pair kept together in a chord; and, as before, one accidental per note in a chord, an accidental with a mark and its
+sound, a natural next to the note. The five of RC164 fail on tb.53. Each change undone fails its own: the accidentals
+read in the file's order, 4 (the sound with them); the marks in document order, 1; the room taken beside a note's own
+accidental, 1 (a build of the reading change alone).
+
+**Upstream status**: upstream's own (#4454, merged to develop in 7f9e3651d, 2026-11-18; in no release yet).
+
+**Not taken with it**: 02f360168 (#4573, the overlap check of floating elements without a dynamic cast), adapted to
+6.2.0's `Is()`: the 20 largest songs of MuseNote's catalog, each loaded and every page drawn, 5 rounds with the
+engines alternating, drew byte for byte the same and took 0.9 % less time in all, inside the spread of one song's runs
+(5.6 %). MuseNote finding W148, closed: not taken.
+
+**Gate of tb.54** (patch 130, MuseNote plan V3_2_0_81). Native: the suite, 464 cases (16,420 assertions), and under
+ASan with libc++'s checks 463 (16,403), no finding; `tool/log_format_audit.py`: 301 engine sources, 0 calls. A Debug
+engine (asserts on) over every input: 3,610, all through, and through the frozen readers the 3,390 MusicXML and ABC
+inputs, all through. Parity against tb.53: 22,947 outputs, 0 differ (no song has such a note); seeded ids 3,216 of
+3,216; every input reads back from its MEI (3,610). The locator gate: 0 failures (every generated id of 501,573
+MusicXML notes kept). MuseSync's 24 starters: the same. MuseNote's export gate in every format: exit 0, no
+song-aspect worse than tb.53. The frozen readers' whole MEI: the same as tb.53's for the 3,087 songs, the 80 of 3.0.1
+and the 194 ABC files.
+
 ### 129. MusicXML and ABC: upstream 6.2.0's readers, kept as they were, for the ids MuseNote 2.1 to 3.0.1 stored (tb.53)
 
 MuseNote plan V3_2_0_80 (root causes RC162 and RC163, findings W99 and W146), ours (bad1637, amended by 8d220a4).
