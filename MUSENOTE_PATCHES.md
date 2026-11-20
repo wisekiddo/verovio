@@ -2989,6 +2989,55 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 137. The Humdrum export writes each staff's program as its instrument code (tb.57)
+
+MuseNote plan V3_2_0_85 (root causes RC176 and RC177; finding W79, its instruments). The MEI-to-Humdrum converter
+(`Tool_mei2hum`) wrote a staff's name and abbreviation (`*I"`, `*I'`) but no instrument code, and dropped the program
+of the staff's `instrDef@midi.instrnum`. The Humdrum reader turns a code into the staff's General MIDI program
+(`HumdrumInput::addInstrumentDefinition`, `HumInstrument::getGM`), and humlib had that direction only: a score's
+Humdrum export, read back, played none of the programs the score names.
+
+- **A program's code** (`HumInstrument::getHumdrumForGM`, the reverse of `getGM`). Where the table gives a program
+  several codes, the one named after the General MIDI instrument itself (a table of 30: `piano` for 0, `vox` for 52,
+  `tromt` for 57, …), else the table's first; none for a program the table lacks (60 of the 128).
+  `getGM(getHumdrumForGM(p))` is `p` for the 68 that have one.
+- **Each staff's program** (`Tool_mei2hum::parseStaffDef`, `m_staffPrograms`): the `instrDef@midi.instrnum` of the
+  first staffDef of its number, else of its staffGrp. Cleared at each conversion.
+- **Written** (`writeInstrumentCodes`, on the file as written, the way patch 131 writes its tempo): one line after the
+  first `*staff` line, `*I` and the code in each `**kern` or `**mens` spine whose staff has a program with a code, `*`
+  in the others. A staff on program 0 that the file gives no name (no `*I"` before the first data; a `*I""` names a
+  group) gets none: MIDI plays program 0 where none is said, and the reader names a staff that has no name after its
+  code (`getLabelFromInstrumentCode`), a name the score does not show. A staff with no name on another program is
+  named so: Humdrum gives no program without a code (MuseNote's owner, 2026-11-20).
+- **RC177, an entry at index 0** (`HumInstrument::getGM`, `getName`, `getHumdrum`, each by name and of an instrument
+  of its own, and `setGM`): `find` gives the table's first entry 0 and −1 for none, and the six took 0 for none. The
+  table's first code, `accor` (the accordion, 21), had no program, name or code, and `setGM` added it a second time.
+- **What it changes.** A Humdrum export only: one interpretation line more where a staff has a program with a code,
+  so the ids the reader gives by line move after it, in a new export. Read back, such a staff plays its program, in
+  an `instrDef` with the `@midi.instrname` the reader writes. No reader changes.
+
+**Cases**: `test/native/test_tb57_humdrum_instruments_engine.cpp` in MuseNote's `corelib/verovio` (8 cases): a staff's
+program written as its code and read back; two staves, each in its own spine; a staffGrp's program, the accordion's
+(RC177); a staff's code in its own spine only, and the program it starts with; a program with no code, and a staff
+with none, written with none; program 0 written only on a staff the file names (a name `*I""` makes a group's, a name
+given later); every program's code read back as that program, the accordion by each way in; a converter used twice.
+On tb.56, 6 of the 7 that build there fail (the seventh asserts that no code is written, which tb.56 does not); the
+round trip needs `getHumdrumForGM`. The program 0 case also failed on the fix as first built, which wrote every code.
+Each of the patch's 19 parts undone, under the address, division and overflow sanitizers, fails a case.
+
+**Upstream status**: not offered.
+
+**Gate of tb.57** (patch 137, MuseNote plan V3_2_0_85). Native: the suite, 496 cases (16,866 assertions), and under
+ASan with libc++'s checks 495 (the RC106 arena case is left out of that build), no finding; `tool/log_format_audit.py`:
+301 engine sources, 0 calls. A Debug engine (asserts on) over every input and every Humdrum export: 6,810, all
+through. Parity against tb.56: 22,961 outputs, none differ; seeded ids 3,218 of 3,218; every input reads back from
+its MEI (3,612). The locator gate: 0 failures. MuseSync's 24 starters: the same. MuseNote's export gate in every
+format: MusicXML and ABC as on tb.56; Humdrum 2,964 songs play the same in every aspect, and 2,727 of the songs
+listed for instrument play their programs now (172 left: 122 programs with no code, the format's; 49 songs on
+channels Humdrum does not keep; one program out of range). Its census against tb.56: `instrDef` and
+`@midi.instrnum` as the score's in 2,371 songs more; `@midi.instrname` new in 2,383, and a staff's name in 887
+(3 of them clarinets in B♭, whose name draws its flat as a glyph), both accepted by MuseNote's owner.
+
 ### 136. A lyric line ends where the file says, and an empty syllable is no syllable of a word (tb.56)
 
 MuseNote plan V3_2_0_84 (root cause RC172, finding W153). Upstream, cherry-picked: #4339 (92b03ade9, 8497ed330;
