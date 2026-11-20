@@ -824,6 +824,7 @@ protected:
     bool isTempoishText(hum::HTp token);
     bool isLastStaffTempo(hum::HTp token);
     bool isStartTempoPlayedAgain(hum::HTp token); // MuseNote patch 134 (RC170)
+    bool handleInterpretationState(hum::HTp token, int staffindex, Note *note); // MuseNote patch 135 (RC171)
     void addMensuralQuality(Note *note, hum::HTp token);
     bool checkForMens(hum::HumdrumFile &infile);
     bool layerOnlyContainsNullStuff(std::vector<hum::HTp> &data);

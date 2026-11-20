@@ -13986,7 +13986,10 @@ bool HumdrumInput::fillContentsOfLayer(int track, int startline, int endline, in
                 processDirections(layerdata[z], staffindex);
 
                 if (layerdata[z]->isInterpretation()) {
-                    handlePedalMark(layerdata[z]);
+                    // MuseNote patch 135 (RC171): a bar of a whole-bar rest reads what its interpretations set as a
+                    // bar of notes does (it read their pedal marks only: a *MM, a *tscale or an ottava's end there
+                    // was lost).  No note of the layer is passed: the bar has none.
+                    handleInterpretationState(layerdata[z], staffindex, NULL);
                 }
             }
         }
@@ -14058,59 +14061,10 @@ bool HumdrumInput::fillContentsOfLayer(int track, int startline, int endline, in
             continue;
         }
         if (token->isInterpretation()) {
-            processInterpretationStuff(token, staffindex);
-            if (*token == "*join") {
-                m_join = true;
+            // MuseNote patch 135 (RC171): what an interpretation sets for the music after it is read by one function,
+            // which a bar of a whole-bar rest reads too
+            if (handleInterpretationState(token, staffindex, note)) {
                 continue;
-            }
-            if (*token == "*Xjoin") {
-                m_join = false;
-                continue;
-            }
-            if ((staffindex == 0) && (token->compare(0, 8, "*tscale:") == 0)) {
-                hum::HumRegex hree;
-                if (hree.search(token, "^\\*tscale:(\\d+)/(\\d+)$")) {
-                    int valuetop = hree.getMatchInt(1);
-                    int valuebot = hree.getMatchInt(2);
-                    if ((valuetop > 0) && (valuebot > 0)) {
-                        hum::HumNum value = valuetop;
-                        value /= valuebot;
-                        m_localTempoScaling *= value;
-                        Tempo *tempo = new Tempo();
-                        tempo->SetMidiBpm(m_midibpm * m_globalTempoScaling * m_localTempoScaling.getFloat());
-                        setLocationId(tempo, token);
-                        int staffindex = 0;
-                        hum::HumNum tstamp = getMeasureTstamp(token, staffindex);
-                        tempo->SetTstamp(tstamp.getFloat());
-                        addChildMeasureOrSection(tempo);
-                    }
-                }
-                else if (hree.search(token, "^\\*tscale:(\\d+)$")) {
-                    hum::HumNum value = hree.getMatchInt(1);
-                    if (value > 0) {
-                        m_localTempoScaling *= value;
-                        Tempo *tempo = new Tempo();
-                        tempo->SetMidiBpm(m_midibpm * m_globalTempoScaling * m_localTempoScaling.getFloat());
-                        setLocationId(tempo, token);
-                        int staffindex = 0;
-                        hum::HumNum tstamp = getMeasureTstamp(token, staffindex);
-                        tempo->SetTstamp(tstamp.getFloat());
-                        addChildMeasureOrSection(tempo);
-                    }
-                }
-            }
-
-            if (ss[staffindex].verse) {
-                checkForVerseLabels(token);
-            }
-            if (!m_mens) {
-                handleOttavaMark(token, note);
-                handleLigature(token);
-                handleColoration(token);
-                handleTempoChange(token);
-                handlePedalMark(token);
-                handleStaffStateVariables(token);
-                handleStaffDynamStateVariables(token);
             }
             handleCustos(elements, pointers, layerdata, i);
             if (*token == "*rep") {
@@ -14124,19 +14078,6 @@ bool HumdrumInput::fillContentsOfLayer(int track, int startline, int endline, in
                     }
                     processDynamics(layerdata[j], staffindex);
                     processDirections(layerdata[j], staffindex);
-                }
-            }
-            if (hre.search(token, "^\\*color:(.*)")) {
-                int ctrack = token->getTrack();
-                int strack = token->getSubtrack();
-                m_spine_color[ctrack][strack] = hre.getMatch(1);
-                if (strack == 1) {
-                    m_spine_color[ctrack][0] = m_spine_color[ctrack][1];
-                }
-                else if (strack == 0) {
-                    for (int z = 1; z < (int)m_spine_color[ctrack].size(); z++) {
-                        m_spine_color[ctrack][z] = m_spine_color[ctrack][0];
-                    }
                 }
             }
 
@@ -15527,6 +15468,89 @@ bool HumdrumInput::isStartTempoPlayedAgain(hum::HTp token)
             hum::HTp later = infile.token(i, j);
             if ((later->compare(0, 3, "*MM") == 0) || (later->compare(0, 8, "*tscale:") == 0)) {
                 return true;
+            }
+        }
+    }
+    return false;
+}
+
+//////////////////////////////
+//
+// HumdrumInput::handleInterpretationState -- MuseNote patch 135 (RC171): what an interpretation of a layer sets for
+//    the music after it (a join, a tempo, *tscale, a verse label, an ottava, a ligature, coloration, a pedal mark, the
+//    state of the staff and of its dynamics, a color), read the same way in a bar of notes and in a bar of a
+//    whole-bar rest.  [note] is the layer's last note, if any.  Returns true for a join (*join, *Xjoin), which sets
+//    nothing else.
+//
+
+bool HumdrumInput::handleInterpretationState(hum::HTp token, int staffindex, Note *note)
+{
+    std::vector<humaux::StaffStateVariables> &ss = m_staffstates;
+    processInterpretationStuff(token, staffindex);
+    if (*token == "*join") {
+        m_join = true;
+        return true;
+    }
+    if (*token == "*Xjoin") {
+        m_join = false;
+        return true;
+    }
+    if ((staffindex == 0) && (token->compare(0, 8, "*tscale:") == 0)) {
+        hum::HumRegex hree;
+        if (hree.search(token, "^\\*tscale:(\\d+)/(\\d+)$")) {
+            int valuetop = hree.getMatchInt(1);
+            int valuebot = hree.getMatchInt(2);
+            if ((valuetop > 0) && (valuebot > 0)) {
+                hum::HumNum value = valuetop;
+                value /= valuebot;
+                m_localTempoScaling *= value;
+                Tempo *tempo = new Tempo();
+                tempo->SetMidiBpm(m_midibpm * m_globalTempoScaling * m_localTempoScaling.getFloat());
+                setLocationId(tempo, token);
+                int staffindex = 0;
+                hum::HumNum tstamp = getMeasureTstamp(token, staffindex);
+                tempo->SetTstamp(tstamp.getFloat());
+                addChildMeasureOrSection(tempo);
+            }
+        }
+        else if (hree.search(token, "^\\*tscale:(\\d+)$")) {
+            hum::HumNum value = hree.getMatchInt(1);
+            if (value > 0) {
+                m_localTempoScaling *= value;
+                Tempo *tempo = new Tempo();
+                tempo->SetMidiBpm(m_midibpm * m_globalTempoScaling * m_localTempoScaling.getFloat());
+                setLocationId(tempo, token);
+                int staffindex = 0;
+                hum::HumNum tstamp = getMeasureTstamp(token, staffindex);
+                tempo->SetTstamp(tstamp.getFloat());
+                addChildMeasureOrSection(tempo);
+            }
+        }
+    }
+
+    if (ss[staffindex].verse) {
+        checkForVerseLabels(token);
+    }
+    if (!m_mens) {
+        handleOttavaMark(token, note);
+        handleLigature(token);
+        handleColoration(token);
+        handleTempoChange(token);
+        handlePedalMark(token);
+        handleStaffStateVariables(token);
+        handleStaffDynamStateVariables(token);
+    }
+    hum::HumRegex hre;
+    if (hre.search(token, "^\\*color:(.*)")) {
+        int ctrack = token->getTrack();
+        int strack = token->getSubtrack();
+        m_spine_color[ctrack][strack] = hre.getMatch(1);
+        if (strack == 1) {
+            m_spine_color[ctrack][0] = m_spine_color[ctrack][1];
+        }
+        else if (strack == 0) {
+            for (int z = 1; z < (int)m_spine_color[ctrack].size(); z++) {
+                m_spine_color[ctrack][z] = m_spine_color[ctrack][0];
             }
         }
     }
