@@ -960,6 +960,8 @@ class HumInstrument {
 		std::string getName             (void);
 		std::string getName             (const std::string& Hname);
 		std::string getHumdrum          (void);
+		// MuseNote patch 137 (RC176): the code of a General MIDI program, the reverse of getGM
+		std::string getHumdrumForGM     (int gm);
 		int         getGM               (void);
 		int         getGM               (const std::string& Hname);
 		void        setHumdrum          (const std::string& Hname);
@@ -9388,6 +9390,7 @@ class Tool_mei2hum : public HumTool {
 		string         m_beamPostfix;
 		string         m_tremoloMarkup;      // Tool_tremolo's markup for the next note or chord written (MuseNote RC132)
 		bool           m_hasTremolo = false; // a tremolo's markup was written: Tool_tremolo expands it
+		std::map<int, int> m_staffPrograms;  // each staff's General MIDI program, from its instrDef (MuseNote RC176)
 		// Each tie's ends seen so far, by the tie: the time its start's note ends, the time its end's note starts, and
 		// the note (MuseNote RC136)
 		map<xml_node, pair<HumNum, xml_node>> m_tieStarts;

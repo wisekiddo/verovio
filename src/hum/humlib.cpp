@@ -16970,7 +16970,8 @@ HumInstrument::~HumInstrument() {
 //
 
 int HumInstrument::getGM(void) {
-	if (m_index > 0) {
+	// MuseNote patch 137 (RC177): find() gives the table's first entry 0, -1 for none
+	if (m_index >= 0) {
 		return m_data[m_index].gm;
 	} else {
 		return -1;
@@ -16992,7 +16993,8 @@ int HumInstrument::getGM(const string& Hname) {
 		tindex = find(Hname);
 	}
 
-	if (tindex > 0) {
+	// MuseNote patch 137 (RC177): find() gives the table's first entry 0, -1 for none
+	if (tindex >= 0) {
 		return m_data[tindex].gm;
 	} else {
 		return -1;
@@ -17007,7 +17009,8 @@ int HumInstrument::getGM(const string& Hname) {
 //
 
 string HumInstrument::getName(void) {
-	if (m_index > 0) {
+	// MuseNote patch 137 (RC177): find() gives the table's first entry 0, -1 for none
+	if (m_index >= 0) {
 		return m_data[m_index].name;
 	} else {
 		return "";
@@ -17028,7 +17031,8 @@ string HumInstrument::getName(const string& Hname) {
 	} else{
 		tindex = find(Hname);
 	}
-	if (tindex > 0) {
+	// MuseNote patch 137 (RC177): find() gives the table's first entry 0, -1 for none
+	if (tindex >= 0) {
 		return m_data[tindex].name;
 	} else {
 		return "";
@@ -17043,11 +17047,44 @@ string HumInstrument::getName(const string& Hname) {
 //
 
 string HumInstrument::getHumdrum(void) {
-	if (m_index > 0) {
+	// MuseNote patch 137 (RC177): find() gives the table's first entry 0, -1 for none
+	if (m_index >= 0) {
 		return m_data[m_index].humdrum;
 	} else {
 		return "";
 	}
+}
+
+
+
+//////////////////////////////
+//
+// HumInstrument::getHumdrumForGM -- MuseNote patch 137 (RC176): the
+//    Humdrum instrument code of General MIDI program [gm], the reverse
+//    of getGM.  Where the table gives the program several codes, the one
+//    that names the General MIDI instrument itself (piano for Acoustic
+//    Grand Piano, violn for Violin, vox for Choir Aahs: a voice), else the
+//    table's first.  Empty for a program the table gives none.
+//
+
+string HumInstrument::getHumdrumForGM(int gm) {
+	static const map<int, string> own = {
+		{0, "piano"}, {7, "clavi"}, {14, "chime"}, {20, "reedo"}, {21, "accor"}, {24, "guitr"}, {40, "violn"},
+		{41, "viola"}, {42, "cello"}, {43, "cbass"}, {52, "vox"}, {56, "tromp"}, {57, "tromt"}, {58, "tuba"},
+		{60, "cor"}, {64, "saxS"}, {65, "saxA"}, {66, "saxT"}, {67, "saxR"}, {68, "oboe"}, {69, "cangl"},
+		{70, "fagot"}, {71, "clars"}, {73, "flt"}, {74, "fltds"}, {77, "shaku"}, {82, "calpe"}, {104, "sitar"},
+		{107, "koto"}, {115, "wblok"}
+	};
+	auto found = own.find(gm);
+	if (found != own.end()) {
+		return found->second;
+	}
+	for (const _HumInstrument& entry : m_data) {
+		if (entry.gm == gm) {
+			return entry.humdrum;
+		}
+	}
+	return "";
 }
 
 
@@ -17062,7 +17099,8 @@ int HumInstrument::setGM(const string& Hname, int aValue) {
 		return 0;
 	}
 	int rindex = find(Hname);
-	if (rindex > 0) {
+	// MuseNote patch 137 (RC177): find() gives the table's first entry 0, -1 for none
+	if (rindex >= 0) {
 		m_data[rindex].gm = aValue;
 	} else {
 		afi(Hname.c_str(), aValue, Hname.c_str());
@@ -101104,6 +101142,73 @@ bool Tool_mei2hum::convert(ostream& out, const char* input) {
 
 
 
+// MuseNote patch 137 (RC176): each staff's General MIDI program [programs]
+// (by staff number) written as its Humdrum instrument code
+// (HumInstrument::getHumdrumForGM), on one line after the file's *staff
+// line, in the staff's **kern or **mens spine: the Humdrum reader turns
+// the code into the staff's program (HumdrumInput::addInstrumentDefinition).
+// A staff whose program has no code, or that names none, gets none.  So
+// does a staff on program 0 that the file gives no name (*I"): MIDI plays
+// program 0 where none is said, and the reader names a staff with no name
+// after its code (HumdrumInput::getLabelFromInstrumentCode, "Piano"), a name
+// the score does not show.
+static void writeInstrumentCodes(HumdrumFile& outfile, const map<int, int>& programs) {
+	if (programs.empty()) {
+		return;
+	}
+	// read again, for its spines, as a reader reads it
+	stringstream text;
+	text << outfile;
+	HumdrumFile read;
+	read.readString(text.str());
+	HumInstrument table;
+	// the spines the file names before its first data, as the reader looks
+	// for a name (*I", where *I"" names a group)
+	set<int> named;
+	for (int i=0; (i<read.getLineCount()) && !read[i].isData(); i++) {
+		if (!read[i].isInterpretation()) {
+			continue;
+		}
+		for (int j=0; j<read[i].getFieldCount(); j++) {
+			HTp token = read.token(i, j);
+			if ((token->compare(0, 3, "*I\"") == 0) && (token->compare(0, 4, "*I\"\"") != 0)) {
+				named.insert(token->getTrack());
+			}
+		}
+	}
+	for (int i=0; i<read.getLineCount(); i++) {
+		HumdrumLine& line = read[i];
+		if (line.isData()) {
+			return;
+		}
+		if (!line.isInterpretation() || (line.token(0)->compare(0, 6, "*staff") != 0)) {
+			continue;
+		}
+		string codes;
+		bool any = false;
+		for (int j=0; j<line.getFieldCount(); j++) {
+			HTp token = line.token(j);
+			const string type = token->getDataType();
+			string code;
+			if ((token->compare(0, 6, "*staff") == 0) && ((type == "**kern") || (type == "**mens"))) {
+				auto program = programs.find(atoi(token->c_str() + 6));
+				if ((program != programs.end()) && ((program->second != 0) || named.count(token->getTrack()))) {
+					code = table.getHumdrumForGM(program->second);
+				}
+			}
+			codes += (j ? "\t" : "");
+			codes += code.empty() ? "*" : ("*I" + code);
+			any |= !code.empty();
+		}
+		if (any) {
+			outfile.insertLine(i + 1, codes);
+		}
+		return;
+	}
+}
+
+
+
 // MuseNote patch 131 (RC167): a score that gives no tempo at its start plays
 // at 120, the engine's tempo for an MEI file without one, and Verovio's
 // Humdrum reader gives a file that names none a tempo by its rule
@@ -101183,6 +101288,7 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 	initialize();
 	m_tremoloMarkup.clear();
 	m_hasTremolo = false;
+	m_staffPrograms.clear();
 
 	bool status = true; // for keeping track of problems in conversion process.
 
@@ -101342,6 +101448,8 @@ bool Tool_mei2hum::convert(ostream& out, xml_document& doc) {
 		Tool_tremolo tremolo;
 		tremolo.run(outfile);
 	}
+	// MuseNote patch 137 (RC176): each staff's instrument code
+	writeInstrumentCodes(outfile, m_staffPrograms);
 	// MuseNote patch 131 (RC167): the tempo a score that names none plays at, where a reader would give another
 	writeTempoReadOtherwise(outfile);
 	out << outfile;
@@ -102106,6 +102214,21 @@ void Tool_mei2hum::parseStaffDef(xml_node staffDef, HumNum starttime) {
 	m_scoreDef.staves.at(num-1) = m_scoreDef.global;
 
 	fillWithStaffDefAttributes(m_scoreDef.staves.at(num-1), staffDef);
+
+	// MuseNote patch 137 (RC176): the staff's General MIDI program, which
+	// the file is written with as the staff's Humdrum instrument code
+	// (writeInstrumentCodes): from its instrDef, else its staffGrp's.  The
+	// first staffDef of a staff number says it: the one a reader takes.
+	if (m_staffPrograms.count(num) == 0) {
+		xml_node instrDef = staffDef.child("instrDef");
+		if (!instrDef && (strcmp(staffDef.parent().name(), "staffGrp") == 0)) {
+			instrDef = staffDef.parent().child("instrDef");
+		}
+		xml_attribute program = instrDef.attribute("midi.instrnum");
+		if (program) {
+			m_staffPrograms[num] = program.as_int();
+		}
+	}
 
 	// see leaky memory note below for why there are separate
 	// variables for clef, keysig, etc.
