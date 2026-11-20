@@ -2989,6 +2989,61 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 136. A lyric line ends where the file says, and an empty syllable is no syllable of a word (tb.56)
+
+MuseNote plan V3_2_0_84 (root cause RC172, finding W153). Upstream, cherry-picked: #4339 (92b03ade9, 8497ed330;
+6.3.0), #4444 (7d781df87; 6.4.0) and 20c1936cc's verse half (6.4.0). MusicXML ends a lyric line (the line under a
+held syllable) with `<extend type="stop"/>` on its last note. `MusicXmlInput::ReadMusicXmlNote` dropped a `<lyric>`
+with no `<text>`, so the stop was lost and the line ran on to the note before the next syllable of its verse. MEI ends
+a line with an empty syllable on the next note, and the lyric preparation took one for a word's next syllable: a
+hyphen to it was not drawn (`View::DrawSylConnector` stops where the next syllable has no box), an empty syllable
+could start a hyphen or a line, and the MIDI writer gave it a lyric event of no text.
+
+- **A stop ends its line** (92b03ade9, 7d781df87). The reader holds a note's stops per staff and layer
+  (`m_pendingExtenderStops`) and gives the layer's next note or chord an empty syllable in the stop's verse where it
+  has no syllable of its own there; a chord's notes are one event. `include/vrv/iomusxml.h`'s one conflicting hunk
+  keeps this branch's members and upstream's.
+- **An empty syllable is no syllable of a word** (92b03ade9, 7d781df87), ported into
+  `PrepareLyricsFunctor::FollowSyl`, where patch 85 (a77c758) moved the following of a syllable: applied as text, the
+  rule does not build. A hyphen before an empty syllable ends on its note with no next syllable (`m_nextWordSyl`):
+  it is drawn up to that note where there is room for a dash. An empty syllable starts no hyphen and no line. A line
+  before it ends on the note before it, as before.
+- **No MIDI lyric event for an empty syllable** (92b03ade9; `Syl::IsEmpty` in `GenerateMIDIFunctor::VisitSyl`,
+  8497ed330).
+- **No verse on a tab group** (20c1936cc's verse half, which patch 121 left for this). The reader as it is cannot reach
+  it: a stop is taken by a note or a chord only, and a tab note's element is its tab group. Taken so the code reads as
+  upstream's.
+- **What it changes.** No MEI of MuseNote's songs or MuseSync's (none has a stop): no id moves. A user's file with
+  stops reads the ids after each stop once more (each stop's empty syllable is a new object). 16 songs draw one hyphen
+  more where its note leaves room for a dash (at the parity set's scale 15: Kiss Me (capo 3) has no room there); in
+  those 16 the layout's own ids move, since each connector drawn builds a temporary `Syl`, which takes a generated id.
+  The MIDI of 35 songs loses its 74 empty lyric events and nothing else (the writer passes a secondary tied note's
+  syllables and every verse but a note's first, so most empty syllables never wrote one); in 2 of them a lyric changes
+  places with the key and time signatures of its tick (the writer's `qsort` calls two meta events of one tick equal;
+  tempos are in track 0, which keeps its order). The frozen 6.2.0 readers (`*620*`, patch 129) are not touched.
+
+**Cases**: `test/native/test_tb56_extender_stops_engine.cpp` in MuseNote's `corelib/verovio` (7 cases): a stop ends
+its line on its note, and the next note gets an empty syllable; a word's first syllable followed by an empty syllable
+on its tied note keeps its hyphen; an empty syllable writes no MIDI lyric event; and, as before, a line with no stop,
+a stop whose next note has a syllable of its own, hyphens with an elision and an empty syllable between words, a stop
+before a note of a single TAB staff. The 3 of RC172 fail on tb.55. Each change undone fails its own: the stop held for
+the next note, the stop case; an empty syllable no word's next syllable, the hyphen case; no MIDI event for an empty
+syllable, the MIDI case. The tab guard undone fails none, and none can.
+
+**Upstream status**: upstream's own (#4339 in 6.3.0; #4444 and 20c1936cc in 6.4.0). The port into `FollowSyl` is
+this branch's, not offered.
+
+**Gate of tb.56** (patch 136, MuseNote plan V3_2_0_84). Native: the suite, 488 cases (16,658 assertions), and under
+ASan with libc++'s checks 485 and, on their own, the 2 that run skips (W154's), no finding; `tool/log_format_audit.py`:
+301 engine sources, 0 calls. A Debug engine (asserts on) over every input: 3,612, all through, and through the frozen
+readers the 3,392 MusicXML and ABC inputs, all through. Parity against tb.55: 22,961 outputs, 51 differ, each as above
+(16 pages, 35 MIDI files); no MEI, timemap or pitch map; seeded ids 3,218 of 3,218; every input reads back from its
+MEI (3,612). The locator gate: 0 failures (every generated id of 501,777 MusicXML notes kept). MuseSync's 24
+starters: the same. MuseNote's export gate in every format: exit 0, no song-aspect worse than tb.55 (the 2 songs
+added since, judged on both engines: none worse); its MusicXML export writes the stop on a line's last note, beside
+the empty syllable, which it reads back as before. The frozen readers' whole MEI: the same as tb.54's (tb.55 leaves
+them alone) for the 3,089 songs, the 80 of 3.0.1 and the 194 ABC files.
+
 ### 135. A bar of a whole-bar rest reads its interpretations as a bar of notes does (tb.55)
 
 MuseNote plan V3_2_0_83 (root cause RC171, finding W79's tempo). `fillContentsOfLayer` reads a bar of a whole-bar rest
@@ -4953,11 +5008,16 @@ ones when upstream releases them; ours stay: patches 128, 123's bound, 121's tec
 
 **Left for the base move:** 975f7c28d (harmony text runs: every chord symbol's tspans change, no gain from MusicXML);
 57f56d0da (an ending's `@label` drawn: no effect from MusicXML). **Not needed:** d1a5c019a (patch 62 already ties tab
-notes), 8497ed330 (it needs 92b03ade9), 1712ca6f8.
+notes), 8497ed330 (it needs 92b03ade9: both taken at tb.56, patch 136), 1712ca6f8.
 
 **Found by the audits of tb.52's classes, upstream develop still has it:** a rest in a tab group timed twice (patch
 128, ours; e2f797f22 brings it to MusicXML); a technical mark offered to a tabGrp (patch 121, ours); an ornament's staff
 unbounded (patch 123, ours); no triangle notehead is drawn, `isotriangle` or any (MuseNote RC157, W141, open).
+
+**Taken at tb.56 (2026-11-20, MuseNote plan V3_2_0_84; patch 136):** #4339 (92b03ade9, 8497ed330; 6.3.0) and
+#4444 (7d781df87; 6.4.0), their lyric rule ported into `FollowSyl` (patch 85), and 20c1936cc's verse half. They
+move no generated id of MuseNote's songs or MuseSync's (none has a stop); a user's file with stops reads the ids
+after each stop once more.
 
 ## Rules for this branch
 
