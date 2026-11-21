@@ -353,8 +353,13 @@ FunctorCode AlignHorizontallyFunctor::VisitLayerElement(LayerElement *layerEleme
         // The time will be reset to 0.0 when starting a new layer anyway
         if (layerElement->Is(TIMESTAMP_ATTR)) {
             m_time = duration;
-            // When a tstamp is pointing to the end of a measure, then use the right barline alignment
-            if (m_time == this->m_measureAligner->GetRightAlignment()->GetTime()) {
+            // When a tstamp is pointing to the end of a measure, then use the right barline alignment. One past the end
+            // is placed there too: a mark makes no time (MuseNote RC5: the aligner moved the bar's end out to it, and
+            // the MIDI and the timemap took the bar's length from there). The time stamps are aligned after every
+            // layer of the measure, so its end is known.
+            const Fraction barEnd = this->m_measureAligner->GetRightAlignment()->GetTime();
+            if (m_time >= barEnd) {
+                m_time = barEnd;
                 type = ALIGNMENT_MEASURE_RIGHT_BARLINE;
             }
         }
