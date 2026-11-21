@@ -2989,6 +2989,100 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 143. A rest marked measure="yes" is a whole-bar rest only where its ticks fill its bar (tb.60)
+
+MuseNote plan V3_2_0_89 (root cause RC196, finding W123). Ours. Patch 70 made a rest with no `<type>` a whole-bar rest
+only where its ticks fill its bar, "as `measure="yes"`": a rest marked `measure="yes"` stayed one in any bar. In a bar
+its notes do not fill (`metcon="false"`) the engine plays a whole-bar rest for no time
+(`LayerElement::GetAlignmentDuration`), so a pickup bar of only such a rest was not played, and the music after it
+started early (the probe's C at 0, not 1). Now `measure="yes"` makes a whole-bar rest where `TicksFillTheBar` holds;
+elsewhere the rest is one of its ticks' value, as one with no type (`WriteItsTicks`, `ValueOfItsTicks`): the page
+shows what plays. A full bar's `measure="yes"` rest is read as before.
+
+**Cases**: `test/native/test_tb60_bar_and_tempo_engine.cpp` in MuseNote's `corelib/verovio`, 2 cases: a pickup of one
+beat holding a `measure="yes"` rest (with no type, and with a whole's) plays from the second beat and reads as a
+quarter rest; a full bar's stays an mRest. The first fails on tb.59; the rest judged by its ticks undone fails it.
+
+**Upstream status**: not offered. Upstream knows the playback (#3146, open); #3207 (open) proposes an mRest timed by
+`@dur.ges`; #4126, in this branch's base, gives a whole-bar element no time in a `metcon="false"` bar.
+
+**Gate of tb.60** (patches 140 to 143, MuseNote plan V3_2_0_89). Native: the suite, 524 cases (18,530 assertions),
+and under ASan with libc++'s checks and `-fsanitize=integer-divide-by-zero` 523 (the RC106 arena case is left out of
+that build), no finding; `tool/log_format_audit.py`: 301 engine sources, 0 calls. A Debug engine (asserts on) over
+every input: 3,612, all through, and through the frozen readers the 3,392 MusicXML and ABC inputs, all through.
+Parity against tb.59: 22,961 outputs, none differs; seeded ids 3,218 of 3,218; every input reads back from its MEI
+(3,612). The locator gate: 0 failures (every generated id of 501,777 MusicXML notes kept). MuseSync's 24 starters: the
+same. `bar_times.py`: 2,650 live songs, none breaks a rule. MuseNote's export gate in every format: exit 0, no
+song-aspect worse than tb.59's, the same 6 chant exports refused. The frozen readers' whole MEI: the same as tb.59's
+for the 3,089 songs, the 80 of 3.0.1 and the 194 ABC files. Each part undone fails its own case (14 breaks), the frozen
+reader's guards under the sanitizer.
+
+### 142. The MusicXML reader measures a full bar by the meter's counts summed (tb.60)
+
+MuseNote plan V3_2_0_89 (root cause RC193, findings W171 and W169). Ours, with the idea of upstream's a9ac27d5c (#4577,
+develop, unreleased). `MusicXmlInput`'s full-bar test (`metcon`) worked out the bar's length itself. It multiplied an
+additive meter's counts, so 3+2/8 made a bar of six eighths: a full one was marked not full, and its whole-bar rest
+played for no time. And it divided by the meter's unit, which a `<time>` with `<beats>` and no `<beat-type>` leaves at
+0: undefined behaviour, which ends the process on x86 and gives 0 on ARM, so every bar was marked not full. The clef
+placed at the end of the bar before a clef change divided by the same unit (on ARM it stood at the bar's start).
+
+- **The full-bar test** asks `TicksFillTheBar`, the exact rule two other tests of the reader use: the counts summed, a
+  `Fraction`, a bar of no known meter never marked.
+- **The clef** divides by the unit only where it is a number (`std::max(1, m_meterUnit)`): any value past the bar's
+  end does there, as its comment says.
+- **The frozen 6.2.0 reader** (`iomusxml620.cpp`, by patch 129's rule): its two divisions give 0 where the unit is 0,
+  which is what 6.2.0's gave on ARM, so for a file 6.2.0 read it builds what it built, and it ends the process no
+  more. Its multiplied counts are 6.2.0's reading, and stay. Its header names the guards marked "MuseNote patch 142".
+- Of #4577 only the sum is ported. Its pick conflicts with this branch's bar time (RC116, patch 97) in two hunks, and
+  its removal of the temporary `MeterSig` moves seeded ids, so it is not taken.
+
+**Cases**: 4: a 3+2/8 bar holding a whole-bar rest is full (the next note at 2.5 quarters), and one of five eighths is
+not marked; a `<time>` with no `<beat-type>` marks no bar and keeps the clef at the bar's end; the frozen reader reads
+that file as 6.2.0 did, with no division by 0 under `-fsanitize=integer-divide-by-zero`; and a scan: `iomusxml.cpp`
+divides by `m_meterUnit` nowhere. All but the frozen reader's fail on tb.59; that one fails under the sanitizer with
+its guards undone ("division by zero", `iomusxml620.cpp`).
+
+**Upstream status**: the sum is upstream's (a9ac27d5c, #4577, unreleased); the division by 0 is not offered.
+
+### 141. A mark placed past its bar's end makes no time (tb.60)
+
+MuseNote plan V3_2_0_89 (root cause RC5, finding W38). Ours. The aligner gave a mark with a time stamp (words, a
+dynamic, a tempo, a chord symbol) past its bar's end an alignment past the right barline, and moved the bar's end out to
+it (`MeasureAligner::GetAlignmentAtTime` → `SetMaxTime`). The MIDI and the timemap take the bar's length from there
+(`InitMaxMeasureDurationFunctor::VisitMeasureEnd`), so the bar played its notes and then waited. Patch 69 (RC55) keeps
+the MusicXML reader's marks inside their bars; files of MEI, Humdrum and ABC, and MuseNote's editor's, still met it.
+A time stamp at or past the bar's end now takes the right barline's alignment, as one exactly at the end did: the bar
+keeps its length, and the mark is drawn at the barline. Time stamps are aligned after every layer of the measure
+(`AlignHorizontallyFunctor::VisitMeasureEnd`), so its end is known.
+
+**Cases**: 2: words six quarters into a 4/4 bar (the next bar at 4 quarters, 2,000 ms, in the timemap and the MIDI);
+a dynamic past what a bar not full holds (the bar keeps its two quarters). Both fail on tb.59, and both with the
+barline undone.
+
+**Upstream status**: not offered. Upstream's comment there calls it "a tstamp event after the last note".
+
+### 140. One rule for the tempo an element gives (tb.60)
+
+MuseNote plan V3_2_0_89 (root causes RC184 and RC191, findings W162 and W121). Ours. Five places worked out the tempo
+a score definition or a `<tempo>` gives, each its own way (`Doc::CalculateTimemap`, `Doc::ExportMIDI`,
+`InitMaxMeasureDurationFunctor::VisitScoreDef` and `VisitTempo`, and the MusicXML reader's tempo places of RC182), and
+none read `@midi.mspb`. And `Tempo::CalcTempo` took a dot off the unit's denominator, so ♩. = 60 played 80 quarters a
+minute, not 90 (upstream's 325a8f220, #3215, 2023, called ×4/3 a dot correct).
+
+- `Tempo::PlaysAt`: `@midi.bpm`, else `@midi.mspb` (60,000,000 ÷ it), else `@mm` in its unit and dots; one of 0 or
+  less gives none. The five places call it.
+- `CalcTempo`: a dot makes the unit half as long again, and each more dot half the one before it (× 2 − 2^−dots).
+
+**Cases**: 7: ♩. = 60 plays 90 and ♩.. = 60 105, ♩ = 60 and a half at 60 as before, a score definition's too, in the
+timemap and the MIDI; `@midi.mspb` plays, the score's and a `<tempo>`'s; `@midi.bpm` before `@midi.mspb` before
+`@mm`; a negative `@midi.bpm` and 0 microseconds give none (a `@midi.bpm` of 0 is none by its attribute class
+already); the MusicXML reader judges a bare `<sound tempo>` by a dotted mark's tempo; and a scan: no source but
+`tempo.cpp` calls `CalcTempo` or reads `@midi.bpm`, `@midi.mspb` or `@mm`. Each fails on tb.59 but the one of 0 or
+less, which was written after; each part undone fails its own (the dots, `@midi.mspb`, each guard, each of the six
+calls reading for itself).
+
+**Upstream status**: not offered.
+
 ### 139. A MusicXML elision is drawn with the symbol its file gives (tb.59)
 
 MuseNote plan V3_2_0_88 (root cause RC190, finding W168). Upstream, cherry-picked: d751fb2ed and 9473d055a (#4446,
