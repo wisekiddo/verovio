@@ -2989,6 +2989,55 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 139. A MusicXML elision is drawn with the symbol its file gives (tb.59)
+
+MuseNote plan V3_2_0_88 (root cause RC190, finding W168). Upstream, cherry-picked: d751fb2ed and 9473d055a (#4446,
+6.4.0), and ours on them. MusicXML joins two syllables sung on one note with an `<elision>`, whose content names the
+symbol drawn between them: an undertie (‿), a no-break space, a hyphen, an underscore; left empty, the undertie, or the
+glyph its `@smufl` names. `MusicXmlInput` gave every elision `@con="b"`, the undertie, whatever the file said: a
+no-break space was drawn as an undertie.
+
+- **The elision's symbol** (d751fb2ed, 9473d055a): `ConvertElisionToCon` reads the `<elision>`'s text into `syl@con`:
+  a no-break space `s`, `-` and `‐` `d`, `_` `u`, `~` and `˜` `t`, `^` and `ˆ` `c`, `ˇ` `v`, `⁀` and `⁔` `i`, `‿` `b`;
+  empty, the `@smufl` glyph's (`lyricsHyphenBaseline` and its non-breaking form `d`, the `lyricsElision` glyphs `b`),
+  else `b`; any other text `b`, with a warning. The second commit takes back the first's whitespace parsing, so an
+  ASCII space reads as empty (`b`). Each conflicts once, in `ReadMusicXmlHarmony`, on a line the second takes back
+  (this branch tests `!rootStep` where upstream tests the harmony's text): kept ours. The net change is upstream's
+  final `ConvertElisionToCon`, its declaration and its call.
+- **The Humdrum export** (ours, `Tool_mei2hum::parseVerse`): it joined the syllables of one note's verse with a space,
+  which the Humdrum reader makes an elision drawn with an undertie. A syllable joined to the next by a space
+  (`@con="s"`) is written with `&#160;`, which the reader keeps as one syllable holding a no-break space, drawn the
+  same; any other join is written as before.
+- **What it changes.** 46 elisions in 11 of MuseNote's songs hold a no-break space: they are drawn with a space, the
+  undertie gone, and the syllables spaced so (Carinhoso fits 8 systems for 9, and the ids of what its layout draws,
+  none in the MEI, move with the system it loses). 16 more, in 7 songs and Paperback Writer's third, follow a verse
+  number ("1."), which the reader makes the verse's label: nothing to join, as before. No object is added: no
+  generated id moves, and the MIDI, timemap and pitch map do not change. MuseSync's songs have no elision. The
+  Humdrum export of the 11 reads each such join back as one syllable. The frozen 6.2.0 reader (`iomusxml620.cpp`,
+  patch 129) is not touched.
+
+**Cases**: `test/native/test_tb59_elisions_engine.cpp` in MuseNote's `corelib/verovio` (8 cases): a no-break-space
+elision is `s`, with no undertie drawn; a `@smufl` glyph `lyricsHyphenBaseline` gives `d`; the elisions of two verses
+on one note keep their own symbols; a syllable joined by a space comes back from the Humdrum export as one syllable,
+with no undertie; and, as before, an empty elision and U+203F are `b`, the undertie drawn; an ASCII space is `b`;
+MuseNote's export of a verse number (`<text>2.</text><elision/>`) is a label and one syllable; an undertie elision's
+Humdrum round trip is `b`, the undertie drawn. The 4 of RC190 fail on tb.58. Each part undone fails its own: the
+symbol not read, the 4 of RC190; the `@smufl` glyph not read, its case; the Humdrum join by a space, its case.
+
+**Upstream status**: upstream's own (d751fb2ed and 9473d055a, in 6.4.0). The Humdrum export's join is this branch's,
+not offered.
+
+**Gate of tb.59** (patch 139, MuseNote plan V3_2_0_88). Native: the suite, 510 cases (17,002 assertions), and under
+ASan with libc++'s checks 509 (the RC106 arena case is left out of that build), no finding; `tool/log_format_audit.py`:
+301 engine sources, 0 calls. A Debug engine (asserts on) over every input: 3,612, all through, and through the frozen
+readers the 3,392 MusicXML and ABC inputs, all through. Parity against tb.58: 22,961 outputs, 44 differ, as declared:
+the 11 songs' MEI (the score's and the locator's two, each change one `@con` made `s` from `b`, 46 in all) and their
+drawings; seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612). The locator gate: 0 failures (every
+generated id of 501,777 MusicXML notes kept). MuseSync's 24 starters: the same. MuseNote's export gate in every
+format: exit 0, each format's figures the same as tb.58's; one census differs, as declared: Humdrum's syllables, in 10
+songs more, each `s` join read back as one syllable. The frozen readers' whole MEI: the same as tb.58's for the 3,089
+songs, the 80 of 3.0.1 and the 194 ABC files.
+
 ### 138. A tempo a MusicXML file changes with a bare `<sound>` plays (tb.58)
 
 MuseNote plan V3_2_0_86 (root cause RC182, finding W160). Upstream, cherry-picked: bd1515b1a (#4443, 6.4.0) and
@@ -5121,6 +5170,11 @@ after each stop once more.
 ported into `ReadMusicXmlSound`, with ours on them: a bare `<sound tempo>` builds a tempo only where it changes the
 tempo in effect. They move no generated id of MuseNote's songs or MuseSync's (none of their bare `<sound tempo>`s
 changes the tempo); a user's file whose bare `<sound>` changes it reads its ids after each new tempo once more.
+
+**Taken at tb.59 (2026-11-21, MuseNote plan V3_2_0_88; patch 139):** d751fb2ed and 9473d055a (#4446), 6.4.0, each
+conflict kept ours, with ours on them: the Humdrum export writes a syllable joined by a space with `&#160;`. They
+move no generated id of MuseNote's songs or MuseSync's (no object is added); 46 elisions in 11 of MuseNote's songs
+are drawn with the space their files give.
 
 ## Rules for this branch
 
