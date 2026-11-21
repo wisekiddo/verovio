@@ -321,6 +321,11 @@ private:
     void ReadMusicXmlPrint(pugi::xml_node, Section *section);
     void ReadMusicXmlSound(pugi::xml_node, Measure *measure, Section *section);
     /**
+     * The tempo in effect at bar [measureCount], @tstamp [tstamp]: the last of the tempos made at or before that place
+     * (m_tempoPlaces), else MIDI's own (MuseNote plan V3_2_0_86, RC182).
+     */
+    double TempoAt(int measureCount, double tstamp) const;
+    /**
      * The directions and sounds of the [bars] bars a multi-bar rest stands for, from [from] in the first, [bar], on:
      * read into [measure], the rest's (a start at its start, a jump at its end, as its barlines are its last bar's)
      */
@@ -792,6 +797,12 @@ private:
     std::vector<Octave *> m_octaveStack;
     std::vector<Pedal *> m_pedalStack;
     std::vector<Tempo *> m_tempoStack;
+    /**
+     * The tempos the import has made, by their bar's count (m_measureCounts) and @tstamp: the score's start tempo before
+     * its first bar, a direction's, and each bare <sound tempo> that changes the tempo. A bare one is built only where
+     * TempoAt gives another (MuseNote plan V3_2_0_86, RC182).
+     */
+    std::map<std::pair<int, double>, double> m_tempoPlaces;
     /*
      * The stack of floating elements (tie, slur, etc.) to be added at the
      * end of each measure: each by the bar it was read in, which m_contentMeasures resolves to the bar of the score.

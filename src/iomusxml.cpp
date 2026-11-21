@@ -1399,6 +1399,8 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
     if (scoreMidiBpm) {
         assert(score->GetScoreDef());
         score->GetScoreDef()->SetMidiBpm(scoreMidiBpm.node().attribute("tempo").as_double());
+        // The tempo the score starts at, before its first bar (MuseNote RC182: a bare <sound tempo> is judged by it)
+        m_tempoPlaces[{ -1, 0.0 }] = score->GetScoreDef()->GetMidiBpm();
     }
 
     pugi::xpath_node_set partListChildren = root.select_nodes("/score-partwise/part-list/*");
@@ -3411,6 +3413,12 @@ void MusicXmlInput::ReadMusicXmlDirection(
         }
         m_controlElements.push_back({ measure, tempo });
         m_tempoStack.push_back(tempo);
+        // The tempo it plays at (its sound's, else its metronome mark's), which a bare <sound tempo> after it is
+        // judged by (MuseNote RC182)
+        if (tempo->HasMidiBpm() || tempo->HasMm()) {
+            m_tempoPlaces[{ m_measureCounts.at(measure), timeStamp }]
+                = tempo->HasMidiBpm() ? tempo->GetMidiBpm() : Tempo::CalcTempo(tempo);
+        }
     }
 
     // other cases
@@ -4983,16 +4991,31 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
 
     // A tempo within a direction is already handled by ReadMusicXmlDirection
     const bool inDirection = IsElement(node.parent(), "direction");
-    const float bpm = node.attribute("tempo").as_float();
+    // Read whole, as the score's start tempo and a direction's are, so the same number is the same tempo
+    const double bpm = node.attribute("tempo").as_double();
     if (bpm > 0 && !inDirection) {
-        const short int offset = node.child("offset").text().as_int();
+        // (as a direction's: a short held no offset past 32,767 divisions, four quarters at 10,080 a quarter)
+        const int offset = node.child("offset").text().as_int();
         const double timeStamp = (double)(m_durTotal + offset) * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0;
-        Tempo *tempo = new Tempo();
-        tempo->SetMidiBpm(bpm);
-        tempo->SetTstamp(timeStamp);
-        m_controlElements.push_back({ measure, tempo });
-        m_tempoStack.push_back(tempo);
+        // MuseNote (RC182): built only where it changes the tempo in effect at its place. A bare <sound> that gives
+        // that tempo again (the start tempo in each part, as 350 of MuseNote's songs do) builds nothing: no object, so
+        // no id after it moves.
+        const int measureCount = m_measureCounts.at(measure);
+        if (this->TempoAt(measureCount, timeStamp) != bpm) {
+            Tempo *tempo = new Tempo();
+            tempo->SetMidiBpm(bpm);
+            tempo->SetTstamp(timeStamp);
+            m_controlElements.push_back({ measure, tempo });
+            m_tempoStack.push_back(tempo);
+            m_tempoPlaces[{ measureCount, timeStamp }] = bpm;
+        }
     }
+}
+
+double MusicXmlInput::TempoAt(int measureCount, double tstamp) const
+{
+    const auto after = m_tempoPlaces.upper_bound({ measureCount, tstamp });
+    return (after == m_tempoPlaces.begin()) ? MIDI_TEMPO : std::prev(after)->second;
 }
 
 void MusicXmlInput::KeepWhatTheSoundSays(ControlElement *mark, const pugi::xml_node sound, const std::string &kind) const
