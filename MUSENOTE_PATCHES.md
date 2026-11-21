@@ -2989,6 +2989,55 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 138. A tempo a MusicXML file changes with a bare `<sound>` plays (tb.58)
+
+MuseNote plan V3_2_0_86 (root cause RC182, finding W160). Upstream, cherry-picked: bd1515b1a (#4443, 6.4.0) and
+5c7736156 (#4503, 6.4.0), and ours on them. MusicXML gives a tempo with `<sound tempo>`: in a `<direction>`, with its
+words or metronome mark, or straight under the `<measure>`, a bare sound with no mark on the page. `MusicXmlInput`
+read a bare one only in part 1, bar 1, as the score's start tempo (`scoreDef@midi.bpm`); `ReadMusicXmlSound` read no
+tempo, so a later bare tempo change was lost and the music played on at the tempo before it.
+
+- **The tempo of a bare `<sound>`** (bd1515b1a, 5c7736156): a `<tempo>` with its `@midi.bpm` and `@tstamp` (the bar's
+  time and the sound's `<offset>`), as a direction's is made; a `<sound>` inside a `<direction>` is left to
+  `ReadMusicXmlDirection`, which makes its `<tempo>`. Applied as text, their hunk lands in `ReadMultiRestMarks`
+  (patch 94 stands where upstream's `ReadMusicXmlSound` ends) and keys a control element by its bar's count where this
+  branch keeps its `Measure` (`m_controlElements`): it does not build. Ported into `ReadMusicXmlSound`.
+- **Only where it changes the tempo** (ours): the tempos the import makes are kept by bar and `@tstamp`
+  (`m_tempoPlaces`: the start tempo before the first bar; each direction's, by its `@midi.bpm` or else
+  `Tempo::CalcTempo`; each bare one built), and a bare `<sound tempo>` builds its `<tempo>` only where the tempo in
+  effect at its place (`TempoAt`, else `MIDI_TEMPO`) is another. 350 of MuseNote's songs and 1 of MuseSync's hold
+  bare `<sound tempo>`s that give their start tempo again, in each part (All Blues); upstream's commits as they are
+  would build an object in each and move every id after it, for no change of tempo.
+- **Read as a direction's are** (ours): the tempo as a double (with `as_float` a start tempo of 79.9998 was another
+  number than the scoreDef's, and built a `<tempo>`), and the offset as an `int` (a `short` held none past 32,767
+  divisions: four quarters at 10,080 a quarter).
+- **What it changes.** No output of MuseNote's songs or MuseSync's: none of their bare `<sound tempo>`s changes the
+  tempo. A user's file that changes its tempo with a bare `<sound>` plays it, from the start of its bar (the engine
+  plays a bar at the last tempo met in it, as it does a direction's: MuseNote W167/RC189, open), and its ids after each new tempo move once. The
+  frozen 6.2.0 reader (`iomusxml620.cpp`, patch 129) is not touched.
+
+**Cases**: `test/native/test_tb58_sound_tempo_engine.cpp` in MuseNote's `corelib/verovio` (6 cases): a bare tempo
+change at bar 3 played from bar 3 (its `<tempo>`, with no text; the MIDI's tempo events; the timemap's bar 4 at 8 s); a
+bare tempo at its `<offset>`, and at one past 32,767 divisions; a change written in the second part alone; and, as
+before, part 1 bar 1's start tempo, also with a fraction (no `<tempo>`); a bare tempo that gives the tempo in effect,
+in each part and after a metronome mark (the MEI the same as without it, ids and all); a direction's `<sound tempo>`
+standing at its offset (one `<tempo>`, #4503). The 3 of RC182 fail on tb.57. Each part undone fails its own: no tempo
+built, the 3 of RC182; the rule, all 6; a direction's tempo not recorded, the given-again case; #4503's check, the
+direction case; `as_float`, the start-tempo case; a `short` offset, the offset case.
+
+**Upstream status**: upstream's own (bd1515b1a and 5c7736156, in 6.4.0). The rule, and the tempo and offset read as a
+direction's are, are this branch's, not offered.
+
+**Gate of tb.58** (patch 138, MuseNote plan V3_2_0_86). Native: the suite, 502 cases (16,940 assertions), and under
+ASan with libc++'s checks 501 (the RC106 arena case is left out of that build), no finding; `tool/log_format_audit.py`:
+301 engine sources, 0 calls. A Debug engine (asserts on) over every input and 4 scores of tempo changes: 3,616, all
+through, and through the frozen readers the 3,392 MusicXML and ABC inputs, all through. Parity against tb.57: 22,961
+outputs, 0 differ; seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612). The locator gate: 0
+failures (every generated id of 501,777 MusicXML notes kept). MuseSync's 24 starters: the same. MuseNote's export gate
+in every format: exit 0, no song-aspect worse than tb.57; over the 4 scores of tempo changes, the MusicXML and Humdrum
+exports play the same in every aspect. The frozen readers' whole MEI: the same as tb.56's for the 3,089 songs, the 80
+of 3.0.1 and the 194 ABC files.
+
 ### 137. The Humdrum export writes each staff's program as its instrument code (tb.57)
 
 MuseNote plan V3_2_0_85 (root causes RC176 and RC177; finding W79, its instruments). The MEI-to-Humdrum converter
@@ -5067,6 +5116,11 @@ unbounded (patch 123, ours); no triangle notehead is drawn, `isotriangle` or any
 #4444 (7d781df87; 6.4.0), their lyric rule ported into `FollowSyl` (patch 85), and 20c1936cc's verse half. They
 move no generated id of MuseNote's songs or MuseSync's (none has a stop); a user's file with stops reads the ids
 after each stop once more.
+
+**Taken at tb.58 (2026-11-21, MuseNote plan V3_2_0_86; patch 138):** bd1515b1a (#4443) and 5c7736156 (#4503), 6.4.0,
+ported into `ReadMusicXmlSound`, with ours on them: a bare `<sound tempo>` builds a tempo only where it changes the
+tempo in effect. They move no generated id of MuseNote's songs or MuseSync's (none of their bare `<sound tempo>`s
+changes the tempo); a user's file whose bare `<sound>` changes it reads its ids after each new tempo once more.
 
 ## Rules for this branch
 
