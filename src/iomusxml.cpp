@@ -3754,8 +3754,10 @@ void MusicXmlInput::ReadMusicXmlNote(
         }
         // we assume /note with the duration of an entire bar, or without /type where its ticks fill its bar, to be
         // mRest. (Without a type and shorter than its bar it was one too, and in a bar its meter does not fill the
-        // engine plays a whole-bar rest for no time: MuseNote RC56)
-        else if ((typeStr.empty() && this->TicksFillTheBar(duration)) || rest.attribute("measure").as_bool()
+        // engine plays a whole-bar rest for no time: MuseNote RC56. A rest marked measure="yes" is one only where its
+        // ticks fill the bar too; in a pickup it is a rest of its ticks, as one with no type: MuseNote RC196)
+        else if ((typeStr.empty() && this->TicksFillTheBar(duration))
+            || (rest.attribute("measure").as_bool() && this->TicksFillTheBar(duration))
             || this->FillsItsBarOtherwise(node, layer, typeStr, dots, duration)) {
             if (m_slash) {
                 MeterSig tmpMeterSig;
