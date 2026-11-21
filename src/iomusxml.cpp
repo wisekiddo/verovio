@@ -251,10 +251,11 @@ void MusicXmlInput::ProcessClefChangeQueue(Section *section)
             }
             else {
                 // For previous measure we need to make sure that clef is set at the end, so pass high duration value
-                // (since it won't matter there) and no bar, since it doesn't matter as well
+                // (since it won't matter there) and no bar, since it doesn't matter as well. (A <time> with no
+                // <beat-type> leaves the unit at 0, which no value is divided by: MuseNote RC193)
                 int steps = 1;
                 for (int &num : m_meterCount) steps += num;
-                const int endDuration = 4 * m_ppq * steps / m_meterUnit;
+                const int endDuration = 4 * m_ppq * steps / std::max(1, m_meterUnit);
                 musicxml::ClefChange previousClefChange(
                     NULL, previousStaff, previousLayer, clefChange.m_clef, endDuration, false);
                 this->AddClefs(previousMeasure, previousClefChange);
@@ -2422,11 +2423,10 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
     }
 
     // set metcon to false for pickup measures: by the bar's time (by the cursor, a bar whose voice written last ends
-    // early was marked not full: MuseNote RC116)
-    int measureTotal = m_ppq * 4;
-    for (const int &num : m_meterCount) measureTotal *= num;
-    measureTotal /= m_meterUnit;
-    if (barTime && barTime != measureTotal) {
+    // early was marked not full: MuseNote RC116), against the meter as the reader's other full-bar tests measure it
+    // (MuseNote RC193: this test multiplied an additive meter's counts, making 3+2/8 a bar of six eighths, and divided
+    // by the meter's unit, which a <time> with no <beat-type> leaves at 0)
+    if (barTime && !this->TicksFillTheBar(barTime)) {
         measure->SetMetcon(BOOLEAN_false);
     }
 

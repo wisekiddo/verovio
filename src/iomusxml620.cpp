@@ -6,11 +6,11 @@
 /////////////////////////////////////////////////////////////////////////////
 // MuseNote (fork patch 129): upstream Verovio 6.2.0's iomusxml.cpp (43f806031), frozen. It differs from upstream's file
 // by its include guard or its include of the frozen header, the namespace vrv::v620 around its own definitions, and the
-// guards marked "MuseNote patch 129": each takes from a later fork patch only what keeps an input from ending the
-// process, reading out of bounds or never coming back. For a file 6.2.0 read, none changes the objects the reader
-// builds (the ledger, patch 129, says what each changes). Nothing else in it is ever edited. MuseNote 2.1 to 3.0.1
-// shipped this reader: the marks they stored name notes by the ids its objects got, and the option legacyReaders
-// "6.2.0" reads a score with it to find them again.
+// guards marked "MuseNote patch 129" (and since, "MuseNote patch 142"): each takes from a later fork patch only what
+// keeps an input from ending the process, reading out of bounds or never coming back. For a file 6.2.0 read, none
+// changes the objects the reader builds (the ledger, patch 129, says what each changes). Nothing else in it is ever
+// edited. MuseNote 2.1 to 3.0.1 shipped this reader: the marks they stored name notes by the ids its objects got, and
+// the option legacyReaders "6.2.0" reads a score with it to find them again.
 
 #include "iomusxml620.h"
 
@@ -253,7 +253,9 @@ void MusicXmlInput::ProcessClefChangeQueue(Section *section)
                 // (since it won't matter there) and set measureNum to empty, since it doesn't matter as well
                 int steps = 1;
                 for (int &num : m_meterCount) steps += num;
-                const int endDuration = 4 * m_ppq * steps / m_meterUnit;
+                // MuseNote patch 142: a <time> with no <beat-type> leaves the unit at 0, which is divided by no more:
+                // 0 is what 6.2.0's division gave on ARM, so nothing it builds changes
+                const int endDuration = (m_meterUnit != 0) ? 4 * m_ppq * steps / m_meterUnit : 0;
                 musicxml::ClefChange previousClefChange(
                     std::string(""), previousStaff, previousLayer, clefChange.m_clef, endDuration, false);
                 this->AddClefs(previousMeasure, previousClefChange);
@@ -2034,7 +2036,8 @@ bool MusicXmlInput::ReadMusicXmlMeasure(
     // set metcon to false for pickup measures
     int measureTotal = m_ppq * 4;
     for (const int &num : m_meterCount) measureTotal *= num;
-    measureTotal /= m_meterUnit;
+    // MuseNote patch 142: as above, a unit of 0 gives 0, as 6.2.0's division did on ARM
+    measureTotal = (m_meterUnit != 0) ? measureTotal / m_meterUnit : 0;
     if (m_durTotal && m_durTotal != measureTotal) {
         measure->SetMetcon(BOOLEAN_false);
     }
