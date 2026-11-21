@@ -106048,15 +106048,20 @@ void Tool_mei2hum::parseVerse(xml_node verse, GridStaff* staff) {
 
 	string versetext;
 	int sylcount = 0;
+	xml_node previous; // the syllable before, whose @con joins it to the next
 
 	for (int i=0; i<(int)children.size(); i++) {
 		string nodename = children[i].name();
 		if (nodename == "syl") {
 			if (sylcount > 0) {
-				versetext += " ";
+				// MuseNote (V3_2_0_88, RC190): syllables of one note are joined by a space, which the Humdrum
+				// reader draws as an elision (an undertie); a syllable joined by a space (@con="s") is written
+				// with &#160;, which the reader keeps as a no-break space within one syllable
+				versetext += (string(previous.attribute("con").value()) == "s") ? "&#160;" : " ";
 			}
 			sylcount++;
 			versetext += parseSyl(children[i]);
+			previous = children[i];
 		} else {
 			cerr << DKHTP << verse.name() << "/" << nodename << CURRLOC << endl;
 		}
