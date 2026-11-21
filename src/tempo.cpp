@@ -117,16 +117,23 @@ double Tempo::CalcTempo(const AttMmTempo *attMmTempo)
     if (attMmTempo->HasMmUnit() && (attMmTempo->GetMmUnit() > DURATION_breve)) {
         mmUnit = pow(2, (int)attMmTempo->GetMmUnit() - 2);
     }
-    if (attMmTempo->HasMmDots()) {
-        double dotsUnit = 0.0;
-        for (int d = 0; d < attMmTempo->GetMmDots(); d++) {
-            dotsUnit += mmUnit / 4.0 / pow(2, d);
-        }
-        mmUnit -= dotsUnit;
-    }
     if (mmUnit > 0) tempo = mm * 4.0 / mmUnit;
+    // A dot makes the unit half as long again, and each more dot half the one before it (MuseNote RC184: the dots were
+    // taken off the unit's denominator, so ♩. = 60 played 80 quarters a minute, not 90)
+    if (attMmTempo->HasMmDots()) tempo *= 2.0 - pow(0.5, attMmTempo->GetMmDots());
 
     return tempo;
+}
+
+double Tempo::PlaysAt(const AttMidiTempo *midiTempo, const AttMmTempo *mmTempo)
+{
+    if (midiTempo->HasMidiBpm() && (midiTempo->GetMidiBpm() > 0)) return midiTempo->GetMidiBpm();
+    if (midiTempo->HasMidiMspb() && (midiTempo->GetMidiMspb() > 0)) return 60000000.0 / midiTempo->GetMidiMspb();
+    if (mmTempo->HasMm()) {
+        const double tempo = CalcTempo(mmTempo);
+        if (tempo > 0) return tempo;
+    }
+    return 0.0;
 }
 
 } // namespace vrv

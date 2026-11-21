@@ -1399,8 +1399,9 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
     if (scoreMidiBpm) {
         assert(score->GetScoreDef());
         score->GetScoreDef()->SetMidiBpm(scoreMidiBpm.node().attribute("tempo").as_double());
-        // The tempo the score starts at, before its first bar (MuseNote RC182: a bare <sound tempo> is judged by it)
-        m_tempoPlaces[{ -1, 0.0 }] = score->GetScoreDef()->GetMidiBpm();
+        // The tempo the score starts at, before its first bar (MuseNote RC182: a bare <sound tempo> is judged by it),
+        // read as every tempo is (MuseNote RC191)
+        m_tempoPlaces[{ -1, 0.0 }] = Tempo::PlaysAt(score->GetScoreDef(), score->GetScoreDef());
     }
 
     pugi::xpath_node_set partListChildren = root.select_nodes("/score-partwise/part-list/*");
@@ -3414,10 +3415,9 @@ void MusicXmlInput::ReadMusicXmlDirection(
         m_controlElements.push_back({ measure, tempo });
         m_tempoStack.push_back(tempo);
         // The tempo it plays at (its sound's, else its metronome mark's), which a bare <sound tempo> after it is
-        // judged by (MuseNote RC182)
-        if (tempo->HasMidiBpm() || tempo->HasMm()) {
-            m_tempoPlaces[{ m_measureCounts.at(measure), timeStamp }]
-                = tempo->HasMidiBpm() ? tempo->GetMidiBpm() : Tempo::CalcTempo(tempo);
+        // judged by (MuseNote RC182), read as every tempo is (MuseNote RC191)
+        if (const double given = Tempo::PlaysAt(tempo, tempo); given > 0) {
+            m_tempoPlaces[{ m_measureCounts.at(measure), timeStamp }] = given;
         }
     }
 

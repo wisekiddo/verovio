@@ -404,14 +404,11 @@ void Doc::CalculateTimemap()
 
     double tempo = MIDI_TEMPO;
 
-    // Set tempo
+    // Set tempo (the score's own, as every tempo is read: MuseNote RC191)
     ScoreDef *scoreDef = this->GetFirstVisibleScore()->GetScoreDef();
     assert(scoreDef);
-    if (scoreDef->HasMidiBpm()) {
-        tempo = scoreDef->GetMidiBpm();
-    }
-    else if (scoreDef->HasMm()) {
-        tempo = Tempo::CalcTempo(scoreDef);
+    if (const double given = Tempo::PlaysAt(scoreDef, scoreDef); given > 0) {
+        tempo = given;
     }
 
     // We first calculate the maximum duration of each measure
@@ -452,16 +449,11 @@ void Doc::ExportMIDI(smf::MidiFile *midiFile, std::map<std::string, int> *notePi
     double tempo = MIDI_TEMPO;
     std::set<int> tempoEventTicks; // track the ticks of added tempo events
 
-    // set MIDI tempo
+    // set MIDI tempo (the score's own, as every tempo is read: MuseNote RC191)
     ScoreDef *scoreDef = this->GetFirstVisibleScore()->GetScoreDef();
     assert(scoreDef);
-    if (scoreDef->HasMidiBpm()) {
-        tempo = scoreDef->GetMidiBpm();
-        tempoEventTicks.insert(0);
-        midiFile->addTempo(0, 0, tempo);
-    }
-    else if (scoreDef->HasMm()) {
-        tempo = Tempo::CalcTempo(scoreDef);
+    if (const double given = Tempo::PlaysAt(scoreDef, scoreDef); given > 0) {
+        tempo = given;
         tempoEventTicks.insert(0);
         midiFile->addTempo(0, 0, tempo);
     }

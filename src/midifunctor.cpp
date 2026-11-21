@@ -295,11 +295,9 @@ FunctorCode InitMaxMeasureDurationFunctor::VisitMeasureEnd(Measure *measure)
 
 FunctorCode InitMaxMeasureDurationFunctor::VisitScoreDef(ScoreDef *scoreDef)
 {
-    if (scoreDef->HasMidiBpm()) {
-        m_currentTempo = scoreDef->GetMidiBpm();
-    }
-    else if (scoreDef->HasMm()) {
-        m_currentTempo = Tempo::CalcTempo(scoreDef);
+    // (as every tempo is read: MuseNote RC191)
+    if (const double given = Tempo::PlaysAt(scoreDef, scoreDef); given > 0) {
+        m_currentTempo = given;
     }
 
     return FUNCTOR_CONTINUE;
@@ -307,11 +305,8 @@ FunctorCode InitMaxMeasureDurationFunctor::VisitScoreDef(ScoreDef *scoreDef)
 
 FunctorCode InitMaxMeasureDurationFunctor::VisitTempo(Tempo *tempo)
 {
-    if (tempo->HasMidiBpm()) {
-        m_currentTempo = tempo->GetMidiBpm();
-    }
-    else if (tempo->HasMm()) {
-        m_currentTempo = Tempo::CalcTempo(tempo);
+    if (const double given = Tempo::PlaysAt(tempo, tempo); given > 0) {
+        m_currentTempo = given;
     }
 
     return FUNCTOR_CONTINUE;

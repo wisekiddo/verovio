@@ -105,6 +105,14 @@ public:
      */
     static double CalcTempo(const AttMmTempo *attMmTempo);
 
+    /**
+     * The tempo an element (a tempo, a score definition) gives, in quarter notes a minute: its @midi.bpm, else its
+     * @midi.mspb (microseconds a quarter), else its @mm in its unit and dots; 0 when it gives none. Every reader of a
+     * tempo takes it from here (MuseNote RC191: five places worked it out, each its own way, and none read
+     * @midi.mspb).
+     */
+    static double PlaysAt(const AttMidiTempo *midiTempo, const AttMmTempo *mmTempo);
+
 private:
     //
 public:
