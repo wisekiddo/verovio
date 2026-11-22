@@ -2989,6 +2989,50 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 144. The SVG's boxes of text, as upstream writes them now (tb.61)
+
+MuseNote plan V3_2_0_90 (root cause RC197, finding W174). Upstream, cherry-picked: 90fc4d036 (#4565, develop, not yet
+released), on ours: the syllable ink bounds of a09acec80 (#4405, not taken), which it reads. With `svgBoundingBoxes` on,
+`SvgDeviceContext::DrawSvgBoundingBox` wrote a text's box group inside its `<tspan>`, where SVG allows no `<g>`; gave a
+lyric syllable an empty box (`View::DrawSyl` turns its vertical extent off, lyric lines being spaced by the staff
+alignment); copied an element's `<title>` (`@label`) into its box group; and looked for a floating element's content
+box on the element, not on its current positioner.
+
+- **The boxes** (90fc4d036): `StartBoundingBoxGraphic` writes a text's box group after its `<text>`, in the element that
+  holds it, and no `<title>` in a box group; `AddChild` passes over those groups, so what is drawn after a text keeps its
+  order; a syllable's box and its text's take their height from the ink of the text; a floating element's content box
+  (`svgContentBoundingBoxes`) is its current positioner's.
+- **The ink bounds** (ours, from a09acec80): `Syl` keeps `m_drawingTextInkTop`, `m_drawingTextInkBottom` and
+  `m_hasDrawingTextInkBounds`, cleared by `Syl::Reset`; `View::DrawSyl` stores them from the text's extent before it
+  draws it.
+- **What it changes.** 3,217 songs' SVG and nothing else: no MEI, MIDI, timemap, pitch map or id. After MuseNote's
+  patcher the page drawn is the same but for what is not drawn (box groups holding a `<title>`, which the patcher left
+  in 189 songs' pages until now, and emptied elements written self-closing). Every lyric syllable and its text get a box
+  (819,620 each, in 2,664 songs): MuseNote's taps read note, rest and bar boxes only and do not change, but in 5 songs one
+  bar's tap box, its content's outline already (MuseNote W175), grows by its lyrics. The SVG grows 7.4 %. What it opens
+  for MuseNote's later releases (a lyric followed while it plays, a word tapped) is in MuseNote plan V3_2_0_90.
+
+**Cases**: `test/native/test_tb61_svg_text_boxes_engine.cpp` in MuseNote's `corelib/verovio` (4 cases): a text's box
+group is written after its `<text>`, none inside a `<tspan>`, and a note's box is as before; a lyric syllable's box holds
+the ink of its text, its baseline within; an element's `<title>` is in its own group, once, and in no box group; with
+content boxes a direction has its content box, none without the option. The 4 fail on tb.60. Each part undone fails its
+own: the group's place, the title, the syllable's box, the ink bounds stored, the content box's positioner. And V3_2_0_84's
+cases read a syllable's drawn rects only (`connectorsOf`: its whole group, its box groups left out).
+
+**Upstream status**: upstream's own (90fc4d036, develop). The ink bounds are a part of upstream's a09acec80; nothing is
+offered.
+
+**Gate of tb.61** (patch 144, MuseNote plan V3_2_0_90). Native: the suite, 528 cases (18,558 assertions), and under ASan,
+integer-divide-by-zero and libc++'s checks 527 (the RC106 arena case is left out of that build), no finding;
+`tool/log_format_audit.py`: 301 engine sources, 0 calls. A Debug engine (asserts on) over every input: 3,612, all
+through, and through the frozen readers the 3,392 MusicXML and ABC inputs, all through. Parity against tb.60: 22,961
+outputs, 3,217 differ, all SVG, as declared; seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612).
+MuseNote's patcher and box parser over the 3,217: the page drawn the same (3,015) or without only what is not drawn
+(202), the taps' boxes the same but W175's 5 bars. The locator gate: 0 failures (every generated id of 501,777 MusicXML
+notes kept). MuseSync's 24 starters: the same. `bar_times.py`: no song breaks a rule, as tb.60. MuseNote's export gate
+in every format: exit 0, no song-aspect worse. The frozen readers' whole MEI: the same as tb.60's for the 3,089 songs,
+the 80 of 3.0.1 and the 194 ABC files.
+
 ### 143. A rest marked measure="yes" is a whole-bar rest only where its ticks fill its bar (tb.60)
 
 MuseNote plan V3_2_0_89 (root cause RC196, finding W123). Ours. Patch 70 made a rest with no `<type>` a whole-bar rest
@@ -5269,6 +5313,10 @@ changes the tempo); a user's file whose bare `<sound>` changes it reads its ids 
 conflict kept ours, with ours on them: the Humdrum export writes a syllable joined by a space with `&#160;`. They
 move no generated id of MuseNote's songs or MuseSync's (no object is added); 46 elisions in 11 of MuseNote's songs
 are drawn with the space their files give.
+
+**Taken at tb.61 (2026-11-22, MuseNote plan V3_2_0_90; patch 144):** 90fc4d036 (#4565, develop, not yet released),
+with ours under it, the syllable ink bounds of a09acec80 (#4405, otherwise not taken). It moves no id: the songs' SVG
+boxes change, and the page MuseNote draws does not.
 
 ## Rules for this branch
 
