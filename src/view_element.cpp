@@ -1856,6 +1856,14 @@ void View::DrawSyl(DeviceContext *dc, LayerElement *element, Layer *layer, Staff
 
     this->CalcOffset(dc, x, y);
 
+    syl->ResetDrawingTextInkBounds();
+    const std::u32string sylText = syl->GetText();
+    if (!sylText.empty()) {
+        TextExtend inkExtent;
+        dc->GetTextExtent(sylText, &inkExtent, false);
+        syl->SetDrawingTextInkBounds(y + inkExtent.m_ascent, y - inkExtent.m_descent);
+    }
+
     TextDrawingParams params;
     params.m_x = x;
     params.m_y = y;

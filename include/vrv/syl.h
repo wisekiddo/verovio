@@ -89,6 +89,18 @@ public:
     int GetDrawingWidth() const;
     int GetDrawingHeight() const;
 
+    /** Store and retrieve the actual glyph-ink bounds calculated while drawing the syllable text. */
+    void SetDrawingTextInkBounds(int top, int bottom)
+    {
+        m_drawingTextInkTop = top;
+        m_drawingTextInkBottom = bottom;
+        m_hasDrawingTextInkBounds = true;
+    }
+    void ResetDrawingTextInkBounds() { m_hasDrawingTextInkBounds = false; }
+    bool HasDrawingTextInkBounds() const { return m_hasDrawingTextInkBounds; }
+    int GetDrawingTextInkTop() const { return m_drawingTextInkTop; }
+    int GetDrawingTextInkBottom() const { return m_drawingTextInkBottom; }
+
     /**
      * Return true when the syl has no textual content.
      */
@@ -138,6 +150,9 @@ public:
     Syl *m_nextWordSyl;
 
 private:
+    int m_drawingTextInkTop;
+    int m_drawingTextInkBottom;
+    bool m_hasDrawingTextInkBounds;
 };
 
 } // namespace vrv
