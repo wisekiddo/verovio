@@ -61,6 +61,7 @@ InitOnsetOffsetFunctor::InitOnsetOffsetFunctor(Doc *doc) : DocFunctor(doc)
     m_currentRealTimeSeconds = 0.0;
     m_notationType = NOTATIONTYPE_cmn;
     m_currentTempo = MIDI_TEMPO;
+    m_currentMeasure = NULL;
     m_meterParams.equivalence = durationEq.at(m_doc->GetOptions()->m_durationEquivalence.GetValue());
 }
 
@@ -69,7 +70,9 @@ FunctorCode InitOnsetOffsetFunctor::VisitChordEnd(Chord *chord)
     LayerElement *element = chord->ThisOrSameasLink();
 
     Fraction incrementScoreTime = element->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
-    double realTimeIncrementSeconds = incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+    // (each piece of the bar at its tempo: MuseNote RC189)
+    const double realTimeIncrementSeconds
+        = this->RealTimeSecondsAt(m_currentScoreTime + incrementScoreTime) - m_currentRealTimeSeconds;
 
     m_currentScoreTime = m_currentScoreTime + incrementScoreTime;
     m_currentRealTimeSeconds += realTimeIncrementSeconds;
@@ -109,9 +112,10 @@ FunctorCode InitOnsetOffsetFunctor::VisitLayerElement(LayerElement *layerElement
         else {
             incrementScoreTime = element->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
         }
-        // For rests to be possibly added to the timemap
+        // For rests to be possibly added to the timemap (each piece of the bar at its tempo: MuseNote RC189)
         if (rest) {
-            double realTimeIncrementSeconds = incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+            const double realTimeIncrementSeconds
+                = this->RealTimeSecondsAt(m_currentScoreTime + incrementScoreTime) - m_currentRealTimeSeconds;
             rest->SetScoreTimeOnset(m_currentScoreTime);
             rest->SetRealTimeOnsetSeconds(m_currentRealTimeSeconds);
             rest->SetScoreTimeOffset(m_currentScoreTime + incrementScoreTime);
@@ -119,7 +123,7 @@ FunctorCode InitOnsetOffsetFunctor::VisitLayerElement(LayerElement *layerElement
         }
         if (!tabGrp) {
             m_currentScoreTime = m_currentScoreTime + incrementScoreTime;
-            m_currentRealTimeSeconds += incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+            m_currentRealTimeSeconds = this->RealTimeSecondsAt(m_currentScoreTime);
         }
     }
     else if (element->Is(NOTE)) {
@@ -147,7 +151,9 @@ FunctorCode InitOnsetOffsetFunctor::VisitLayerElement(LayerElement *layerElement
         else {
             incrementScoreTime = note->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
         }
-        double realTimeIncrementSeconds = incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+        // (each piece of the bar at its tempo: MuseNote RC189)
+        const double realTimeIncrementSeconds
+            = this->RealTimeSecondsAt(m_currentScoreTime + incrementScoreTime) - m_currentRealTimeSeconds;
 
         // LogDebug("Note Alignment Duration %f - Dur %d - Diatonic Pitch %d - Track %d", GetAlignmentDuration(),
         // note->GetNoteOrChordDur(element), note->GetDiatonicPitch(), *midiTrack);
@@ -175,13 +181,13 @@ FunctorCode InitOnsetOffsetFunctor::VisitLayerElement(LayerElement *layerElement
         incrementScoreTime = rpt->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
         rpt->SetScoreTimeOnset(m_currentScoreTime);
         m_currentScoreTime = m_currentScoreTime + incrementScoreTime;
-        m_currentRealTimeSeconds += incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+        m_currentRealTimeSeconds = this->RealTimeSecondsAt(m_currentScoreTime);
     }
     else if (layerElement->Is({ BEAM, LIGATURE, FTREM, TUPLET }) && layerElement->HasSameasLink()) {
         incrementScoreTime
             = layerElement->GetSameAsContentAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
         m_currentScoreTime = m_currentScoreTime + incrementScoreTime;
-        m_currentRealTimeSeconds += incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+        m_currentRealTimeSeconds = this->RealTimeSecondsAt(m_currentScoreTime);
     }
     else if (layerElement->Is(MENSUR)) {
         this->m_meterParams.mensur = vrv_cast<Mensur *>(layerElement);
@@ -206,8 +212,15 @@ FunctorCode InitOnsetOffsetFunctor::VisitLayerElement(LayerElement *layerElement
 FunctorCode InitOnsetOffsetFunctor::VisitMeasure(Measure *measure)
 {
     m_currentTempo = measure->GetCurrentTempo();
+    m_currentMeasure = measure;
 
     return FUNCTOR_CONTINUE;
+}
+
+double InitOnsetOffsetFunctor::RealTimeSecondsAt(const Fraction &scoreTime) const
+{
+    return m_currentMeasure ? m_currentMeasure->GetRealTimeSecondsAt(scoreTime)
+                            : scoreTime.ToDouble() * 60.0 / m_currentTempo;
 }
 
 FunctorCode InitOnsetOffsetFunctor::VisitStaff(Staff *staff)
@@ -229,7 +242,9 @@ FunctorCode InitOnsetOffsetFunctor::VisitTabGrpEnd(TabGrp *tabGrp)
     LayerElement *element = tabGrp->ThisOrSameasLink();
 
     Fraction incrementScoreTime = element->GetAlignmentDuration(m_meterParams, true, m_notationType) * SCORE_TIME_UNIT;
-    double realTimeIncrementSeconds = incrementScoreTime.ToDouble() * 60.0 / m_currentTempo;
+    // (each piece of the bar at its tempo: MuseNote RC189)
+    const double realTimeIncrementSeconds
+        = this->RealTimeSecondsAt(m_currentScoreTime + incrementScoreTime) - m_currentRealTimeSeconds;
 
     m_currentScoreTime = m_currentScoreTime + incrementScoreTime;
     m_currentRealTimeSeconds += realTimeIncrementSeconds;
@@ -248,6 +263,7 @@ InitMaxMeasureDurationFunctor::InitMaxMeasureDurationFunctor() : Functor()
     m_currentTempo = MIDI_TEMPO;
     m_tempoAdjustment = 1.0;
     m_multiRestFactor = 1;
+    m_currentMeasure = NULL;
 }
 
 FunctorCode InitMaxMeasureDurationFunctor::VisitLayerElement(LayerElement *layerElement)
@@ -263,6 +279,11 @@ FunctorCode InitMaxMeasureDurationFunctor::VisitLayerElement(LayerElement *layer
 
 FunctorCode InitMaxMeasureDurationFunctor::VisitMeasure(Measure *measure)
 {
+    // The bar's tempos: the one in effect at its start, then each change in it (MuseNote RC189)
+    m_currentMeasure = measure;
+    measure->ClearTempos();
+    measure->AddTempo(0, this->GetAdjustedTempo());
+
     measure->ClearScoreTimeOnset();
     measure->AddScoreTimeOnset(m_currentScoreTime);
 
@@ -274,13 +295,16 @@ FunctorCode InitMaxMeasureDurationFunctor::VisitMeasure(Measure *measure)
 
 FunctorCode InitMaxMeasureDurationFunctor::VisitMeasureEnd(Measure *measure)
 {
+    // The tempo carried on, the last one met in the bar
     const double tempo = this->GetAdjustedTempo();
     measure->SetCurrentTempo(tempo);
 
-    const Fraction scoreTimeIncrement
-        = measure->m_measureAligner.GetRightAlignment()->GetTime() * m_multiRestFactor * SCORE_TIME_UNIT;
+    // Each piece of the bar at its own tempo (MuseNote RC189: the bar was timed by the last one met in it); a multi-bar
+    // rest's factor times the whole
+    const Fraction barScoreTime = measure->m_measureAligner.GetRightAlignment()->GetTime() * SCORE_TIME_UNIT;
+    const Fraction scoreTimeIncrement = barScoreTime * m_multiRestFactor;
     m_currentScoreTime = m_currentScoreTime + scoreTimeIncrement;
-    m_currentRealTimeSeconds += scoreTimeIncrement.ToDouble() * 60.0 / tempo;
+    m_currentRealTimeSeconds += measure->GetRealTimeSecondsAt(barScoreTime) * m_multiRestFactor;
 
     measure->ClearScoreTimeOffset();
     measure->AddScoreTimeOffset(m_currentScoreTime);
@@ -289,6 +313,7 @@ FunctorCode InitMaxMeasureDurationFunctor::VisitMeasureEnd(Measure *measure)
     measure->AddRealTimeOffsetMilliseconds(m_currentRealTimeSeconds * 1000.0);
 
     m_multiRestFactor = 1;
+    m_currentMeasure = NULL;
 
     return FUNCTOR_CONTINUE;
 }
@@ -307,6 +332,16 @@ FunctorCode InitMaxMeasureDurationFunctor::VisitTempo(Tempo *tempo)
 {
     if (const double given = Tempo::PlaysAt(tempo, tempo); given > 0) {
         m_currentTempo = given;
+        // It plays from where it stands in its bar, by its start's alignment (the layout is done before the timemap);
+        // one with no place there, from the bar's start (MuseNote RC189)
+        if (m_currentMeasure) {
+            Fraction offset = 0;
+            if (tempo->GetStart() && tempo->GetStart()->GetAlignment()) {
+                offset = tempo->GetStart()->GetAlignment()->GetTime() * SCORE_TIME_UNIT;
+                if (offset < 0) offset = 0;
+            }
+            m_currentMeasure->AddTempo(offset, this->GetAdjustedTempo());
+        }
     }
 
     return FUNCTOR_CONTINUE;
@@ -350,6 +385,7 @@ InitTimemapAdjustNotesFunctor::InitTimemapAdjustNotesFunctor() : Functor()
     m_noCue = false;
     m_lastNote = NULL;
     m_currentTempo = MIDI_TEMPO;
+    m_currentMeasure = NULL;
 }
 
 FunctorCode InitTimemapAdjustNotesFunctor::VisitArpeg(Arpeg *arpeg)
@@ -370,7 +406,7 @@ FunctorCode InitTimemapAdjustNotesFunctor::VisitArpeg(Arpeg *arpeg)
     // Defer the notes in playing order
     Fraction shift = 0;
     Fraction startTime = sortedNotes.front()->GetScoreTimeOnset();
-    const Fraction increment = UNACC_GRACENOTE_FRACTION * (int)m_currentTempo;
+    const Fraction increment = UNACC_GRACENOTE_FRACTION * (int)this->TempoAt(startTime);
     for (Note *note : sortedNotes) {
         if (shift != 0) this->SetNoteStartStop(note, startTime + shift);
         shift = shift + increment;
@@ -410,7 +446,7 @@ FunctorCode InitTimemapAdjustNotesFunctor::VisitGraceGrpEnd(GraceGrp *graceGrp)
     // Handling of Nachschlag
     if (!m_graces.empty() && (graceGrp->GetAttach() == graceGrpLog_ATTACH_pre) && !m_accentedGraceNote && m_lastNote) {
         Fraction startTime = m_lastNote->GetScoreTimeOffset();
-        const Fraction graceNoteDur = UNACC_GRACENOTE_FRACTION * (int)m_currentTempo;
+        const Fraction graceNoteDur = UNACC_GRACENOTE_FRACTION * (int)this->TempoAt(startTime);
         const Fraction totalDur = graceNoteDur * (int)m_graces.size();
         startTime = startTime - totalDur;
         startTime = (startTime < 0) ? 0 : startTime;
@@ -435,7 +471,7 @@ FunctorCode InitTimemapAdjustNotesFunctor::VisitLayerEnd(Layer *layer)
     // Process grace notes at the end of the layer - always treat them as "unacc"
     if (!m_graces.empty() && !m_graces.front().notes.empty()) {
         Fraction startTime = m_graces.front().notes.front()->GetScoreTimeOnset();
-        Fraction graceNoteDur = UNACC_GRACENOTE_FRACTION * (int)m_currentTempo;
+        Fraction graceNoteDur = UNACC_GRACENOTE_FRACTION * (int)this->TempoAt(startTime);
         const Fraction totalDur = graceNoteDur * (int)m_graces.size();
         startTime = startTime - totalDur;
         startTime = (startTime < 0) ? 0 : startTime;
@@ -464,8 +500,20 @@ FunctorCode InitTimemapAdjustNotesFunctor::VisitMeasure(Measure *measure)
 {
     // Update the current tempo
     m_currentTempo = measure->GetCurrentTempo();
+    m_currentMeasure = measure;
 
     return FUNCTOR_CONTINUE;
+}
+
+double InitTimemapAdjustNotesFunctor::TempoAt(const Fraction &scoreTime) const
+{
+    return m_currentMeasure ? m_currentMeasure->GetTempoAt(scoreTime) : m_currentTempo;
+}
+
+double InitTimemapAdjustNotesFunctor::RealTimeSecondsAt(const Fraction &scoreTime) const
+{
+    return m_currentMeasure ? m_currentMeasure->GetRealTimeSecondsAt(scoreTime)
+                            : scoreTime.ToDouble() * 60.0 / m_currentTempo;
 }
 
 FunctorCode InitTimemapAdjustNotesFunctor::VisitNote(Note *note)
@@ -527,7 +575,7 @@ void InitTimemapAdjustNotesFunctor::SetGraceNotesFor(Note *refNote)
         graceNoteDur = totalDur / (int)m_graces.size();
     }
     else {
-        graceNoteDur = UNACC_GRACENOTE_FRACTION * (int)m_currentTempo;
+        graceNoteDur = UNACC_GRACENOTE_FRACTION * (int)this->TempoAt(startTime);
         const Fraction totalDur = graceNoteDur * (int)m_graces.size();
         if (startTime >= totalDur) {
             startTime = startTime - totalDur;
@@ -569,11 +617,12 @@ void InitTimemapAdjustNotesFunctor::SetNoteStartStop(Note *note, const Fraction 
     assert(note);
 
     note->SetScoreTimeOnset(startTime);
-    double startRealTimeSeconds = startTime.ToDouble() * 60.0 / m_currentTempo;
+    // (each piece of the bar at its tempo: MuseNote RC189)
+    const double startRealTimeSeconds = this->RealTimeSecondsAt(startTime);
     note->SetRealTimeOnsetSeconds(startRealTimeSeconds);
     if (stopTime != VRV_UNSET) {
         note->SetScoreTimeOffset(stopTime);
-        double stopRealTimeSeconds = stopTime.ToDouble() * 60.0 / m_currentTempo;
+        const double stopRealTimeSeconds = this->RealTimeSecondsAt(stopTime);
         note->SetRealTimeOffsetSeconds(stopRealTimeSeconds);
     }
 }
@@ -803,9 +852,16 @@ FunctorCode GenerateMIDIFunctor::VisitMeasure(const Measure *measure)
     // Here we need to update the m_totalTime from the starting time of the measure.
     m_totalTime = measure->GetScoreTimeOnset().ToDouble();
 
-    if ((m_totalTime == 0.0) || (measure->GetCurrentTempo() != m_currentTempo)) {
-        m_currentTempo = measure->GetCurrentTempo();
-        const int tick = m_totalTime * m_midiFile->getTPQ();
+    // Each of the bar's tempos at its own tick: the one at its start, then each change in it, so the MIDI plays what the
+    // timemap times (MuseNote RC189: the bar's last tempo was written at its first tick). The score's first tempo is
+    // its first bar's at tick 0.
+    std::vector<std::pair<Fraction, double>> tempos = measure->GetTempos();
+    if (tempos.empty()) tempos.push_back({ 0, measure->GetCurrentTempo() });
+    for (const auto &[offset, tempo] : tempos) {
+        const bool scoreStart = (m_totalTime == 0.0) && (offset == 0);
+        if (!scoreStart && (tempo == m_currentTempo)) continue;
+        m_currentTempo = tempo;
+        const int tick = (m_totalTime + offset.ToDouble()) * m_midiFile->getTPQ();
         // Check if there was already a tempo event added for the given tick
         if (m_tempoEventTicks.insert(tick).second) {
             m_midiFile->addTempo(0, tick, m_currentTempo);
@@ -1178,6 +1234,7 @@ GenerateTimemapFunctor::GenerateTimemapFunctor(Timemap *timemap) : ConstFunctor(
     m_currentTempo = MIDI_TEMPO;
     m_noCue = false;
     m_timemap = timemap;
+    m_currentMeasure = NULL;
 }
 
 FunctorCode GenerateTimemapFunctor::VisitLayerElement(const LayerElement *layerElement)
@@ -1198,8 +1255,21 @@ FunctorCode GenerateTimemapFunctor::VisitMeasure(const Measure *measure)
     m_currentScoreTime = measure->GetScoreTimeOnset();
     m_currentRealTimeMilliseconds = measure->GetRealTimeOnsetMilliseconds();
     m_currentTempo = measure->GetCurrentTempo();
+    m_currentMeasure = measure;
 
     this->AddTimemapEntry(measure);
+
+    // Each change of tempo in the bar has its own place in the timemap, where no note may start (MuseNote RC189); a
+    // mark that gives the tempo already playing changes nothing
+    double before = 0.0;
+    for (const auto &[offset, tempo] : measure->GetTempos()) {
+        const bool same = (tempo == before);
+        before = tempo;
+        if ((offset == 0) || same) continue;
+        TimemapEntry &entry = m_timemap->GetEntry(m_currentScoreTime + offset);
+        entry.tstamp = round(m_currentRealTimeMilliseconds + measure->GetRealTimeSecondsAt(offset) * 1000.0);
+        entry.tempo = tempo;
+    }
 
     return FUNCTOR_CONTINUE;
 }
@@ -1275,8 +1345,9 @@ void GenerateTimemapFunctor::AddTimemapEntry(const Object *object)
         if (!isRest) startEntry.notesOn.push_back(object->GetID());
         if (isRest) startEntry.restsOn.push_back(object->GetID());
 
-        // Also add the tempo
-        startEntry.tempo = m_currentTempo;
+        // Also add the tempo, the one at its onset in its bar (MuseNote RC189: the bar's last one)
+        startEntry.tempo
+            = m_currentMeasure ? m_currentMeasure->GetTempoAt(interface->GetScoreTimeOnset()) : m_currentTempo;
 
         /*********** end values ***********/
 

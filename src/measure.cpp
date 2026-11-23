@@ -160,6 +160,7 @@ void Measure::Reset()
     m_scoreTimeOffset.clear();
     m_realTimeOffsetMilliseconds.clear();
     m_currentTempo = MIDI_TEMPO;
+    m_tempos.clear();
 }
 
 bool Measure::IsSupportedChild(ClassId classId)
@@ -519,15 +520,51 @@ const Staff *Measure::GetLastStaff(bool excludeOStaves) const
 int Measure::EnclosesTime(int time) const
 {
     int repeat = 1;
+    // (each piece of the bar at its own tempo: MuseNote RC189)
     double timeDuration
-        = m_measureAligner.GetRightAlignment()->GetTime().ToDouble() * SCORE_TIME_UNIT * 60.0 / m_currentTempo * 1000.0
-        + 0.5;
+        = this->GetRealTimeSecondsAt(m_measureAligner.GetRightAlignment()->GetTime() * SCORE_TIME_UNIT) * 1000.0 + 0.5;
     std::vector<double>::const_iterator iter;
     for (iter = m_realTimeOnsetMilliseconds.begin(); iter != m_realTimeOnsetMilliseconds.end(); ++iter) {
         if ((time >= *iter) && (time <= *iter + timeDuration)) return repeat;
         repeat++;
     }
     return VRV_UNSET;
+}
+
+void Measure::AddTempo(const Fraction &offset, double tempo)
+{
+    auto at = std::find_if(
+        m_tempos.begin(), m_tempos.end(), [&offset](const std::pair<Fraction, double> &t) { return !(t.first < offset); });
+    if ((at != m_tempos.end()) && (at->first == offset)) {
+        at->second = tempo;
+    }
+    else {
+        m_tempos.insert(at, { offset, tempo });
+    }
+}
+
+double Measure::GetTempoAt(const Fraction &offset) const
+{
+    double tempo = m_currentTempo;
+    for (const auto &[from, value] : m_tempos) {
+        if (offset < from) break;
+        tempo = value;
+    }
+    return tempo;
+}
+
+double Measure::GetRealTimeSecondsAt(const Fraction &offset) const
+{
+    if (m_tempos.empty()) return offset.ToDouble() * 60.0 / m_currentTempo;
+    double seconds = 0.0;
+    for (size_t i = 0; i < m_tempos.size(); ++i) {
+        const Fraction &from = m_tempos.at(i).first;
+        if (!(from < offset)) break;
+        const bool nextBefore = (i + 1 < m_tempos.size()) && (m_tempos.at(i + 1).first < offset);
+        const Fraction to = nextBefore ? m_tempos.at(i + 1).first : offset;
+        seconds += (to - from).ToDouble() * 60.0 / m_tempos.at(i).second;
+    }
+    return seconds;
 }
 
 Fraction Measure::GetScoreTimeOnset(int repeat) const

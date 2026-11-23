@@ -353,6 +353,21 @@ public:
     ///@}
 
     /**
+     * The tempos the bar plays at (MuseNote RC189): the one in effect at its start, and each change in it, by its score
+     * time from the bar's start (in quarter notes, as the score times are), adjusted. Of two at one time the one given
+     * last is kept. Set by InitMaxMeasureDurationFunctor.
+     */
+    ///@{
+    void ClearTempos() { m_tempos.clear(); }
+    void AddTempo(const Fraction &offset, double tempo);
+    const std::vector<std::pair<Fraction, double>> &GetTempos() const { return m_tempos; }
+    /** The tempo at [offset]: the last one that starts at or before it (the current tempo where the bar keeps none) */
+    double GetTempoAt(const Fraction &offset) const;
+    /** The seconds from the bar's start to [offset], each piece at its own tempo */
+    double GetRealTimeSecondsAt(const Fraction &offset) const;
+    ///@}
+
+    /**
      * Return vector with tie endpoints for ties that start and end in current measure
      */
     std::vector<std::pair<LayerElement *, LayerElement *>> GetInternalTieEndpoints();
@@ -462,6 +477,8 @@ private:
     std::vector<Fraction> m_scoreTimeOffset;
     std::vector<double> m_realTimeOffsetMilliseconds;
     double m_currentTempo;
+    // The bar's tempos by their score time in it (MuseNote RC189)
+    std::vector<std::pair<Fraction, double>> m_tempos;
 
     std::map<int, BarlineRenditionPair> m_invisibleStaffBarlines;
 };

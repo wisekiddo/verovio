@@ -76,6 +76,11 @@ private:
     data_NOTATIONTYPE m_notationType;
     // The current tempo
     double m_currentTempo;
+    // The measure being timed, whose tempos time its elements (MuseNote RC189)
+    const Measure *m_currentMeasure;
+
+    // The seconds from the measure's start to [scoreTime], each piece at its tempo (MuseNote RC189)
+    double RealTimeSecondsAt(const Fraction &scoreTime) const;
 };
 
 //----------------------------------------------------------------------------
@@ -138,6 +143,8 @@ private:
     double m_tempoAdjustment;
     // The factor for multibar rests
     int m_multiRestFactor;
+    // The measure being timed, which keeps its tempos (MuseNote RC189)
+    Measure *m_currentMeasure;
 };
 
 //----------------------------------------------------------------------------
@@ -255,6 +262,12 @@ private:
     double m_currentTempo;
     // The last (non grace) note
     Note *m_lastNote;
+    // The measure being adjusted, whose tempos time its notes (MuseNote RC189)
+    const Measure *m_currentMeasure;
+
+    // The tempo at [scoreTime] in the measure, and the seconds from its start to it (MuseNote RC189)
+    double TempoAt(const Fraction &scoreTime) const;
+    double RealTimeSecondsAt(const Fraction &scoreTime) const;
 };
 
 //----------------------------------------------------------------------------
@@ -537,6 +550,8 @@ private:
     bool m_noCue;
     // The timemap
     Timemap *m_timemap;
+    // The measure whose elements are added, which keeps its tempos (MuseNote RC189)
+    const Measure *m_currentMeasure;
 };
 
 //----------------------------------------------------------------------------

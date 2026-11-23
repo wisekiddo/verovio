@@ -449,13 +449,13 @@ void Doc::ExportMIDI(smf::MidiFile *midiFile, std::map<std::string, int> *notePi
     double tempo = MIDI_TEMPO;
     std::set<int> tempoEventTicks; // track the ticks of added tempo events
 
-    // set MIDI tempo (the score's own, as every tempo is read: MuseNote RC191)
+    // set MIDI tempo (the score's own, as every tempo is read: MuseNote RC191). The tempo event at tick 0 is written
+    // by the first bar, which starts with the score's tempo or one of its own (MuseNote RC189: written here first, it
+    // kept that bar's own tempo out of the MIDI)
     ScoreDef *scoreDef = this->GetFirstVisibleScore()->GetScoreDef();
     assert(scoreDef);
     if (const double given = Tempo::PlaysAt(scoreDef, scoreDef); given > 0) {
         tempo = given;
-        tempoEventTicks.insert(0);
-        midiFile->addTempo(0, 0, tempo);
     }
 
     // set MIDI tuning
