@@ -2989,6 +2989,54 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 147. The lyrics of two voices on one line, and lyrics placed above (tb.64)
+
+MuseNote plan V3_2_0_94 (root causes RC205 and RC206, findings W183 and W184). Ours, on the idea of upstream's
+e5f1b2456 (#4493, 6.4.0), whose code stands on 6.3.0's lyric elements (#4405, not taken: 22 hunks on 6.2.0), with its
+reader line.
+
+- **Two voices, one line (RC205).** The engine draws every voice's verse of one number on one line (`View::GetSylYRel`
+  goes by the verse number), but `Page::AdjustSylSpacingByVerse` spaced each voice's words alone (patch 85's
+  `RecordSylSpacingFunctor`, by staff, layer and verse), so one voice's word ran into the other voice's next. A line of
+  verses is now a staff's side and verse number, every voice of the staff together: `RecordSylSpacingFunctor` records
+  and replays it, and `AdjustSylSpacingFunctor` spaces a measure's verses at its end, in the order of their alignments
+  (`AdjustVerse`, the body `VisitVerse` had). Two verses of different voices at one alignment are not spaced against
+  each other: the one reaching furthest right is the previous, and the others move with it (spaced, they asked the
+  measure for room from their alignment to itself, which widened it and left them as they were). Each voice keeps its
+  own label abbreviation, shown on its first verse of a system.
+- **Placed above (RC206).** The MusicXML reader left a lyric's `placement` unread (6.2.0's line was commented out); it
+  is read into `verse@place` (upstream's line), which the engine already draws above the staff. The frozen 6.2.0
+  reader is not touched.
+- Left out of #4493: one line shared by a staff's lyrics below and the next staff's above (`ShareLyricLines`). No song
+  of MuseNote's has lyrics on two staves of a part, and such lyrics keep their own room, as before.
+- **What it changes.** A staff with one verse number in two voices, and a verse marked above: in MuseNote's songs the
+  SVG of 16 (15 with two voices' lyrics, and Paperback Writer's verse 5 above the staff) and Paperback Writer's MEI
+  (`verse@place`). No MIDI, timemap, pitch map or id. A staff with one voice's lyrics is spaced as before, in the same
+  order.
+
+**Cases**: `test/native/test_tb64_lyric_lines_engine.cpp` in MuseNote's `corelib/verovio`, 5 cases: two voices' words
+word after word drawn apart, and in the order sung whichever voice the page draws first; two voices' words at one time
+keep their note's place and the measure its width; a lyric placed above is read so and drawn above the staff, one with
+no placement below, as before; each voice's label abbreviation on its first verse of a system. On tb.63 3 of the 5
+fail; the cases of one time and of the labels hold, as they must. Each part undone fails its own case: the line keyed by
+voice again, no order at the measure's end, no rule for one alignment, no reader line, the labels shared.
+
+**Gate of tb.64** (patch 147, MuseNote plan V3_2_0_94, on tb.63). Native: the suite, 548 cases (18,832 assertions), and
+under ASan, integer-divide-by-zero and libc++'s checks 547, no finding; `tool/log_format_audit.py`: 301 engine sources,
+0 calls. A Debug engine (asserts on) over every input: 3,612, all through, and through the frozen readers the 3,392
+MusicXML and ABC inputs, all through. Parity against tb.63: 22,961 outputs, 19 differ, as declared: the 16 songs' SVG
+and Paperback Writer's MEI (read, seeded, read back); seeded ids 3,218 of 3,218; every input reads back from its MEI
+(3,612). The locator gate: 0 failures. MuseSync's 24 starters: the same. `bar_times.py`: no song breaks a rule.
+MuseNote's export gate in every format: MusicXML and ABC as before; the Humdrum export cannot hold the new
+`verse@place` (Paperback Writer), Humdrum keeping no side for a lyric (MuseNote RC212, accepted by its owner
+2026-11-23). The
+frozen readers' whole MEI: the same as tb.63's for the 3,089 songs, the 80 of 3.0.1 and the 194 ABC files. On
+MuseNote's 12 layouts and 3 ways of drawing a page, over its 2,676 songs with words: no syllable of one voice over
+another's but in the editor's narrowest tile, where 4 places of 13 remain, an older fault of the narrowest sizes
+(MuseNote W187, RC211). MuseNote's taps (its V3_2_0_92 probe, 116 songs): none right on tb.63 is wrong on tb.64.
+
+**Upstream status**: not offered.
+
 ### 146. Every copy the order of play makes has its own id (tb.63)
 
 MuseNote plan V3_2_0_93 (root cause RC204, finding W85). Ours. Where an MEI order names a part again from inside an
