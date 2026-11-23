@@ -2989,6 +2989,41 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 146. Every copy the order of play makes has its own id (tb.63)
+
+MuseNote plan V3_2_0_93 (root cause RC204, finding W85). Ours. Where an MEI order names a part again from inside an
+order being played, `ExpansionMap::Expand` makes a new container for that pass, a section, ending, `lem` or `rdg` as
+the part's own is. It named it by `GeneratePredictableIDs`, `<id>-rend<N>` with N one past the copies of `<id>` the
+expansion map records, and never recorded it there, as it records each copy of a part
+(`AddExpandedIDToExpansionMap`). Every new container of a part so took the same name: an order four levels deep made
+30 sections `R-rend2`, ten levels deep 2,046; and none led back to the container as written
+(`GetNotatedIdForElement`, `GetExpansionIdsForElement`).
+
+- **Each new container is recorded** as a copy of the container it repeats, as each copy of a part is: the next one is
+  named after it (`R-rend2`, `R-rend3` … in the order they are made), and the map leads it back to the one written.
+- **What it changes.** Only a document whose order makes such a container: its containers' ids, and what the map
+  answers for them. What is played is the same. No input of the corpus makes one (3,609 loaded with their order
+  written out), so no output of it changes.
+
+**Cases**: `test/native/test_tb63_container_ids_engine.cpp` in MuseNote's `corelib/verovio`, 4 cases: orders 1, 4 and
+10 levels deep hold each id once, their containers named `R-rend2` onwards as made, each leading back to `R`, and play
+as before (2 to the power of the levels, a whole note each); an ending named again three times, `E`, `E-rend2`,
+`E-rend3`; a plain repeat named as before; the document for playback (without `expandAlways`) the same. On tb.62 (the
+recording undone) 3 of the 4 fail; the plain repeat passes, as it must.
+
+**Gate of tb.63** (patch 146, MuseNote plan V3_2_0_93, on tb.62). Native: the suite, 543 cases (18,788 assertions),
+and under ASan, integer-divide-by-zero and libc++'s checks 542, no finding, but one timing case over its bound by the
+Mac's load (MuseNote W90, RC100: the same work on tb.62, 0.9 to 1.5 s alone); `tool/log_format_audit.py`: 301 engine
+sources, 0 calls. A Debug engine (asserts on) over every input: 3,612, all through, and through the frozen readers the
+3,392 MusicXML and ABC inputs, all through. Every input loaded with its order written out (3,609): no container made,
+no id held twice, the 4,111 copies of sections and endings in 2,052 inputs named the same as on tb.62. Parity against
+tb.62: 22,961 outputs, none differs; seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612). The
+locator gate: 0 failures. MuseSync's 24 starters: the same. `bar_times.py`: no song breaks a rule. MuseNote's export
+gate in every format: exit 0, no song-aspect worse. The frozen readers' whole MEI: the same as tb.62's for the 3,089
+songs, the 80 of 3.0.1 and the 194 ABC files.
+
+**Upstream status**: not offered. Upstream's develop (fb66a3829, 2026-11-20) is the same, and has no issue for it.
+
 ### 145. A tempo change plays from where it stands in its bar (tb.62)
 
 MuseNote plan V3_2_0_91 (root cause RC189, finding W167). Ours. The engine gave a bar one tempo, the last one met in it,
