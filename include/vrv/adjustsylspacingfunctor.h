@@ -10,7 +10,10 @@
 
 #include "functor.h"
 
+#include <map>
+#include <set>
 #include <tuple>
+#include <vector>
 
 namespace vrv {
 
@@ -20,6 +23,8 @@ namespace vrv {
 
 /**
  * This class adjusts the spacing of the syl processing verse by verse.
+ * A line of verses holds every voice of a staff, spaced from left to right (MuseNote RC205, the idea of upstream
+ * e5f1b2456).
  */
 class AdjustSylSpacingFunctor : public DocFunctor {
 public:
@@ -50,7 +55,12 @@ public:
 protected:
     //
 private:
-    //
+    /** Adjusts the spacing between the previous verse and this one */
+    void AdjustVerse(Verse *verse);
+
+    /** Moves the previous verse back into the free space, and the verses at its alignment with it */
+    int AdjustPreviousVersePosition(int &overlap);
+
 public:
     //
 private:
@@ -58,12 +68,18 @@ private:
     ArrayOfAdjustmentTuples m_overlappingSyl;
     // The previous verse
     Verse *m_previousVerse;
+    // The verses of other voices at the previous verse's alignment, moved with it
+    std::vector<Verse *> m_simultaneousVerses;
     // The previous syl
     Syl *m_lastSyl;
     // The previous measure
     Measure *m_previousMeasure;
-    // The current LabelAbbr
-    LabelAbbr *m_currentLabelAbbr;
+    // The current LabelAbbr of each voice, by layer @n
+    std::map<int, LabelAbbr *> m_currentLabelAbbrs;
+    // The voices, by layer @n, with a verse already in the current system
+    std::set<int> m_systemLayers;
+    // The verses of the current measure, spaced at its end in the order of their alignments
+    std::vector<Verse *> m_measureVerses;
     // Amount of free space
     int m_freeSpace;
     // The staff size
@@ -75,11 +91,11 @@ private:
 //----------------------------------------------------------------------------
 
 /**
- * This class records, in one walk of a page, what AdjustSylSpacingFunctor meets in the walk of each verse: the
- * systems and the ends of the measures, which every verse meets, the staves of each number, and the verses of each
- * staff, layer and verse number; each in the order of the page. Replay gives a verse's own to the functor in that
- * order. (A filtered walk of the whole page for each verse: as many walks as verses, and a Humdrum token of 3,000
- * words took seconds to lay out. MuseNote RC92)
+ * This class records, in one walk of a page, what AdjustSylSpacingFunctor meets in the walk of each line of verses:
+ * the systems and the ends of the measures, which every line meets, the staves of each number, and the verses of each
+ * line, a staff's side (above or below) and verse number, every voice of the staff together (MuseNote RC205); each in
+ * the order of the page. Replay gives a line's own to the functor in that order. (A filtered walk of the whole page
+ * for each verse: as many walks as verses, and a Humdrum token of 3,000 words took seconds to lay out. MuseNote RC92)
  */
 class RecordSylSpacingFunctor : public Functor {
 public:
@@ -96,14 +112,19 @@ public:
      */
     bool ImplementsEndInterface() const override { return true; }
 
-    /** Gives [functor] what the walk of verse [verseN] of layer [layerN] of the staves numbered [staffN] meets */
-    void Replay(int staffN, int layerN, int verseN, AdjustSylSpacingFunctor &functor) const;
+    /** A line of verses: the staff @n, whether the verses are above it, the verse @n */
+    using Line = std::tuple<int, bool, int>;
+
+    /** The lines met, in the order of their keys */
+    std::vector<Line> GetLines() const;
+
+    /** Gives [functor] what the walk of the verses of [line] meets */
+    void Replay(const Line &line, AdjustSylSpacingFunctor &functor) const;
 
     /*
      * Functor interface
      */
     ///@{
-    FunctorCode VisitLayer(Layer *layer) override;
     FunctorCode VisitMeasureEnd(Measure *measure) override;
     FunctorCode VisitStaff(Staff *staff) override;
     FunctorCode VisitSystem(System *system) override;
@@ -120,12 +141,11 @@ private:
     Met<System> m_systemEnds;
     // The staves, by their number
     std::map<int, Met<Staff>> m_staves;
-    // The verses, by staff, layer and verse number
-    std::map<std::tuple<int, int, int>, Met<Verse>> m_verses;
-    // The place in the walk, and the numbers of the staff and the layer it is in
+    // The verses, by line
+    std::map<Line, Met<Verse>> m_verses;
+    // The place in the walk, and the number of the staff it is in
     int m_place = 0;
     int m_staffN = 0;
-    int m_layerN = 0;
 };
 
 } // namespace vrv

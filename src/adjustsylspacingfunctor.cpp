@@ -7,6 +7,7 @@
 
 #include "adjustsylspacingfunctor.h"
 
+#include <algorithm>
 #include <climits>
 
 //----------------------------------------------------------------------------
@@ -34,13 +35,35 @@ AdjustSylSpacingFunctor::AdjustSylSpacingFunctor(Doc *doc) : DocFunctor(doc)
     m_previousVerse = NULL;
     m_lastSyl = NULL;
     m_previousMeasure = NULL;
-    m_currentLabelAbbr = NULL;
     m_freeSpace = 0;
     m_staffSize = 100;
 }
 
+int AdjustSylSpacingFunctor::AdjustPreviousVersePosition(int &overlap)
+{
+    const int previousX = m_previousVerse->GetDrawingXRel();
+    const int nextFreeSpace = m_previousVerse->AdjustPosition(overlap, m_freeSpace, m_doc);
+    const int shift = m_previousVerse->GetDrawingXRel() - previousX;
+    for (Verse *verse : m_simultaneousVerses) {
+        verse->SetDrawingXRel(verse->GetDrawingXRel() + shift);
+    }
+    return nextFreeSpace;
+}
+
 FunctorCode AdjustSylSpacingFunctor::VisitMeasureEnd(Measure *measure)
 {
+    // Every voice's verses of the measure, spaced in the order of their alignments (MuseNote RC205: a voice's verses
+    // spaced alone ran into another voice's on the same line)
+    std::stable_sort(m_measureVerses.begin(), m_measureVerses.end(), [](const Verse *verse1, const Verse *verse2) {
+        const int x1 = verse1->GetAlignment() ? verse1->GetAlignment()->GetXRel() : 0;
+        const int x2 = verse2->GetAlignment() ? verse2->GetAlignment()->GetXRel() : 0;
+        return (x1 < x2);
+    });
+    for (Verse *verse : m_measureVerses) {
+        this->AdjustVerse(verse);
+    }
+    m_measureVerses.clear();
+
     // At the end of the measure - pass it along for overlapping verses
     m_previousMeasure = measure;
 
@@ -64,7 +87,10 @@ FunctorCode AdjustSylSpacingFunctor::VisitSystem(System *system)
     // reset it
     m_overlappingSyl.clear();
     m_previousVerse = NULL;
+    m_simultaneousVerses.clear();
     m_previousMeasure = NULL;
+    m_systemLayers.clear();
+    m_measureVerses.clear();
     m_freeSpace = 0;
     m_staffSize = 100;
 
@@ -80,7 +106,7 @@ FunctorCode AdjustSylSpacingFunctor::VisitSystemEnd(System *system)
     // Here we also need to handle the last syl of the measure - we check the alignment with the right barline
     if (m_previousVerse && m_lastSyl) {
         int overlap = m_lastSyl->GetContentRight() - m_previousMeasure->GetRightBarLine()->GetAlignment()->GetXRel();
-        m_previousVerse->AdjustPosition(overlap, m_freeSpace, m_doc);
+        this->AdjustPreviousVersePosition(overlap);
 
         // If the previous verse was not in the previous measure (but before), ignore the overlap because it is
         // not likely to go over the whole following measure
@@ -99,18 +125,32 @@ FunctorCode AdjustSylSpacingFunctor::VisitSystemEnd(System *system)
 
 FunctorCode AdjustSylSpacingFunctor::VisitVerse(Verse *verse)
 {
+    // Spaced at the end of the measure, with the other voices' verses (MuseNote RC205)
+    m_measureVerses.push_back(verse);
+
+    return FUNCTOR_CONTINUE;
+}
+
+void AdjustSylSpacingFunctor::AdjustVerse(Verse *verse)
+{
+    const Layer *layer = vrv_cast<const Layer *>(verse->GetFirstAncestor(LAYER));
+    assert(layer);
+
     /****** find label / labelAbbr */
+
+    // The abbreviations are tracked for each voice
+    LabelAbbr *&currentLabelAbbr = m_currentLabelAbbrs[layer->GetN()];
 
     // If we have a <label>, reset the previous abbreviation
     if (verse->FindDescendantByType(LABEL)) {
-        m_currentLabelAbbr = NULL;
+        currentLabelAbbr = NULL;
     }
 
     bool newLabelAbbr = false;
     verse->SetDrawingLabelAbbr(NULL);
     // Find the labelAbbr (if none previously given)
-    if (m_currentLabelAbbr == NULL) {
-        m_currentLabelAbbr = vrv_cast<LabelAbbr *>(verse->FindDescendantByType(LABELABBR));
+    if (currentLabelAbbr == NULL) {
+        currentLabelAbbr = vrv_cast<LabelAbbr *>(verse->FindDescendantByType(LABELABBR));
         // Keep indication that this is a new abbreviation and that it should not be displayed on this verse
         newLabelAbbr = true;
     }
@@ -140,7 +180,7 @@ FunctorCode AdjustSylSpacingFunctor::VisitVerse(Verse *verse)
         }
     }
 
-    if (syls.empty()) return FUNCTOR_CONTINUE;
+    if (syls.empty()) return;
 
     Syl *firstSyl = vrv_cast<Syl *>(syls.front());
     assert(firstSyl);
@@ -149,19 +189,37 @@ FunctorCode AdjustSylSpacingFunctor::VisitVerse(Verse *verse)
     Syl *lastSyl = vrv_cast<Syl *>(syls.back());
     assert(lastSyl);
 
+    // The abbreviation is shown on each voice's first verse of the system
+    if (m_systemLayers.insert(layer->GetN()).second && !newLabelAbbr && currentLabelAbbr) {
+        verse->SetDrawingLabelAbbr(currentLabelAbbr);
+    }
+
     // Not much to do when we hit the first syllable of the system
     if (m_previousVerse == NULL) {
         m_previousVerse = verse;
+        m_simultaneousVerses.clear();
         m_lastSyl = lastSyl;
-
-        if (!newLabelAbbr && m_currentLabelAbbr) {
-            verse->SetDrawingLabelAbbr(m_currentLabelAbbr);
-        }
 
         // No free space because we never move the first one back
         m_freeSpace = 0;
         m_previousMeasure = NULL;
-        return FUNCTOR_CONTINUE;
+        return;
+    }
+
+    // Verses of two voices at one alignment are not spaced against each other: the one reaching furthest right is the
+    // previous, and the others move with it (upstream e5f1b2456). Spaced, they would ask the measure for room from
+    // their alignment to itself, which widens it and leaves them as they are.
+    if (!m_previousMeasure && (verse->GetAlignment() == m_previousVerse->GetAlignment())
+        && (layer != m_previousVerse->GetFirstAncestor(LAYER))) {
+        if (lastSyl->GetContentRight() > m_lastSyl->GetContentRight()) {
+            m_simultaneousVerses.push_back(m_previousVerse);
+            m_previousVerse = verse;
+            m_lastSyl = lastSyl;
+        }
+        else {
+            m_simultaneousVerses.push_back(verse);
+        }
+        return;
     }
 
     int xShift = 0;
@@ -182,7 +240,7 @@ FunctorCode AdjustSylSpacingFunctor::VisitVerse(Verse *verse)
         overlap += (label->GetContentX2() - label->GetContentX1()) + m_doc->GetDrawingDoubleUnit(m_staffSize);
     }
 
-    int nextFreeSpace = m_previousVerse->AdjustPosition(overlap, m_freeSpace, m_doc);
+    int nextFreeSpace = this->AdjustPreviousVersePosition(overlap);
 
     if (overlap > 0) {
         // We are adjusting syl in two different measures - move only the right barline of the first measure
@@ -201,22 +259,15 @@ FunctorCode AdjustSylSpacingFunctor::VisitVerse(Verse *verse)
     }
 
     m_previousVerse = verse;
+    m_simultaneousVerses.clear();
     m_lastSyl = lastSyl;
     m_freeSpace = nextFreeSpace;
     m_previousMeasure = NULL;
-
-    return FUNCTOR_CONTINUE;
 }
 
 //----------------------------------------------------------------------------
 // RecordSylSpacingFunctor (MuseNote RC92)
 //----------------------------------------------------------------------------
-
-FunctorCode RecordSylSpacingFunctor::VisitLayer(Layer *layer)
-{
-    m_layerN = layer->GetN();
-    return FUNCTOR_CONTINUE;
-}
 
 FunctorCode RecordSylSpacingFunctor::VisitMeasureEnd(Measure *measure)
 {
@@ -245,16 +296,25 @@ FunctorCode RecordSylSpacingFunctor::VisitSystemEnd(System *system)
 
 FunctorCode RecordSylSpacingFunctor::VisitVerse(Verse *verse)
 {
-    m_verses[{ m_staffN, m_layerN, verse->GetN() }].emplace_back(m_place++, verse);
+    m_verses[{ m_staffN, verse->GetPlace() == STAFFREL_above, verse->GetN() }].emplace_back(m_place++, verse);
     return FUNCTOR_CONTINUE;
 }
 
-void RecordSylSpacingFunctor::Replay(int staffN, int layerN, int verseN, AdjustSylSpacingFunctor &functor) const
+std::vector<RecordSylSpacingFunctor::Line> RecordSylSpacingFunctor::GetLines() const
+{
+    std::vector<Line> lines;
+    for (const auto &[line, met] : m_verses) {
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+void RecordSylSpacingFunctor::Replay(const Line &line, AdjustSylSpacingFunctor &functor) const
 {
     static const Met<Staff> noStaves;
     static const Met<Verse> noVerses;
-    const auto staves = m_staves.find(staffN);
-    const auto verses = m_verses.find({ staffN, layerN, verseN });
+    const auto staves = m_staves.find(std::get<0>(line));
+    const auto verses = m_verses.find(line);
     const Met<Staff> &staffMet = (staves != m_staves.end()) ? staves->second : noStaves;
     const Met<Verse> &verseMet = (verses != m_verses.end()) ? verses->second : noVerses;
     // The five lists, each in the order of the walk, merged by their places in it

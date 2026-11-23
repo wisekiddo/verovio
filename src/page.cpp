@@ -755,24 +755,18 @@ int Page::GetContentWidth() const
 
 void Page::AdjustSylSpacingByVerse(const IntTree &verseTree, Doc *doc)
 {
-    IntTree_t::const_iterator staves;
-    IntTree_t::const_iterator layers;
-    IntTree_t::const_iterator verses;
-
     if (verseTree.child.empty()) return;
 
-    // Same for the lyrics, but Verse by Verse since Syl are TimeSpanningInterface elements for handling connectors.
-    // Each verse is given what the walk of the page filtered to it met, from one walk that records it (a walk for
-    // each verse took seconds for a token of 3,000 words: MuseNote RC92)
+    // Same for the lyrics, but line by line since Syl are TimeSpanningInterface elements for handling connectors. A
+    // line is a staff's side and verse number, every voice of the staff together: spaced voice by voice, the verses
+    // of two voices drawn on one line ran into each other (MuseNote RC205). Each line is given what the walk of the
+    // page filtered to it met, from one walk that records it (a walk for each verse took seconds for a token of 3,000
+    // words: MuseNote RC92)
     RecordSylSpacingFunctor recordSylSpacing;
     this->Process(recordSylSpacing);
-    for (staves = verseTree.child.begin(); staves != verseTree.child.end(); ++staves) {
-        for (layers = staves->second.child.begin(); layers != staves->second.child.end(); ++layers) {
-            for (verses = layers->second.child.begin(); verses != layers->second.child.end(); ++verses) {
-                AdjustSylSpacingFunctor adjustSylSpacing(doc);
-                recordSylSpacing.Replay(staves->first, layers->first, verses->first, adjustSylSpacing);
-            }
-        }
+    for (const RecordSylSpacingFunctor::Line &line : recordSylSpacing.GetLines()) {
+        AdjustSylSpacingFunctor adjustSylSpacing(doc);
+        recordSylSpacing.Replay(line, adjustSylSpacing);
     }
 }
 
