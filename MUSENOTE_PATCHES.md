@@ -2989,6 +2989,55 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 145. A tempo change plays from where it stands in its bar (tb.62)
+
+MuseNote plan V3_2_0_91 (root cause RC189, finding W167). Ours. The engine gave a bar one tempo, the last one met in it,
+from the bar's start. `InitMaxMeasureDurationFunctor::VisitMeasureEnd` timed the whole bar by it, and
+`InitOnsetOffsetFunctor` and `InitTimemapAdjustNotesFunctor` timed every note, rest and grace of the bar by it.
+`GenerateMIDIFunctor::VisitMeasure` wrote it at the bar's first tick, the timemap stamped it on every note of the bar,
+and `Measure::EnclosesTime` measured the bar by it. A change at beat 3 so sounded from beat 1, and one at the barline
+retimed the whole bar it ends.
+
+- **A bar keeps its tempos** (`Measure`): the one in effect at its start and each change in it, by its score time in
+  the bar, adjusted (`midiTempoAdjustment`). Of two at one place the one given last is kept. It answers the tempo at a
+  time and the seconds to it, piece by piece.
+- **The duration** functor starts a bar's list with the tempo in effect, and adds each `<tempo>` at its start's
+  alignment (the layout is done before the timemap; one with no place, at the bar's start). It times the bar piece by
+  piece: a multi-bar rest's factor times the whole. The tempo carried on is still the last one met.
+- **The notes, rests and graces** are timed by the bar's real time at their score times; an unaccented grace's length
+  is set by the tempo where it stands.
+- **The MIDI** writes each of the bar's tempos at its own tick. The document no longer writes the score's tempo at tick
+  0 itself: written first, it kept the first bar's own tempo there out of the MIDI, which then played the score's
+  while the timemap played the bar's. The first bar writes tick 0's.
+- **The timemap** stamps a note with the tempo at its onset, and each change in a bar gets its own entry where no note
+  may start; a mark that gives the tempo already playing gets none.
+- **What it changes.** The MIDI and timemap of 6 songs, from the bar of the change on: All By Myself, Defying Gravity
+  (bar 71), The Meeting of the Waters (a 72 the bar's last tempo hid is heard), September Song (60 from quarter 58,
+  not 57) and I Remember It Well ×2 (120 for the first 1.5 quarters, then 80). No MEI changes, so no id moves.
+
+**Cases**: `test/native/test_tb62_tempo_within_the_bar_engine.cpp` in MuseNote's `corelib/verovio`, 11 cases: a
+change at beat 3 plays from beat 3, in the timemap, the MIDI's tempo and the timemap's tempo; a change at the barline
+leaves its bar at the tempo before it; two changes in one bar; of two at one place, the last; a note sounding across a
+change; a grace note before a change; the tempo adjustment on every piece; the first bar's own tempo at tick 0; the
+element at a time found in the bar that plays then; a mark that gives the tempo already playing adds nothing; and, as
+before, a change at a bar's start, a bar with none, a multi-bar rest. With all of the patch undone, 9 of the 11 fail
+(the two that pass: what plays as before, and the mark that changes nothing, which tb.61 gives no entry either); each
+of its 11 parts undone fails its own case. tb.58's case of a bare
+`<sound tempo>` placed by its offset now expects its tempo at its place (quarter 6), not at its bar's start.
+
+**Gate of tb.62** (patch 145, MuseNote plan V3_2_0_91, on tb.61). Native: the suite, 539 cases (18,725 assertions),
+and under ASan, integer-divide-by-zero and libc++'s checks 538, no finding; `tool/log_format_audit.py`: 301 engine
+sources, 0 calls. A Debug engine (asserts on) over every input: 3,612, all through, and through the frozen readers the
+3,392 MusicXML and ABC inputs, all through. Parity against tb.61: 22,961 outputs, 12 differ, the MIDI and timemap of the
+6 songs declared; seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612). The locator gate: 0 failures.
+MuseSync's 24 starters: the same. `bar_times.py`: no song breaks a rule. MuseNote's export gate in every format: exit 0;
+7 song-aspects worse in those 6 songs, each the export's own fault that the tempo now played where it stands shows:
+the Humdrum export writes a bar's tempos at its start (MuseNote W176, RC198), and the MusicXML export moves a mark
+between its divisions (W177, RC199); the ABC export plays 4 of them better. The frozen readers' whole MEI: the same as
+tb.61's for the 3,089 songs, the 80 of 3.0.1 and the 194 ABC files.
+
+**Upstream status**: not offered. Upstream's develop is the same, and has no issue for it.
+
 ### 144. The SVG's boxes of text, as upstream writes them now (tb.61)
 
 MuseNote plan V3_2_0_90 (root cause RC197, finding W174). Upstream, cherry-picked: 90fc4d036 (#4565, develop, not yet
@@ -3005,11 +3054,13 @@ box on the element, not on its current positioner.
 - **The ink bounds** (ours, from a09acec80): `Syl` keeps `m_drawingTextInkTop`, `m_drawingTextInkBottom` and
   `m_hasDrawingTextInkBounds`, cleared by `Syl::Reset`; `View::DrawSyl` stores them from the text's extent before it
   draws it.
-- **What it changes.** 3,217 songs' SVG and nothing else: no MEI, MIDI, timemap, pitch map or id. After MuseNote's
+- **What it changes.** The SVG of 3,217 of parity's inputs (3,197 of MuseNote's 3,198 bundled scores, 20 others) and
+  nothing else: no MEI, MIDI, timemap, pitch map or id. After MuseNote's
   patcher the page drawn is the same but for what is not drawn (box groups holding a `<title>`, which the patcher left
   in 189 songs' pages until now, and emptied elements written self-closing). Every lyric syllable and its text get a box
-  (819,620 each, in 2,664 songs): MuseNote's taps read note, rest and bar boxes only and do not change, but in 5 songs one
-  bar's tap box, its content's outline already (MuseNote W175), grows by its lyrics. The SVG grows 7.4 %. What it opens
+  (409,597 each, in 2,661 songs). MuseNote frames a bar by the outline of all the boxes in it, so its taps on bars do
+  change where that outline put a bar on the wrong line already (MuseNote W175, RC200, fixed in MuseNote plan
+  V3_2_0_92; this entry first said they did not). The SVG grows 7.4 %. What it opens
   for MuseNote's later releases (a lyric followed while it plays, a word tapped) is in MuseNote plan V3_2_0_90.
 
 **Cases**: `test/native/test_tb61_svg_text_boxes_engine.cpp` in MuseNote's `corelib/verovio` (4 cases): a text's box
@@ -3028,8 +3079,9 @@ integer-divide-by-zero and libc++'s checks 527 (the RC106 arena case is left out
 through, and through the frozen readers the 3,392 MusicXML and ABC inputs, all through. Parity against tb.60: 22,961
 outputs, 3,217 differ, all SVG, as declared; seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612).
 MuseNote's patcher and box parser over the 3,217: the page drawn the same (3,015) or without only what is not drawn
-(202), the taps' boxes the same but W175's 5 bars. The locator gate: 0 failures (every generated id of 501,777 MusicXML
-notes kept). MuseSync's 24 starters: the same. `bar_times.py`: no song breaks a rule, as tb.60. MuseNote's export gate
+(202), the taps' boxes the same but for 5 bars (W175; boxes compared, no tap run). The locator gate: 0 failures
+(every generated id of 501,777 MusicXML notes kept). MuseSync's 24 starters: the same. `bar_times.py`: no song breaks
+a rule, as tb.60. MuseNote's export gate
 in every format: exit 0, no song-aspect worse. The frozen readers' whole MEI: the same as tb.60's for the 3,089 songs,
 the 80 of 3.0.1 and the 194 ABC files.
 
