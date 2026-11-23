@@ -391,6 +391,10 @@ Object *ExpansionMap::Expand(Expansion *expansion, std::set<std::string> &existi
         assert(referenceChild);
         parent->GetParent()->InsertAfter(referenceChild, newContainer);
         GeneratePredictableIDs(parent, newContainer);
+        // A copy of the container, recorded as each copy of a part is: the next is named after it, and it leads back
+        // to the container as written. (Its name counted the copies recorded, which it was never one of: every new
+        // container of a part was named the same, 30 sections "R-rend2" in an order four levels deep. MuseNote RC204)
+        this->AddExpandedIDToExpansionMap(parent->GetID(), newContainer->GetID());
         this->RecordMade(newContainer);
         LogDebug("Creating new container <%s> for expansion element %s", newContainer->GetClassName().c_str(),
             newContainer->GetID().c_str());
