@@ -394,8 +394,21 @@ int Rest::GetOptimalLayerLocation(const Staff *staff, const Layer *layer, int de
     bool restOverlap = true;
     const auto otherLayerRelativeLocationInfo = this->GetLocationRelativeToOtherLayers(layer, isTopLayer, restOverlap);
     int currentLayerRelativeLocation = this->GetLocationRelativeToCurrentLayer(staff, layer, isTopLayer);
-    int otherLayerRelativeLocation = otherLayerRelativeLocationInfo.first
-        + this->GetRestOffsetFromOptions(RL_otherLayer, otherLayerRelativeLocationInfo, isTopLayer);
+    // No element of the other layers beside the rest gives no place (unset), and so no candidate, as the current
+    // layer's unset place already is none. The offsets were added to the unset value, which overflows (MuseNote RC209)
+    int otherLayerRelativeLocation = defaultLocation;
+    if (otherLayerRelativeLocationInfo.first != VRV_UNSET) {
+        otherLayerRelativeLocation = otherLayerRelativeLocationInfo.first
+            + this->GetRestOffsetFromOptions(RL_otherLayer, otherLayerRelativeLocationInfo, isTopLayer);
+        if (m_crossStaff) {
+            if (isTopLayer) {
+                otherLayerRelativeLocation += defaultLocation + 2;
+            }
+            else {
+                otherLayerRelativeLocation -= 2;
+            }
+        }
+    }
     if (currentLayerRelativeLocation == VRV_UNSET) {
         currentLayerRelativeLocation = defaultLocation;
     }
@@ -403,14 +416,6 @@ int Rest::GetOptimalLayerLocation(const Staff *staff, const Layer *layer, int de
         std::pair<int, RestAccidental> currentLayerRelativeLocationInfo(currentLayerRelativeLocation, RA_none);
         currentLayerRelativeLocation
             += this->GetRestOffsetFromOptions(RL_sameLayer, currentLayerRelativeLocationInfo, isTopLayer);
-    }
-    if (m_crossStaff) {
-        if (isTopLayer) {
-            otherLayerRelativeLocation += defaultLocation + 2;
-        }
-        else {
-            otherLayerRelativeLocation -= 2;
-        }
     }
 
     const int marginLocation = this->GetMarginLayerLocation(isTopLayer, restOverlap);

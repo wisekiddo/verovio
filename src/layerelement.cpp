@@ -700,15 +700,18 @@ Fraction LayerElement::GetAlignmentDuration(
             tuplet->FindAllDescendantsByComparison(&objects, &ids);
             if (objects.size() > 0) {
                 // The ratios of every tuplet around the element multiply, as MEI has it: a triplet inside a triplet
-                // is 9 in the time of 4 (the innermost alone timed it 3 in 2). One tuplet gives its ratio as before
-                num = 1;
-                numbase = 1;
+                // is 9 in the time of 4 (the innermost alone timed it 3 in 2). One tuplet gives its ratio as before.
+                // The product is a Fraction, reduced as it is taken and fitted to an int (Fraction::Fit): its terms
+                // were multiplied in an int, which a file's own numbers can pass (MuseNote RC210). The duration
+                // takes only the ratio, so a reduced one times every note the same
+                Fraction ratio(1);
                 for (const Object *level = tuplet; level; level = level->GetFirstAncestor(TUPLET, MAX_TUPLET_DEPTH)) {
                     const Tuplet *around = vrv_cast<const Tuplet *>(level);
                     // Adjust VRV_UNSET and 0 - which is not valid in MEI anyway
-                    num *= std::max(1, around->GetNum());
-                    numbase *= std::max(1, around->GetNumbase());
+                    ratio = ratio * Fraction(std::max(1, around->GetNum()), std::max(1, around->GetNumbase()));
                 }
+                num = ratio.GetNumerator();
+                numbase = ratio.GetDenominator();
             }
         }
         const DurationInterface *duration = this->GetDurationInterface();

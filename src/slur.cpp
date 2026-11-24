@@ -323,9 +323,14 @@ void Slur::AddSpannedElements(
 
     curve->ClearSpannedElements();
     for (const LayerElement *element : spanned.elements) {
-        const int xLeft = element->GetSelfLeft();
-        const int xRight = element->GetSelfRight();
-        const bool isOverlapping = ((xLeft > xMin) && (xLeft < xMax)) || ((xRight > xMin) && (xRight < xMax));
+        // An element with no horizontal box of its own lies under no part of the slur: its edges are unset, and the
+        // sum that gives them overflows (MuseNote RC209). It is still read for a tuplet bracket and a cross staff
+        bool isOverlapping = false;
+        if (element->HasSelfHorizontalBB()) {
+            const int xLeft = element->GetSelfLeft();
+            const int xRight = element->GetSelfRight();
+            isOverlapping = ((xLeft > xMin) && (xLeft < xMax)) || ((xRight > xMin) && (xRight < xMax));
+        }
 
         if (isOverlapping || element->Is(TUPLET_BRACKET)) {
             CurveSpannedElement *spannedElement = new CurveSpannedElement();

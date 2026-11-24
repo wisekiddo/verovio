@@ -237,6 +237,10 @@ bool BoundingBox::VerticalSelfOverlap(const BoundingBox *other, int margin) cons
 
 int BoundingBox::HorizontalLeftOverlap(const BoundingBox *other, const Doc *doc, int margin, int vMargin) const
 {
+    // An element with no box of its own overlaps nothing: its edges are unset, and a sum with them overflows or is
+    // no place (VerticalSelfOverlap already tests for it; MuseNote RC209)
+    if (!this->HasSelfBB() || !other->HasSelfBB()) return 0;
+
     Point BB1rect[3][2], BB2rect[3][2];
     int anchor1, anchor2;
     int overlap = 0;
@@ -254,6 +258,9 @@ int BoundingBox::HorizontalLeftOverlap(const BoundingBox *other, const Doc *doc,
 
 int BoundingBox::HorizontalRightOverlap(const BoundingBox *other, const Doc *doc, int margin, int vMargin) const
 {
+    // No box of its own, no overlap (as in HorizontalLeftOverlap)
+    if (!this->HasSelfBB() || !other->HasSelfBB()) return 0;
+
     Point BB1rect[3][2], BB2rect[3][2];
     int anchor1, anchor2;
     int overlap = 0;
@@ -271,6 +278,9 @@ int BoundingBox::HorizontalRightOverlap(const BoundingBox *other, const Doc *doc
 
 int BoundingBox::VerticalTopOverlap(const BoundingBox *other, const Doc *doc, int margin, int hMargin) const
 {
+    // No box of its own, no overlap (as in HorizontalLeftOverlap)
+    if (!this->HasSelfBB() || !other->HasSelfBB()) return 0;
+
     Point BB1rect[3][2], BB2rect[3][2];
     int anchor1, anchor2;
     int overlap = 0;
@@ -288,6 +298,9 @@ int BoundingBox::VerticalTopOverlap(const BoundingBox *other, const Doc *doc, in
 
 int BoundingBox::VerticalBottomOverlap(const BoundingBox *other, const Doc *doc, int margin, int hMargin) const
 {
+    // No box of its own, no overlap (as in HorizontalLeftOverlap)
+    if (!this->HasSelfBB() || !other->HasSelfBB()) return 0;
+
     Point BB1rect[3][2], BB2rect[3][2];
     int anchor1, anchor2;
     int overlap = 0;

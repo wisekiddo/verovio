@@ -526,7 +526,9 @@ void View::DrawText(DeviceContext *dc, Text *text, TextDrawingParams &params)
         this->DrawTextString(dc, text->GetText(), params);
     }
 
-    params.m_actualWidth = text->GetContentRight();
+    // The right of what was drawn: a text that drew nothing (an empty syllable) has no box of its own, and leaves the
+    // right where the last text drawn put it. The sum with its unset edge overflowed (MuseNote RC209)
+    if (text->HasContentHorizontalBB()) params.m_actualWidth = text->GetContentRight();
 
     resources->SelectTextFont(FONTWEIGHT_NONE, FONTSTYLE_NONE);
 
