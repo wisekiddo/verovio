@@ -2989,6 +2989,121 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 150. Each part's key and meter change is its own (tb.65)
+
+MuseNote plan V3_2_0_97 (root cause RC127, finding W120). Ours (upstream #3877: "no plans").
+
+- **The cause.** `MusicXmlInput::ReadMusicXmlAttributes` read a key or meter change after the first bar from the first
+  part only, into a score-wide `scoreDef` every staff took: another part's own change was dropped (only its meter's
+  unit kept), and one numbered for one staff of a part (`<key number="2">`) was every staff's. A part's staff showed
+  the first part's key, as a B-flat instrument after a key change, and its notes were spelt by it (a D sharp in four
+  sharps written with a sharp, the key drawn being two). Their sound was right (patch 18 reads each note's `<alter>`).
+  The first bar was right already: each part's key is its own `staffDef`'s.
+- **Each part's change is recorded** for the staves it is for, as it is read (`RecordStaffChanges`: a key or meter
+  with a number its staff's alone; the first of a bar, as before), and **written once every part is read**
+  (`ResolveStaffChanges`, before the clef changes are placed). A change every staff has, alike, stays score-wide, as the
+  first part's was read: no object is made, so every id is as before. Any other goes to a `staffDef` of each staff it
+  is for, in the bar's `scoreDef` (the engine draws a staff's own: `ScoreDef::ReplaceDrawingValues(const StaffDef *)`;
+  the reader's pass for the notes' signs reads it there): the first part's object is moved to the first of its staves it
+  was read for (a copy to the others), so a staff that does not change keeps its key or meter; a later part's is made
+  then (`ConvertKey`, `ReadMusicXMLMeterSig`, the reader's state they set restored).
+- **What it changes.** A score whose parts change key or meter differently, or alone, or for one staff: its MEI, SVG and
+  the notes' written signs; new objects, so new ids, in such a score only. No song of the corpus has one (345 of 3,198
+  change key or meter after the first bar; the one with several parts changes alike), so none changes.
+- **Left as it was.** A part's first-bar `<staff-details print-object="no">` (MuseNote W116). MuseNote's notation model
+  holds one meter for every staff, so a part's own meter is taken there for every part (MuseNote W189, RC213).
+
+**Cases**: `test/native/test_tb65_key_meter_per_part_engine.cpp` in MuseNote's `corelib/verovio`, 7 cases: a later
+part's key change alone is its staff's (the MEI, the key drawn, its D sharp unwritten); the first part's alone; two
+parts changing differently (a B-flat instrument); parts changing alike stay score-wide; a key numbered for one staff of a
+two-staff part; a later part's meter alone; a single part's key and meter score-wide. On tb.64 the five of a staff's own
+fail; the alike and single-part cases hold, as they must. Each part undone fails its own: nothing recorded, or nothing
+written (the five of a staff's own fail); every change taken as not alike (the alike and single-part cases); a key's
+number not read (the numbered one); the first part's object left score-wide (the three where its change is not every
+staff's).
+
+**Gate of tb.65** (patches 148 to 150, MuseNote plans V3_2_0_95 to V3_2_0_97, one gate, on tb.64). Native: the suite,
+566 cases (19,144 assertions), and under ASan, integer-divide-by-zero, signed-integer-overflow and libc++'s checks 565,
+no report; `tool/log_format_audit.py`: 301 engine sources, 0 calls. A Debug engine (asserts on, signed overflow halting
+it) over every input: 3,612, all through, and through the frozen readers the 3,392 MusicXML and ABC inputs, all through,
+no report. Parity against tb.64, drawn with tb.65's engine data: 22,961 outputs, 1 differs, as declared: Honky-Tonk
+Woman's SVG (its 8 triangle heads, their stems and boxes, two beams with them); seeded ids 3,218 of 3,218; every input
+reads back from its MEI (3,612). The locator gate: 0 failures. MuseSync's 24 starters: the same. `bar_times.py`: as
+tb.64. MuseNote's export gate in every format: no song-aspect worse. The frozen readers' whole MEI: the same as tb.64's
+for the 3,089 songs, the 80 of 3.0.1 and the 194 ABC files. The gate's first run drew with the apps' data, which has no
+triangle until tb.65 is vendored, and showed no difference; its overflow check found `View::DrawText`'s, fixed before
+the tag (149); the steps that read no drawing stand from it.
+
+**Upstream status**: not offered.
+
+### 149. No arithmetic on unset values, and nested tuplets' ratio as a fraction (tb.65)
+
+MuseNote plan V3_2_0_96 (root causes RC209 and RC210, findings W154 and W188). Ours.
+
+- **Unset values (RC209).** The engine did arithmetic on an unset place or box edge before testing for unset, a signed
+  overflow the language leaves undefined (the release build wrapped it, and the wrapped value happened to change
+  nothing drawn). Each is tested first now:
+  - `Rest::GetOptimalLayerLocation` added the rest's offset to the other layers' place, unset when none of their
+    elements beside it gives one (their rest, a space): that place is no candidate, as the current layer's unset place
+    already was none;
+  - `BoundingBox::HorizontalLeftOverlap` and its three siblings read the edges of an element with no box of its own
+    (a whole-bar rest of a pickup, when the layers are adjusted: `Stem::CompareToElementPosition`): no box, no overlap,
+    as `VerticalSelfOverlap` has it;
+  - `Slur::AddSpannedElements` read a chord's edges, which has no box of its own (its notes, stem and dots are spanned
+    with theirs): such an element lies under no part of the slur; a tuplet bracket and a cross staff still read;
+  - `View::DrawText` read the right of a text that drew nothing (an empty syllable: the frozen 6.2.0 reader's, of an
+    empty `<text>` after an elision): the drawn right stays where the last text drawn put it. Found by the gate's new
+    check.
+- **The ratio of nested tuplets (RC210).** `LayerElement::GetAlignmentDuration` multiplied the levels' ratios (our patch
+  of the levels) in an int: a MusicXML tuplet of 70000 in 40000 over a time-modification of 3 in 40000, the reader
+  nesting a hidden 3 in 70000 inside it, passed it, and its notes were timed backwards. The product is a `Fraction`,
+  reduced as it is taken and fitted to an int (`Fraction::Fit`); the duration takes only the ratio, so every ratio that
+  fitted times the same.
+- **The gate's class guard.** The native suite's sanitizer build and the Debug engine over every input check signed
+  overflow too, failing on any report.
+- **What it changes.** Nothing drawn or played that fitted before: the overflows' wrapped values were never chosen. The
+  tuplet's timing in a file of numbers past an int.
+
+**Cases**: `test/native/test_tb65_unset_values_engine.cpp`, 5 cases: two layers resting together; a stem beside a
+pickup's whole-bar rest; a slur over a chord; an empty syllable's text (A Big Hunk O' Love, read through the frozen
+reader as the app imports a score); a note in tuplets whose ratios multiply past an int (timed by the product; a product past an int even reduced keeps its notes in
+order). On tb.64 each halts at its overflow (built with
+the check), and the tuplet's timing fails in any build. Each test undone halts its own case under the check: the
+rest's, the overlap readers', the slur's, the text's (the song), the tuplets' product.
+
+**Upstream status**: not offered.
+
+### 148. Triangle noteheads are drawn as triangles (tb.65)
+
+MuseNote plan V3_2_0_95 (root cause RC157, finding W141; with it MuseNote's own: the app's staged data, RC207/W185,
+and each app's data, RC208/W186). Ours: upstream keeps the triangles unsupported (develop, 2026-11-22), Leipzig having
+none.
+
+- **The cause.** `Note::GetNoteheadGlyph` had its triangle cases commented out, and the fonts' data held no triangle
+  (`fonts/supported.xml` left them out): a note with `head.shape="isotriangle"` (MusicXML `<notehead>triangle`) was a
+  plain head.
+- **The cases.** An up triangle by its duration and fill, as the diamond and the rectangle are: breve and longer E0BA,
+  whole E0BB, half E0BC (solid E0BE), quarter and shorter E0BE (void E0BD); a right triangle (`rtriangle`) E0C8 white,
+  E0C9 black, by the diamond's rule. Drawn where the font has the glyph (`Resources::GetGlyph`); a font without it
+  gives the plain head.
+- **The glyphs, optional.** `fonts/supported.xml` takes the up triangles (E0BA–E0BE) and the right ones (E0C8, E0C9),
+  marked `optional="yes"`: the engine requires its default fonts (Bravura, Leipzig) to hold every glyph it supports, and
+  Leipzig has no triangle ("Expected 657 default SMuFL glyphs but could load only 650", then "Leipzig font could not be
+  loaded", at every start). `fonts/generate.py` counts `SMUFL_COUNT` over the required glyphs (650) and writes
+  `IsOptionalSmufl`; `Resources::LoadFont`'s check of a default font, by that count, is unchanged. The data: Bravura and Petaluma
+  all seven, Gootville the up ones, Leland E0BD and E0BE, with their anchors (the stems at the base's corners).
+- **What it changes.** A triangle note's head and its stem: Honky-Tonk Woman's 8 in the corpus: its SVG alone, in parity against tb.64 (the gate of tb.65, under
+  150).
+
+**Cases**: `test/native/test_tb65_triangle_noteheads_engine.cpp`, 6 cases: each duration and fill of both triangles
+in Bravura; a MusicXML triangle read and drawn; a triangle's stem at its base, where the glyph's anchors put it; with
+Leipzig, the plain head; a plain note and a diamond as before; the default fonts load with no error. On tb.64 the three
+of the triangles fail; the others hold, as they must. Each part undone fails its own case: the up triangles (their
+three), the right ones, the plain head where the font has no triangle (Leipzig), the glyphs' anchors (the stem), and
+`SMUFL_COUNT` over every supported glyph, 657 (Leipzig incomplete: the default fonts' case).
+
+**Upstream status**: not offered.
+
 ### 147. The lyrics of two voices on one line, and lyrics placed above (tb.64)
 
 MuseNote plan V3_2_0_94 (root causes RC205 and RC206, findings W183 and W184). Ours, on the idea of upstream's
