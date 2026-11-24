@@ -148,6 +148,22 @@ namespace musicxml {
         bool m_afterBarline = false; // musicXML attribute
     };
 
+    // A key or meter change after the first bar, as a part writes it for one of its staves (MuseNote RC127)
+    struct StaffChange {
+        pugi::xml_node m_key;
+        pugi::xml_node m_time;
+    };
+
+    // The first part's change of a bar, written score-wide as it is read: the objects, the nodes they were read from,
+    // and the part's staves (MuseNote RC127)
+    struct ScoreWideChange {
+        ScoreDef *m_scoreDef = NULL;
+        KeySig *m_keySig = NULL;
+        pugi::xml_node m_key;
+        Object *m_meter = NULL; // a meterSig or a meterSigGrp
+        pugi::xml_node m_time;
+    };
+
     struct OpenDashes {
         OpenDashes(const int dirN, int staffNum, const int measureCount)
         {
@@ -663,6 +679,15 @@ private:
     ScoreDef *GetOrCreateLastScoreDef(Section *section);
     ///@}
 
+    /**
+     * @name A key or meter change after the first bar, by the staves it is for: recorded as each part is read, and
+     * written once every part is (MuseNote RC127)
+     */
+    ///@{
+    void RecordStaffChanges(pugi::xml_node node, const Measure *measure, int index);
+    void ResolveStaffChanges(Section *section, int staffCount);
+    ///@}
+
     /*
      * @name Helper for detecting the slur curve direction
      */
@@ -828,6 +853,10 @@ private:
     std::vector<std::pair<Arpeg *, musicxml::OpenArpeggio>> m_ArpeggioStack;
     /* a map for the measure counts storing the index of each measure created */
     std::map<Measure *, int> m_measureCounts;
+    /* each staff's key or meter change after the first bar, by the bar's count and the staff's @n (MuseNote RC127) */
+    std::map<int, std::map<int, musicxml::StaffChange>> m_staffChanges;
+    /* the first part's change of each bar, as it was written score-wide (MuseNote RC127) */
+    std::map<int, musicxml::ScoreWideChange> m_scoreWideChanges;
     /* measure rests */
     std::map<int, int> m_multiRests;
     /* a map of current accidental for each pitch class */

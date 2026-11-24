@@ -1605,6 +1605,9 @@ bool MusicXmlInput::ReadMusicXml(pugi::xml_node root)
     }
     // here we could check that there is only one staffGrp left in m_staffGrpStack
 
+    // (the staves' own key and meter changes, once every part is read)
+    this->ResolveStaffChanges(section, staffOffset);
+
     this->ProcessClefChangeQueue(section);
 
     // Each element goes into the bar of the score its bar went into (by its number it went into the first bar with
@@ -2546,27 +2549,44 @@ void MusicXmlInput::ReadMusicXmlAttributes(
     pugi::xml_node key = node.child("key");
     pugi::xml_node time = node.child("time");
 
-    // for now only read first key change in first part and update scoreDef
+    // The first key change of a bar in the first part is read into a score-wide scoreDef, as it is read: every staff
+    // takes it. Each part's change after the first bar is recorded for its staves, and once every part is read, a
+    // change not every staff's goes to the staves it is for (ResolveStaffChanges). A later part's change was dropped
+    // and one numbered for one staff was every staff's (MuseNote RC127)
+    const auto count = m_measureCounts.find(measure);
+    const int index = (count != m_measureCounts.end()) ? count->second : -1;
+    const bool firstOfBar = !node.select_node("preceding-sibling::attributes/key");
     if ((key || time || divisionChange) && node.select_node("ancestor::part[not(preceding-sibling::part)]")
-        && !node.select_node("preceding-sibling::attributes/key")) {
+        && firstOfBar) {
         ScoreDef *scoreDef = GetOrCreateLastScoreDef(section);
         assert(scoreDef);
+        musicxml::ScoreWideChange scoreWide;
+        scoreWide.m_scoreDef = scoreDef;
         if (key) {
             KeySig *meiKey = ConvertKey(key);
             scoreDef->AddChild(meiKey);
+            scoreWide.m_keySig = meiKey;
+            scoreWide.m_key = key;
         }
 
         if (time) {
+            const int before = scoreDef->GetChildCount();
             this->ReadMusicXMLMeterSig(time, scoreDef);
+            if (scoreDef->GetChildCount() > before) {
+                scoreWide.m_meter = scoreDef->GetChild(before);
+                scoreWide.m_time = time;
+            }
         }
 
         if (divisions) {
             scoreDef->SetPpq(divisions.text().as_int());
         }
+        if ((index > 0) && (scoreWide.m_keySig || scoreWide.m_meter)) m_scoreWideChanges[index] = scoreWide;
     }
     else if (time && node.select_node("ancestor::part[(preceding-sibling::part)]")) {
         m_meterUnit = time.child("beat-type").text().as_int();
     }
+    if ((index > 0) && firstOfBar) this->RecordStaffChanges(node, measure, index);
 
     pugi::xpath_node measureRepeat = node.select_node("measure-style/measure-repeat");
     pugi::xpath_node measureSlash = node.select_node("measure-style/slash");
@@ -5576,6 +5596,146 @@ ScoreDef *MusicXmlInput::GetOrCreateLastScoreDef(Section *section)
         section->AddChild(scoreDef);
     }
     return scoreDef;
+}
+
+void MusicXmlInput::RecordStaffChanges(pugi::xml_node node, const Measure *measure, int index)
+{
+    assert(measure);
+
+    // The part's staves, by their @n, in the part's order
+    std::vector<int> staves;
+    for (const Object *child : measure->GetChildren()) {
+        if (child->Is(STAFF)) staves.push_back(vrv_cast<const Staff *>(child)->GetN());
+    }
+    // A key or meter with a number is its staff's alone, one without each staff's of the part; the first a staff
+    // has in the bar is read, as the first part's is
+    auto record = [&](pugi::xml_node change, const bool isKey) {
+        const int number = change.attribute("number").as_int();
+        for (int i = 0; i < (int)staves.size(); ++i) {
+            if ((number > 0) && (number != i + 1)) continue;
+            musicxml::StaffChange &staffChange = m_staffChanges[index][staves.at(i)];
+            pugi::xml_node &kept = isKey ? staffChange.m_key : staffChange.m_time;
+            if (!kept) kept = change;
+        }
+    };
+    for (pugi::xml_node key : node.children("key")) record(key, true);
+    for (pugi::xml_node time : node.children("time")) record(time, false);
+}
+
+void MusicXmlInput::ResolveStaffChanges(Section *section, int staffCount)
+{
+    assert(section);
+
+    if (m_staffChanges.empty()) return;
+
+    // Two keys or meters are alike when they say the same: their elements, the meter's symbol, and whether shown
+    auto alike = [](pugi::xml_node a, pugi::xml_node b) {
+        for (const char *name : { "print-object", "symbol" }) {
+            if (std::string(a.attribute(name).as_string()) != b.attribute(name).as_string()) return false;
+        }
+        pugi::xml_node x = a.first_child();
+        pugi::xml_node y = b.first_child();
+        for (; x && y; x = x.next_sibling(), y = y.next_sibling()) {
+            if (std::string(x.name()) != y.name()) return false;
+            if (std::string(x.text().as_string()) != y.text().as_string()) return false;
+        }
+        return !x && !y;
+    };
+
+    // The bar of each count, as the first part made it (a later part's staves were moved into it)
+    std::map<int, Measure *> measureOf;
+    for (Object *child : section->GetChildren()) {
+        if (!child->Is(MEASURE)) continue;
+        Measure *measure = vrv_cast<Measure *>(child);
+        const auto count = m_measureCounts.find(measure);
+        if (count != m_measureCounts.end()) measureOf.emplace(count->second, measure);
+    }
+
+    // (ConvertKey and ReadMusicXMLMeterSig keep what they read for the bars read after: there are none now)
+    KeySig *const currentKeySig = m_currentKeySig;
+    const std::vector<int> meterCount = m_meterCount;
+    const int meterUnit = m_meterUnit;
+
+    for (const auto &[index, staves] : m_staffChanges) {
+        const auto scoreWide = m_scoreWideChanges.find(index);
+        const musicxml::ScoreWideChange *first = (scoreWide != m_scoreWideChanges.end()) ? &scoreWide->second : NULL;
+        for (const bool isKey : { true, false }) {
+            // Every staff's change, all alike: score-wide, as it was read
+            bool any = false;
+            bool everyStaffAlike = true;
+            pugi::xml_node shared;
+            for (int n = 1; n <= staffCount; ++n) {
+                const auto staff = staves.find(n);
+                const pugi::xml_node change = (staff == staves.end())
+                    ? pugi::xml_node()
+                    : (isKey ? staff->second.m_key : staff->second.m_time);
+                if (change) any = true;
+                if (!change || (shared && !alike(shared, change))) everyStaffAlike = false;
+                if (!shared) shared = change;
+            }
+            if (!any || everyStaffAlike) continue;
+
+            // Else each staff's own, in a staffDef of the bar's scoreDef. The first part's score-wide object goes
+            // to the first of its staves it was read for (a copy to the others), so a staff that does not change
+            // keeps its key or meter
+            const auto measure = measureOf.find(index);
+            if (measure == measureOf.end()) {
+                LogWarning("MusicXML import: a key or meter change in bar %d, which no part has", index + 1);
+                continue;
+            }
+            ScoreDef *scoreDef = first ? first->m_scoreDef : NULL;
+            if (!scoreDef) {
+                Object *previous = section->GetPrevious(measure->second);
+                if (previous && previous->Is(SCOREDEF)) scoreDef = vrv_cast<ScoreDef *>(previous);
+            }
+            if (!scoreDef) {
+                scoreDef = new ScoreDef();
+                section->InsertBefore(measure->second, scoreDef);
+            }
+            StaffGrp *staffGrp = vrv_cast<StaffGrp *>(scoreDef->GetFirst(STAFFGRP));
+            if (!staffGrp) {
+                staffGrp = new StaffGrp();
+                scoreDef->AddChild(staffGrp);
+            }
+            Object *firstObject = first ? (isKey ? static_cast<Object *>(first->m_keySig) : first->m_meter) : NULL;
+            const pugi::xml_node firstNode = first ? (isKey ? first->m_key : first->m_time) : pugi::xml_node();
+            bool moved = false;
+            for (const auto &[n, staffChange] : staves) {
+                const pugi::xml_node change = isKey ? staffChange.m_key : staffChange.m_time;
+                if (!change) continue;
+                StaffDef *staffDef = NULL;
+                for (Object *child : staffGrp->GetChildren()) {
+                    if (child->Is(STAFFDEF) && (vrv_cast<StaffDef *>(child)->GetN() == n)) {
+                        staffDef = vrv_cast<StaffDef *>(child);
+                    }
+                }
+                if (!staffDef) {
+                    staffDef = new StaffDef();
+                    staffDef->SetN(n);
+                    staffGrp->AddChild(staffDef);
+                }
+                if (firstObject && (change == firstNode)) {
+                    if (!moved) {
+                        staffDef->AddChild(scoreDef->DetachChild(scoreDef->GetChildIndex(firstObject)));
+                        moved = true;
+                    }
+                    else {
+                        staffDef->AddChild(firstObject->Clone());
+                    }
+                }
+                else if (isKey) {
+                    staffDef->AddChild(this->ConvertKey(change));
+                }
+                else {
+                    this->ReadMusicXMLMeterSig(change, staffDef);
+                }
+            }
+        }
+    }
+
+    m_currentKeySig = currentKeySig;
+    m_meterCount = meterCount;
+    m_meterUnit = meterUnit;
 }
 
 void MusicXmlInput::ResetAccidentals(const KeySig *keySig)
