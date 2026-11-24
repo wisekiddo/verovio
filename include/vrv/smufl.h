@@ -100,6 +100,13 @@ enum {
     SMUFL_E0B7_noteheadVoidWithX = 0xE0B7,
     SMUFL_E0B8_noteheadSquareWhite = 0xE0B8,
     SMUFL_E0B9_noteheadSquareBlack = 0xE0B9,
+    SMUFL_E0BA_noteheadTriangleUpDoubleWhole = 0xE0BA,
+    SMUFL_E0BB_noteheadTriangleUpWhole = 0xE0BB,
+    SMUFL_E0BC_noteheadTriangleUpHalf = 0xE0BC,
+    SMUFL_E0BD_noteheadTriangleUpWhite = 0xE0BD,
+    SMUFL_E0BE_noteheadTriangleUpBlack = 0xE0BE,
+    SMUFL_E0C8_noteheadTriangleUpRightWhite = 0xE0C8,
+    SMUFL_E0C9_noteheadTriangleUpRightBlack = 0xE0C9,
     SMUFL_E0CF_noteheadSlashedBlack1 = 0xE0CF,
     SMUFL_E0D0_noteheadSlashedBlack2 = 0xE0D0,
     SMUFL_E0D1_noteheadSlashedHalf1 = 0xE0D1,
@@ -674,8 +681,14 @@ enum {
     SMUFL_EE94_mensuralProportion9 = 0xEE94,
 };
 
-/** The number of glyphs for verification **/
+/** The number of glyphs every default font (Bravura, Leipzig) has, for verification **/
 #define SMUFL_COUNT 650
+
+/** A glyph drawn only where a font has it, which a default font need not have (supported.xml: optional) **/
+inline bool IsOptionalSmufl(char32_t code)
+{
+    return (code == 0xE0BA) || (code == 0xE0BB) || (code == 0xE0BC) || (code == 0xE0BD) || (code == 0xE0BE) || (code == 0xE0C8) || (code == 0xE0C9);
+}
 
 } // namespace vrv
 

@@ -205,9 +205,10 @@ public:
     char32_t GetMensuralNoteheadGlyph() const;
 
     /**
-     * Return a SMuFL code for the notehead
+     * Return a SMuFL code for the notehead: its shape's glyph where the font has it (or the fallback font), else the
+     * plain head
      */
-    char32_t GetNoteheadGlyph(const data_DURATION duration) const;
+    char32_t GetNoteheadGlyph(const data_DURATION duration, const Resources &resources) const;
 
     /**
      * Check whether current note is enharmonic with another

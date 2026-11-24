@@ -204,11 +204,11 @@
         <glyph glyph-code="E0B7" smufl-name="noteheadVoidWithX" />
         <glyph glyph-code="E0B8" smufl-name="noteheadSquareWhite" />
         <glyph glyph-code="E0B9" smufl-name="noteheadSquareBlack" />
-        <!--<glyph glyph-code="E0BA" smufl-name="noteheadTriangleUpDoubleWhole" />-->
-        <!--<glyph glyph-code="E0BB" smufl-name="noteheadTriangleUpWhole" />-->
-        <!--<glyph glyph-code="E0BC" smufl-name="noteheadTriangleUpHalf" />-->
-        <!--<glyph glyph-code="E0BD" smufl-name="noteheadTriangleUpWhite" />-->
-        <!--<glyph glyph-code="E0BE" smufl-name="noteheadTriangleUpBlack" />-->
+        <glyph glyph-code="E0BA" smufl-name="noteheadTriangleUpDoubleWhole" optional="yes" />
+        <glyph glyph-code="E0BB" smufl-name="noteheadTriangleUpWhole" optional="yes" />
+        <glyph glyph-code="E0BC" smufl-name="noteheadTriangleUpHalf" optional="yes" />
+        <glyph glyph-code="E0BD" smufl-name="noteheadTriangleUpWhite" optional="yes" />
+        <glyph glyph-code="E0BE" smufl-name="noteheadTriangleUpBlack" optional="yes" />
         <!--<glyph glyph-code="E0BF" smufl-name="noteheadTriangleLeftWhite" />-->
         <!--<glyph glyph-code="E0C0" smufl-name="noteheadTriangleLeftBlack" />-->
         <!--<glyph glyph-code="E0C1" smufl-name="noteheadTriangleRightWhite" />-->
@@ -218,8 +218,8 @@
         <!--<glyph glyph-code="E0C5" smufl-name="noteheadTriangleDownHalf" />-->
         <!--<glyph glyph-code="E0C6" smufl-name="noteheadTriangleDownWhite" />-->
         <!--<glyph glyph-code="E0C7" smufl-name="noteheadTriangleDownBlack" />-->
-        <!--<glyph glyph-code="E0C8" smufl-name="noteheadTriangleUpRightWhite" />-->
-        <!--<glyph glyph-code="E0C9" smufl-name="noteheadTriangleUpRightBlack" />-->
+        <glyph glyph-code="E0C8" smufl-name="noteheadTriangleUpRightWhite" optional="yes" />
+        <glyph glyph-code="E0C9" smufl-name="noteheadTriangleUpRightBlack" optional="yes" />
         <!--<glyph glyph-code="E0CA" smufl-name="noteheadMoonWhite" />-->
         <!--<glyph glyph-code="E0CB" smufl-name="noteheadMoonBlack" />-->
         <!--<glyph glyph-code="E0CC" smufl-name="noteheadTriangleRoundDownWhite" />-->

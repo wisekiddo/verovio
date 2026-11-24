@@ -496,11 +496,12 @@ Point Note::GetStemUpSE(const Doc *doc, int staffSize, bool isCueSize) const
     int defaultYShift = doc->GetDrawingUnit(staffSize) / 4;
     if (isCueSize) defaultYShift = doc->GetCueSize(defaultYShift);
     // x default is always set to the right for now
-    int defaultXShift = doc->GetGlyphWidth(this->GetNoteheadGlyph(this->GetActualDur()), staffSize, isCueSize);
+    int defaultXShift
+        = doc->GetGlyphWidth(this->GetNoteheadGlyph(this->GetActualDur(), doc->GetResources()), staffSize, isCueSize);
     Point p(defaultXShift, defaultYShift);
 
     // Here we should get the notehead value
-    char32_t code = this->GetNoteheadGlyph(this->GetDrawingDur());
+    char32_t code = this->GetNoteheadGlyph(this->GetDrawingDur(), doc->GetResources());
 
     // This is never called for now because mensural notes do not have stem/flag children
     // For changing this, change CalcStemFunctor::VisitNote and PrepareLayerElementPartsFunctor::VisitNote
@@ -532,7 +533,7 @@ Point Note::GetStemDownNW(const Doc *doc, int staffSize, bool isCueSize) const
     Point p(0, -defaultYShift);
 
     // Here we should get the notehead value
-    char32_t code = this->GetNoteheadGlyph(this->GetDrawingDur());
+    char32_t code = this->GetNoteheadGlyph(this->GetDrawingDur(), doc->GetResources());
 
     // This is never called for now because mensural notes do not have stem/flag children
     // See comment above
@@ -637,7 +638,7 @@ char32_t Note::GetMensuralNoteheadGlyph() const
     return code;
 }
 
-char32_t Note::GetNoteheadGlyph(const data_DURATION duration) const
+char32_t Note::GetNoteheadGlyph(const data_DURATION duration, const Resources &resources) const
 {
     static std::map<std::string, char32_t> additionalNoteheadSymbols
         = { { "noteheadDiamondBlackWide", SMUFL_E0DC_noteheadDiamondBlackWide },
@@ -673,7 +674,28 @@ char32_t Note::GetNoteheadGlyph(const data_DURATION duration) const
                                                                   : SMUFL_E0DB_noteheadDiamondBlack;
                     }
                 }
-                    // case HEADSHAPE_isotriangle: return SMUFL_E0BC_noteheadTriangleUpHalf;
+                case HEADSHAPE_list_isotriangle: {
+                    // A triangle pointing up, by its duration and fill as the diamond and the rectangle are. Drawn where
+                    // the font has the glyph; a font without it (Leipzig) gives the plain head below, not nothing. (Its
+                    // cases were commented out, and the glyphs not in the fonts' data: a triangle note was drawn as a
+                    // plain head. MuseNote RC157)
+                    char32_t code = SMUFL_E0BE_noteheadTriangleUpBlack;
+                    if ((duration != DURATION_NONE) && (duration <= DURATION_breve)) {
+                        code = SMUFL_E0BA_noteheadTriangleUpDoubleWhole;
+                    }
+                    else if (duration == DURATION_1) {
+                        code = SMUFL_E0BB_noteheadTriangleUpWhole;
+                    }
+                    else if (duration == DURATION_2) {
+                        code = (this->GetHeadFill() == FILL_solid) ? SMUFL_E0BE_noteheadTriangleUpBlack
+                                                                   : SMUFL_E0BC_noteheadTriangleUpHalf;
+                    }
+                    else if (this->GetHeadFill() == FILL_void) {
+                        code = SMUFL_E0BD_noteheadTriangleUpWhite;
+                    }
+                    if (resources.GetGlyph(code)) return code;
+                    break;
+                }
                     // case HEADSHAPE_oval: return SMUFL_noteheadOval;
                     // case HEADSHAPE_piewedge: return SMUFL_noteheadPieWedge;
                 case HEADSHAPE_list_rectangle:
@@ -685,7 +707,16 @@ char32_t Note::GetNoteheadGlyph(const data_DURATION duration) const
                         return (this->GetHeadFill() == FILL_void) ? SMUFL_E0B8_noteheadSquareWhite
                                                                   : SMUFL_E0B9_noteheadSquareBlack;
                     }
-                    // case HEADSHAPE_rtriangle: return SMUFL_noteheadRTriangle;
+                case HEADSHAPE_list_rtriangle: {
+                    // A right triangle: white for a half note and longer, black for shorter, unless its fill says
+                    // otherwise, as the diamond; where the font has it (MuseNote RC157)
+                    const bool black = (duration < DURATION_4) ? (this->GetHeadFill() == FILL_solid)
+                                                               : (this->GetHeadFill() != FILL_void);
+                    const char32_t code
+                        = black ? SMUFL_E0C9_noteheadTriangleUpRightBlack : SMUFL_E0C8_noteheadTriangleUpRightWhite;
+                    if (resources.GetGlyph(code)) return code;
+                    break;
+                }
                     // case HEADSHAPE_semicircle: return SMUFL_noteheadSemicircle;
                 case HEADSHAPE_list_slash: {
                     if (DURATION_1 >= duration) return SMUFL_E102_noteheadSlashWhiteWhole;

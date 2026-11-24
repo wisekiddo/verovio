@@ -615,7 +615,7 @@ int LayerElement::GetDrawingRadius(const Doc *doc, bool isInLigature) const
             code = note->GetMensuralNoteheadGlyph();
         }
         else {
-            code = note->GetNoteheadGlyph(dur);
+            code = note->GetNoteheadGlyph(dur, doc->GetResources());
         }
     }
     else if (this->Is(CHORD)) {

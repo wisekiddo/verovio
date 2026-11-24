@@ -39,7 +39,7 @@ FunctorCode CalcChordNoteHeadsFunctor::VisitChord(Chord *chord)
         }
         else {
             const Note *bottomNote = chord->GetBottomNote();
-            const char32_t code = bottomNote->GetNoteheadGlyph(chord->GetActualDur());
+            const char32_t code = bottomNote->GetNoteheadGlyph(chord->GetActualDur(), m_doc->GetResources());
             m_diameter = m_doc->GetGlyphWidth(
                 code, staff->m_drawingStaffSize, chord->GetDrawingCueSize() ? bottomNote->GetDrawingCueSize() : false);
         }

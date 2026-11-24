@@ -191,6 +191,30 @@
     <a n="stemDownNW" x="0.0" y="-0.5" />
     <a n="stemUpSE" x="1.25" y="0.5" />
   </g>
+  <g c="E0BA" x="0.0" y="-155.0" w="483.0" h="310.0" h-a-x="483" n="noteheadTriangleUpDoubleWhole">
+    <a n="noteheadOrigin" x="0.34" y="0.0" />
+  </g>
+  <g c="E0BB" x="0.0" y="-125.0" w="319.0" h="250.0" h-a-x="319" n="noteheadTriangleUpWhole" />
+  <g c="E0BC" x="0.0" y="-125.0" w="285.0" h="250.0" h-a-x="285" n="noteheadTriangleUpHalf">
+    <a n="stemDownNW" x="0.0" y="-0.46" />
+    <a n="stemUpSE" x="1.14" y="-0.46" />
+  </g>
+  <g c="E0BD" x="0.0" y="-125.0" w="293.0" h="250.0" h-a-x="293" n="noteheadTriangleUpWhite">
+    <a n="stemDownNW" x="0.0" y="-0.5" />
+    <a n="stemUpSE" x="1.17" y="-0.5" />
+  </g>
+  <g c="E0BE" x="0.0" y="-125.0" w="293.0" h="250.0" h-a-x="293" n="noteheadTriangleUpBlack">
+    <a n="stemDownNW" x="0.0" y="-0.5" />
+    <a n="stemUpSE" x="1.17" y="-0.5" />
+  </g>
+  <g c="E0C8" x="0.0" y="-125.0" w="339.0" h="250.0" h-a-x="339" n="noteheadTriangleUpRightWhite">
+    <a n="stemDownNW" x="0.0" y="0.5" />
+    <a n="stemUpSE" x="1.36" y="0.5" />
+  </g>
+  <g c="E0C9" x="0.0" y="-125.0" w="339.0" h="250.0" h-a-x="339" n="noteheadTriangleUpRightBlack">
+    <a n="stemDownNW" x="0.0" y="0.5" />
+    <a n="stemUpSE" x="1.36" y="0.5" />
+  </g>
   <g c="E0CF" x="-80.0" y="-165.0" w="455.0" h="332.0" h-a-x="295" n="noteheadSlashedBlack1">
     <a n="stemDownNW" x="0.0" y="-0.17" />
     <a n="stemUpSE" x="1.18" y="0.16" />

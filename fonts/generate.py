@@ -42,8 +42,14 @@ enum {{
 {smufl_glyph_list}
 }};
 
-/** The number of glyphs for verification **/
+/** The number of glyphs every default font (Bravura, Leipzig) has, for verification **/
 #define SMUFL_COUNT {len_smufl_codes}
+
+/** A glyph drawn only where a font has it, which a default font need not have (supported.xml: optional) **/
+inline bool IsOptionalSmufl(char32_t code)
+{{
+    return {optional_smufl_codes};
+}}
 
 }} // namespace vrv
 
@@ -96,6 +102,8 @@ def generate_smufl(opts: Namespace) -> bool:
 
     log.debug("SMuFL header will be stored in %s", header_out_pth)
     supported_glyphs: dict = __get_supported_glyph_codes(supported_pth)
+    # (a glyph optional="yes" is drawn where a font has it: the default fonts are not expected to)
+    optional_glyphs: list = __get_optional_glyph_codes(supported_pth)
 
     fmt_supported_glyphs: list = [
         f"    SMUFL_{gcode}_{gname} = 0x{gcode}," for gcode, gname in supported_glyphs.items()
@@ -104,7 +112,9 @@ def generate_smufl(opts: Namespace) -> bool:
     log.debug("SMuFL header will contain %s supported glyphs", len(fmt_supported_glyphs))
     fmt_glyph_list = "\n".join(fmt_supported_glyphs)
     fmt_header = SMUFL_HEADER.format(
-        smufl_glyph_list=fmt_glyph_list, len_smufl_codes=len(fmt_supported_glyphs)
+        smufl_glyph_list=fmt_glyph_list,
+        len_smufl_codes=len(fmt_supported_glyphs) - len(optional_glyphs),
+        optional_smufl_codes=" || ".join(f"(code == 0x{gcode})" for gcode in optional_glyphs) or "false",
     )
 
     log.debug("Writing %s", header_file_pth)
@@ -480,6 +490,12 @@ def __get_supported_glyph_codes(supported: Path) -> dict:
 
     log.debug("Found %s supported glyphs", len(glyphs))
     return {g.attrib["glyph-code"]: g.attrib["smufl-name"] for g in glyphs}
+
+
+def __get_optional_glyph_codes(supported: Path) -> list:
+    """Retrieve the supported SMuFL codepoints marked optional: drawn where a font has them."""
+    supported_xml = Et.parse(str(supported))
+    return [g.attrib["glyph-code"] for g in supported_xml.findall(".//glyph") if g.attrib.get("optional") == "yes"]
 
 
 def __read_svg_font_file(

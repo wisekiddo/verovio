@@ -1535,7 +1535,7 @@ void View::DrawNote(DeviceContext *dc, LayerElement *element, Layer *layer, Staf
                 }
             }
             else {
-                fontNo = note->GetNoteheadGlyph(drawingDur);
+                fontNo = note->GetNoteheadGlyph(drawingDur, m_doc->GetResources());
             }
 
             dc->StartCustomGraphic("notehead");
