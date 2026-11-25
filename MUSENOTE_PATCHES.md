@@ -2989,6 +2989,197 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 154. A line too full for its words is laid out again: its notes tighter, then its words smaller (tb.66)
+
+MuseNote plan V3_2_0_98 (root cause RC211, finding W187; what remains: MuseNote W192). Ours: upstream's develop squeezes
+the same way (2026-11-24).
+
+- **The cause.** `JustifyXFunctor` fits a system laid out wider than its page by one ratio below 1 over its justifiable
+  width. The words are spaced to touch (`AdjustSylSpacingFunctor`, `lyricWordSpace`): squeezed, they are drawn over
+  each other. In MuseNote's 2,676 songs with words, on tb.65: 4,442 places (on 1,553 lines of 368 songs) in its editor
+  at its biggest zoom (900 wide), 305 (75 lines, 39 songs) in its reader at its biggest notes (1000); with
+  justification off, none. Three quarters stand on a bar wider than its line alone; the rest on lines the breaker
+  overfilled (151 to 153).
+- **The fit** (`Page::FitHorizontally`, between `LayOutHorizontally` and `JustifyHorizontally`, where justification
+  applies: breaks, no `noJustification`, no `adjustPageWidth`). A system whose justification ratio
+  (`System::GetJustificationRatio`, as `JustifyXFunctor` computes it) is below 1 and below the lowest that keeps each
+  word clear of the next and each hyphen its dash (`SafeSqueezeRatio`, by the distance between their notes, which the
+  squeeze moves) is laid out again:
+  - first with its notes tighter: `System::m_drawingSpacingFactor`, times the ratio, while that narrows the system by
+    a hundredth at least (`EstimateJustificationRatio` returns its estimate times the factor, past its bound);
+  - then with its words smaller: `System::m_drawingLyricScale`, times the ratio, while the squeeze would still draw a
+    word over the next, down to two fifths (MuseNote's floor): smaller words open the gaps between them whether or not
+    the system narrows. The syllables' text only (`Syl::GetDrawingLyricScale`, in `View::DrawSyl`; an elision's mark
+    with it); word gaps, hyphens and their lines keep the option's size;
+  - at most 8 passes over the page; a system with no words, or with its words at two fifths, is squeezed as before.
+    `Page::LayOut` sets both back to 1 first.
+- **What it changes.** The SVG of a line squeezed so that its words were drawn over each other: its notes, and on some
+  its words smaller. A squeeze that keeps the words clear, and a line without words, are as before. No MEI, MIDI,
+  timemap, pitch map or id.
+- **Left as it was.** A line whose words cannot fit even at two fifths is squeezed, its words at two fifths
+  (MuseNote W192).
+
+**Cases**: `test/native/test_tb66_line_fit_engine.cpp`: a line too full for its words is laid out with its notes
+tighter, the words whole; a squeeze that keeps the words apart is left as before (it holds on tb.65 too, as it must);
+words that cannot fit their line whole are set smaller on that line only, to two fifths at most. The other two fail on
+tb.65. Undone, each part fails its own: `FitHorizontally`, the notes stage, the words stage, the safe squeeze, the
+floor, the smaller words drawn. One part has no case of its own: the squeeze measured by the notes' distance, not the
+syllables' (a syllable pulled into the room before it, in a narrow window no synthetic input reached); MuseNote's
+lyric gate guards it (All in Love is Fair).
+
+**Gate of tb.66** (patches 151 to 154, MuseNote plan V3_2_0_98, on tb.65; the gate's fourth run, on 152's third
+form). Native: the suite, 575 cases (80,321 assertions), and under ASan, integer-divide-by-zero and
+signed-integer-overflow 574, no report; `tool/log_format_audit.py`: 301 engine sources, 0 calls. A Debug engine
+(signed overflow halting it) over every input: 3,612, all through, and through the frozen readers the 3,392 MusicXML
+and ABC inputs, all through. Parity against tb.65: 22,961 outputs, 3,226 differ, all SVG, as declared (lines break and
+space otherwise); no MEI, MIDI, timemap, pitch map or id; seeded ids 3,218 of 3,218; every input reads back from its MEI
+(3,612). The locator gate: 0 failures. MuseSync's 24 starters: the same. `bar_times.py`: as tb.65. MuseNote's export
+gate in every format: no song-aspect worse, its six refused exports tb.65's (neume notation). The frozen readers' whole
+MEI: the same as tb.65's for the 3,089 songs, the 80 of 3.0.1 and the 194 ABC files. MuseNote's lyric gate, every song
+with words (2,676) at its 16 layouts and render paths, each syllable judged against its own size on tb.65: words over
+each other on one bar alone, Cinnamon Girl's, its words at two fifths (MuseNote W192): 2 places at the reader's biggest
+notes (tb.65: 305, in 39 songs), 3 in the editor's biggest zoom (tb.65: 4,442, in 368); none on a line whose words
+are not at two fifths, and no word below two fifths; lines with smaller words: 175 at the reader's biggest notes, 1,545
+in the editor's biggest zoom (75 at two fifths), 3 at its 1,400 and 1 in A4 print. Lines, each counted as it is drawn:
+more than on tb.65, the more the narrower the page (the reader's biggest notes 54,925 to 62,901, +14.5 %; the editor's
+biggest zoom +15.0 %; A4 print +5.5 %; the editor's 3,600 tile +1.7 %). MuseNote's measure of every line of its corpus
+(3,198 songs at the reader's biggest notes and the editor's biggest zoom, 160,029 lines): every line's start counted
+exactly as it is drawn but 170, those declared under 152 (a barline split at the break, 168 lines; an arpeggio on the
+first chord, 2). V3_2_0_92's taps (213 songs, 12 layouts, 3 renders each): none right on tb.65 wrong on tb.66, no bar
+misframed. Render time, 100 songs in two layouts: +9.2 % to +9.7 % (four runs). The gate's third run, on 152's second
+form, had passed every gate, with 568 lines' starts a unit off; 11 SVGs differ between the two.
+
+**Upstream status**: not offered.
+
+### 153. The spacing estimate counts what the line breaker counted beyond the measures (tb.66)
+
+MuseNote plan V3_2_0_98 (root cause RC215, finding W187). Ours: upstream's develop is the same (2026-11-24).
+
+- **The cause.** `System::EstimateJustificationRatio` stretches a line's notes before it is laid out, by the room its
+  measures' cast-off widths leave on the page. Those widths are stored before the line has a drawing scoreDef: its
+  staff labels counted nothing, and a later line's clefs, key and meter nothing. A line that fitted at the break grew
+  when it was laid out, and was squeezed (with 152's cause, a fifth of the overlaps of MuseNote's editor at its
+  biggest zoom, in its trace on tb.64).
+- **The fix.** `System::m_castOffStartWidth`: what the line breaker counted for the line beyond its measures (the first
+  line's labels; a later line's start, 152; the cautionary change a line ends with, 152; a held line's overhang, 151).
+  The estimate counts it with the margins.
+- **What it changes.** The note spacing of a line the estimate stretched into room it did not have: any score's lines
+  may space otherwise. The SVG only.
+
+**Cases**: `test/native/test_tb66_line_fit_engine.cpp` in MuseNote's `corelib/verovio` (8 cases for patches 151 to
+154): with the staff labels shown, a line whose bars fit is laid out no wider than its width. It fails on tb.65, and
+with the stored width undone (as RC214's and RC216's do, which count through it).
+
+**Upstream status**: not offered.
+
+### 152. The line breaker counts the start a new line draws, and the change a line ends with (tb.66)
+
+MuseNote plan V3_2_0_98 (root cause RC216, finding W187). Ours: upstream's develop is the same (2026-11-24), its
+comment saying what was missing ("we would need two parameters").
+
+- **The cause.** `CastOffSystemsFunctor` counted a line's start as the last scoreDef's own drawing width
+  (`ScoreDef::GetDrawingWidth`, from `View::SetScoreDefDrawingWidth`: a G clef and 0.4 of a sharp for any key, no
+  meter), and as 0 until it met one; after a change mid-score, that change's own width. A key of many accidentals, a
+  meter at a line's start and a change's real state were not counted. Nor was what a line ending before a change of
+  clef, key or meter ends with: that change, cautionary (`SetCautionaryScoreDefFunctor`).
+- **The fix.** The scoreDef a later line starts with (`m_upcomingScoreDef`) is kept apart from the current line's
+  start: the page's drawing scoreDef, each change applied as it is met (its draw flags, as the engine sets them, are
+  the change the next measure draws), and each clef or key inside a measure as `ScoreDefSetCurrentFunctor` applies
+  them, the flags cleared after each measure (`ApplyMeasure`). What each staff draws is taken as the engine draws it
+  and `BBoxDeviceContext` bounds it (`CalcClefExtent`, `CalcKeyExtent`, `CalcMeterExtent`, `AddGlyphsExtent`): a clef
+  by its glyph (a tablature's at its notation size); a key's accidentals stepped by their advance (as a device context
+  measures it, rounded up: `CalcGlyphAdvance`) and a step, and its naturals, where `View::DrawKeySig` draws them, by
+  their width and a step of their own; a meter's lines of figures, its summands joined by their sign, each centred on
+  the advance of the line with the more glyphs, and its enclosing glyphs; each with its margins, and an element drawn
+  empty (a key of none, a hidden clef) with none. And it is placed as `AdjustXPosFunctor::VisitMeasure` places a
+  measure's scoreDef alignments (`CalcScoreDefEnd`): staff by staff, each element moving its alignment, and every one
+  after it, as far as it must to clear what its staff drew before. So a key goes clear of the widest clef of the
+  staves that draw a key, and a staff with a key of none draws its clef alone; a staff placed after another moves on
+  alignments the first placed already, and every one after them: a meter changing on the lower staff alone moves the
+  line's first bar on by the upper staff's key as well (about 550 units in the case below). What each staff draws is
+  what the engine's draw flags say, kept as the engine keeps them: a key changing on any staff is drawn again on every
+  staff (`ReplaceDrawingValuesInStaffDefFunctor`), empty where it is a key of none.
+  - A new line's start (`CalcLineStartWidth`) is where its first measure's left barline goes after its clefs and keys
+    and a meter changing there, less where it went within the line: a change right before that measure was laid out
+    there, its naturals with it. The room a line's first measure keeps clear of a system start line, on a system of
+    several staves or with a group symbol (`AdjustXPosFunctor`, a barline's width). And the abbreviated labels.
+  - A measure fits its line if it fits with the changes between it and the next measure, which a line ending there
+    ends with, cautionary (`CalcCautionaryWidth`, `CalcChangeWidth`: placed so from the measure's right barline; an
+    ending's end or another milestone may stand among them).
+  - A line starting with a held measure (151) takes its start and the line before it its end from that measure.
+  - The first line's start stays in its first measure, whose width holds it.
+- **For the counting** (found by MuseNote's measure of every line of its corpus, below):
+  - `Clef::GetClefGlyph` and `MeterSig::GetSymbolGlyph` take the resources to look the glyph up in (`clef.h/.cpp`,
+    `metersig.h/.cpp`; the calls before hand theirs on, unchanged). The clef and meter counted are a staffDef's
+    current ones in the breaker's copy of a scoreDef, in no document: `Object::GetDocResources` finds none for them
+    (and warns), the clef's glyph came back 0, and the meter's lookup by glyph name or number would have used the
+    missing resources.
+  - `View::DrawLabels` stores the abbreviated labels' width, which the breaker counts for every line but the first,
+    before it draws the full label or finds it empty (`view_page.cpp`): a part whose name is hidden, its abbreviation
+    drawn on the next lines, kept none. Only the breaker reads that width.
+- **What it changes.** Where lines break: in a key of any accidentals, after a change, before one, in a system of
+  several staves, with a hidden name's abbreviation. Any score's lines may break otherwise; in a key of several
+  accidentals they hold fewer bars, which tb.65 set past their width and squeezed. The SVG and the page count only.
+- **Left as it was.**
+  - An encoded system break taken in `smart` mode starts a line whose start is not counted, as before (neither MuseNote
+    nor MuseSync breaks in that mode).
+  - A barline the engine draws otherwise at a break than within a line (`Measure::SetDrawingBarLines`: a repeat end
+    and the repeat start after it, or a double barline on either side, are one within a line and split at a break) is
+    counted as the one-line layout has it: the line starting there is 104 to 135 units short (168 lines of MuseNote's
+    corpus: 74 at its reader's biggest notes, 94 in its editor at the biggest zoom).
+  - An arpeggio on a line's first chord is spaced against the line's start (`AdjustArpegFunctor`, which moves the
+    first measure's left barline with it), in the one-line layout against the bar before: the line is 29 units short
+    (Ashoken Farewell's bar 18, at both).
+  - A held line's overhang is the one-line layout's; the final layout may widen the line by more.
+  - Not counted, as on tb.65: a clef's enclosure (`@enclose`), a mensur, a meter of several (`meterSigGrp`), a key's
+    own accidentals (`keyAccid`: counted as its type's), and a clef or meter in a font of its own (`@fontname`).
+
+**Cases**: in the same file: a key of seven flats, a change of key and of meter mid-score: no line is laid out wider
+than its width; in bars of quarters, at every page width from 700 to 1,600 in tens, a line of two bars or more starting
+right after a key change holds the bars the next line holds, which starts alike, and one ending before a key change
+that cancels the old key (MusicXML `<cancel>`) is laid out no wider than its width. Each fails on tb.65. And the guard
+the plan named (`test/native/test_tb66_line_counts_engine.cpp`): through a subclass of the toolkit, on every line of
+nine scores at page widths 700 to 1,600 (the two-staff ones in tens), what the breaker counted
+(`System::m_castOffStartWidth`) against what the line draws beyond its measures (its labels, its first measure's left
+barline moved, its last measure's end grown past its right barline, from the score laid out on one line): seven flats;
+changes of key and meter, a key cancelled and one of none; a hidden name's abbreviation; and two staves, each score a
+placement a wrong rule misses: the wider clef on one and the wider key on the other; a bass in C beside a clarinet in
+seven sharps; a meter changing on the lower staff alone, at a line's start; and at a line's end, the key changing on
+the upper staff and the clef on the lower, the meter on the upper and the key on the lower, and the meter (16/16) on
+the upper and the clef on the lower with no key changing, those of a change checking that a line starts at its bar.
+Two of the line's ends are MEI: MusicXML puts a clef change inside its bar, and a staff's meter changing with its key.
+It reads a member 153 adds and does not build on tb.65; it failed on tb.66 as first built (the gate's second run), and
+on 152's second form, which took each alignment as its widest staff's (the bass in C: every later line 34 units
+over). Undone, each part fails its own: the line's start, the cautionary change, the change at a line's start taken
+off, the naturals, the start line's room, the clef's resources, the abbreviation's width, a glyph's right by its box
+(not its advance), the advances rounded up; and the placement: each alignment by its widest staff (the bass in C, 34
+units a line), each staff's own start (the two of keys, 36), alignment by alignment with no shift carried (the meter
+on the lower staff, 550), and the right barline's end before a cautionary change (the meter and the clef, 13). A held
+line's own start has no case of its own: MuseNote's measure of every line of its corpus guards it (the gate of tb.66,
+under 154).
+
+**Upstream status**: not offered.
+
+### 151. A measure held for what overhangs it takes a line alone when it does not fit with the next (tb.66)
+
+MuseNote plan V3_2_0_98 (root cause RC214, finding W187). Ours: upstream's develop is the same (2026-11-24).
+
+- **The cause.** `CastOffSystemsFunctor::VisitMeasure` holds a measure whose content overhangs its barline by more than
+  5 units (a direction, a dynamic, a tempo), so that no break comes between it and the next. At the break the held
+  measures and the next went to the new line together, unchecked: two measures that do not fit one line were set on
+  one, and squeezed (a quarter of the overlaps of MuseNote's reader at its biggest notes, in its trace on tb.64).
+- **The fix.** At a break the held measures and the next must fit the new line together, with what that line ends
+  with (152). If they do not, the held measures take that line alone, and the next begins the line after. A line that
+  ends with a held measure counts what overhangs it, which the layout makes room for (`AdjustXOverflowFunctor`), and a
+  change right after it, cautionary (152), so the estimate leaves room for them (153).
+- **What it changes.** Where lines break after a held measure. The SVG and the page count only.
+
+**Cases**: in the same file: a measure held for a direction's words that overhang its barline, which does not fit with
+the next, takes a line alone, and no line is laid out wider than its width. It fails on tb.65, with the held measures
+alone undone, and with the held line's overhang undone.
+
+**Upstream status**: not offered.
+
 ### 150. Each part's key and meter change is its own (tb.65)
 
 MuseNote plan V3_2_0_97 (root cause RC127, finding W120). Ours (upstream #3877: "no plans").
