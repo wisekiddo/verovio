@@ -3049,6 +3049,10 @@ first chord, 2). V3_2_0_92's taps (213 songs, 12 layouts, 3 renders each): none 
 misframed. Render time, 100 songs in two layouts: +9.2 % to +9.7 % (four runs). The gate's third run, on 152's second
 form, had passed every gate, with 568 lines' starts a unit off; 11 SVGs differ between the two.
 
+**One commit** (c8fe8fa): 151 to 154 are one commit, not one each as the patch queue's rule says (MuseNote's
+`corelib/verovio/AGENTS.md`): each builds on the one before in the same functions, and they were never built apart.
+Kept so by the owner's decision of 2026-11-25; the tag is not moved.
+
 **Upstream status**: not offered.
 
 ### 153. The spacing estimate counts what the line breaker counted beyond the measures (tb.66)
