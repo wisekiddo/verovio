@@ -66,6 +66,12 @@ public:
     /** Retrieves the symbol glyph */
     char32_t GetSymbolGlyph() const;
 
+    /**
+     * The same, with the resources given: for a meter that is in no document, as a staffDef's current meter in a copy
+     * of a scoreDef (MuseNote RC216: GetDocResources finds none for it)
+     */
+    char32_t GetSymbolGlyph(const Resources *resources) const;
+
     /** Retrieve parentheses from the enclose attribute */
     std::pair<char32_t, char32_t> GetEnclosingGlyphs(bool smallGlpyh) const;
 

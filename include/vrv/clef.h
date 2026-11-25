@@ -80,6 +80,12 @@ public:
      */
     char32_t GetClefGlyph(const data_NOTATIONTYPE notationType) const;
 
+    /**
+     * The same, with the resources given: for a clef that is in no document, as a staffDef's current clef in a copy of
+     * a scoreDef (MuseNote RC216: GetDocResources finds none for it, and the glyph was 0)
+     */
+    char32_t GetClefGlyph(const data_NOTATIONTYPE notationType, const Resources *resources) const;
+
     //----------//
     // Functors //
     //----------//

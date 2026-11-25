@@ -82,6 +82,9 @@ void System::Reset()
     m_drawingJustifiableWidth = 0;
     m_castOffTotalWidth = 0;
     m_castOffJustifiableWidth = 0;
+    m_castOffStartWidth = 0;
+    m_drawingSpacingFactor = 1.0;
+    m_drawingLyricScale = 1.0;
     m_drawingAbbrLabelsWidth = 0;
     m_drawingIsOptimized = false;
 }
@@ -431,8 +434,9 @@ double System::EstimateJustificationRatio(const Doc *doc) const
         return 1.0;
     }
 
+    // With what the line breaker counted beyond the measures: the labels, the clefs and keys (MuseNote RC215)
     const double nonJustifiableWidth
-        = m_systemLeftMar + m_systemRightMar + m_castOffTotalWidth - m_castOffJustifiableWidth;
+        = m_systemLeftMar + m_systemRightMar + m_castOffTotalWidth - m_castOffJustifiableWidth + m_castOffStartWidth;
     double estimatedRatio
         = (double)(doc->m_drawingPageContentWidth - nonJustifiableWidth) / ((double)m_castOffJustifiableWidth);
 
@@ -440,7 +444,18 @@ double System::EstimateJustificationRatio(const Doc *doc) const
     estimatedRatio *= 0.95;
     estimatedRatio = std::max(estimatedRatio, 0.8);
 
-    return estimatedRatio;
+    // A system laid out too wide is laid out again tighter, past the bound (MuseNote RC211)
+    return estimatedRatio * m_drawingSpacingFactor;
+}
+
+double System::GetJustificationRatio(const Doc *doc) const
+{
+    assert(doc);
+
+    if (m_drawingJustifiableWidth <= 0) return 1.0;
+    const int nonJustifiableWidth
+        = m_systemLeftMar + m_systemRightMar + m_drawingTotalWidth - m_drawingJustifiableWidth;
+    return (double)(doc->m_drawingPageContentWidth - nonJustifiableWidth) / (double)m_drawingJustifiableWidth;
 }
 
 void System::ConvertToUnCastOffMensuralSystem()

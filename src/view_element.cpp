@@ -1846,6 +1846,10 @@ void View::DrawSyl(DeviceContext *dc, LayerElement *element, Layer *layer, Staff
     if (syl->GetStart() && syl->GetStart()->GetDrawingCueSize()) {
         currentFont.SetPointSize(m_doc->GetCueSize(currentFont.GetPointSize()));
     }
+    // A line whose words cannot fit at full size sets them smaller (MuseNote RC211)
+    if (syl->GetDrawingLyricScale() < 1.0) {
+        currentFont.SetPointSize(currentFont.GetPointSize() * syl->GetDrawingLyricScale());
+    }
     if (syl->HasLetterspacing()) {
         currentFont.SetLetterSpacing(syl->GetLetterspacing() * m_doc->GetDrawingUnit(staff->m_drawingStaffSize));
     }

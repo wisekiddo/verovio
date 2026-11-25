@@ -131,7 +131,11 @@ int Clef::GetClefLocOffset() const
 
 char32_t Clef::GetClefGlyph(const data_NOTATIONTYPE notationtype) const
 {
-    const Resources *resources = this->GetDocResources();
+    return this->GetClefGlyph(notationtype, this->GetDocResources());
+}
+
+char32_t Clef::GetClefGlyph(const data_NOTATIONTYPE notationtype, const Resources *resources) const
+{
     const bool clefChange = (this->GetAlignment() && (this->GetAlignment()->GetType() == ALIGNMENT_CLEF));
     if (!resources) return 0;
 

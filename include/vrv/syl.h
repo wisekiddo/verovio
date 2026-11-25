@@ -82,6 +82,13 @@ public:
     int CalcHyphenLength(Doc *doc, int staffSize);
 
     /**
+     * The scale the syllable's system sets its text at: 1.0, but where a line's words cannot fit at full size
+     * (MuseNote RC211, System::m_drawingLyricScale). Word gaps, hyphens and their lines keep their size: at two
+     * fifths, a line squeezed as before keeps the room between its words.
+     */
+    double GetDrawingLyricScale() const;
+
+    /**
      * Calculate the spacing needed depending on the @worpos and @con
      */
     int CalcConnectorSpacing(Doc *doc, int staffSize);

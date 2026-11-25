@@ -112,6 +112,13 @@ public:
     void JustifyHorizontally();
 
     /**
+     * Lay out again a system laid out wider than the page holds, instead of letting JustifyHorizontally squeeze
+     * it, which draws words over each other (MuseNote RC211): first with its notes tighter, and where that no
+     * longer narrows it, with its words smaller. Only where JustifyHorizontally justifies.
+     */
+    void FitHorizontally();
+
+    /**
      * Lay out the content of the page (system/staves) vertically.
      */
     void LayOutVertically();

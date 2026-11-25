@@ -507,15 +507,33 @@ void View::DrawLabels(
         graphic = labelAbbr;
     }
 
-    if (!graphic || (labelStr.length() == 0)) {
-        return;
-    }
-
     FontInfo labelTxt;
     if (!dc->UseGlobalStyling()) {
         labelTxt.SetFaceName(m_doc->GetResources().GetTextFont());
     }
     labelTxt.SetPointSize(m_doc->GetDrawingLyricFont(staffSize)->GetPointSize());
+
+    // Store in the system the maximum width with abbreviations, which the line breaker counts for the next lines: also
+    // where the full label is empty, the abbreviation being drawn on the next lines all the same (MuseNote RC216)
+    if (labelAbbr && !abbreviations && (labelAbbrStr.length() > 0)) {
+        dc->SetFont(&labelTxt);
+        TextExtend extend;
+        std::vector<std::u32string> lines;
+        labelAbbr->GetTextLines(lines);
+        int maxLength = 0;
+        for (std::u32string &line : lines) {
+            dc->GetTextExtent(line, &extend, true);
+            maxLength = (extend.m_width > maxLength) ? extend.m_width : maxLength;
+        }
+        System *system = vrv_cast<System *>(scoreDef->GetFirstAncestor(SYSTEM));
+        assert(system);
+        system->SetDrawingAbbrLabelsWidth(maxLength + space);
+        dc->ResetFont();
+    }
+
+    if (!graphic || (labelStr.length() == 0)) {
+        return;
+    }
 
     int lineCount = graphic->GetChildCount(LB) + 1;
     if (lineCount > 1) {
@@ -539,20 +557,6 @@ void View::DrawLabels(
 
     // keep the widest width for the system - careful: this can be the label OR labelAbbr
     scoreDef->SetDrawingLabelsWidth(graphic->GetContentX2() - graphic->GetContentX1() + space);
-    // also store in the system the maximum width with abbreviations for justification
-    if (labelAbbr && !abbreviations && (labelAbbrStr.length() > 0)) {
-        TextExtend extend;
-        std::vector<std::u32string> lines;
-        labelAbbr->GetTextLines(lines);
-        int maxLength = 0;
-        for (std::u32string &line : lines) {
-            dc->GetTextExtent(line, &extend, true);
-            maxLength = (extend.m_width > maxLength) ? extend.m_width : maxLength;
-        }
-        System *system = vrv_cast<System *>(scoreDef->GetFirstAncestor(SYSTEM));
-        assert(system);
-        system->SetDrawingAbbrLabelsWidth(maxLength + space);
-    }
 
     dc->ResetFont();
 }

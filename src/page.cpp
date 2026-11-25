@@ -10,6 +10,7 @@
 //----------------------------------------------------------------------------
 
 #include <cassert>
+#include <set>
 
 //----------------------------------------------------------------------------
 
@@ -63,7 +64,9 @@
 #include "resetfunctor.h"
 #include "score.h"
 #include "staff.h"
+#include "syl.h"
 #include "system.h"
+#include "verse.h"
 #include "view.h"
 #include "vrv.h"
 
@@ -227,7 +230,16 @@ void Page::LayOut()
         return;
     }
 
+    // A new layout starts from the systems' own spacing and lyric size (MuseNote RC211)
+    ListOfObjects systems = this->FindAllDescendantsByType(SYSTEM, false, 1);
+    for (Object *object : systems) {
+        System *system = vrv_cast<System *>(object);
+        system->m_drawingSpacingFactor = 1.0;
+        system->m_drawingLyricScale = 1.0;
+    }
+
     this->LayOutHorizontally();
+    this->FitHorizontally();
     this->JustifyHorizontally();
     this->LayOutVertically();
     this->JustifyVertically();
@@ -605,6 +617,105 @@ void Page::LayOutVertically()
     alignSystems.SetShift(doc->m_drawingPageContentHeight);
     alignSystems.SetSystemSpacing(doc->GetOptions()->m_spacingSystem.GetValue() * doc->GetDrawingUnit(100));
     this->Process(alignSystems);
+}
+
+namespace {
+
+// A line's words are set no smaller than two fifths of their size (the owner's choice, 2026-11-24): where they cannot
+// fit even then, JustifyHorizontally squeezes the line, as before
+constexpr double MIN_LYRIC_SCALE = 0.4;
+
+// The lowest ratio JustifyXFunctor may squeeze a system by and keep each word clear of the next, and each hyphen its
+// dash (MuseNote RC211): 0 when the system has no two words to close
+double SafeSqueezeRatio(System *system, Doc *doc)
+{
+    // The syllables of each line of verses: a staff's side and verse number (as AdjustSylSpacingFunctor spaces them)
+    std::map<std::tuple<int, bool, int>, std::vector<Syl *>> lines;
+    ListOfObjects syls = system->FindAllDescendantsByType(SYL);
+    for (Object *object : syls) {
+        Syl *syl = vrv_cast<Syl *>(object);
+        const Staff *staff = vrv_cast<const Staff *>(syl->GetFirstAncestor(STAFF));
+        const Verse *verse = vrv_cast<const Verse *>(syl->GetFirstAncestor(VERSE));
+        if (!staff || !verse || !syl->HasContentHorizontalBB()) continue;
+        lines[{ staff->GetN(), verse->GetPlace() == STAFFREL_above, verse->GetN() }].push_back(syl);
+    }
+    double safe = 0.0;
+    for (auto &[line, lineSyls] : lines) {
+        std::stable_sort(lineSyls.begin(), lineSyls.end(),
+            [](const Syl *syl1, const Syl *syl2) { return (syl1->GetContentLeft() < syl2->GetContentLeft()); });
+        for (int i = 0; i + 1 < (int)lineSyls.size(); ++i) {
+            Syl *syl = lineSyls.at(i);
+            const Syl *next = lineSyls.at(i + 1);
+            // JustifyXFunctor moves the notes; a syllable keeps its place by its note
+            const LayerElement *note = syl->GetStart();
+            const LayerElement *nextNote = next->GetStart();
+            if (!note || !nextNote) continue;
+            const int span = nextNote->GetDrawingX() - note->GetDrawingX();
+            if (span <= 0) continue;
+            const int staffSize = vrv_cast<const Staff *>(syl->GetFirstAncestor(STAFF))->m_drawingStaffSize;
+            const int minGap = ((syl->GetWordpos() == sylLog_WORDPOS_i) || (syl->GetWordpos() == sylLog_WORDPOS_m))
+                ? syl->CalcHyphenLength(doc, staffSize)
+                : 0;
+            const int gap = next->GetContentLeft() - syl->GetContentRight();
+            safe = std::max(safe, 1.0 - (double)(gap - minGap) / (double)span);
+        }
+    }
+    return std::min(safe, 1.0);
+}
+
+} // namespace
+
+void Page::FitHorizontally()
+{
+    Doc *doc = vrv_cast<Doc *>(this->GetFirstAncestor(DOC));
+    assert(doc);
+
+    if ((doc->GetOptions()->m_breaks.GetValue() == BREAKS_none) || doc->GetOptions()->m_noJustification.GetValue()
+        || doc->GetOptions()->m_adjustPageWidth.GetValue()) {
+        return;
+    }
+
+    ListOfObjects systems = this->FindAllDescendantsByType(SYSTEM, false, 1);
+    // Each system's width when last laid out; the systems whose words are being set smaller; and the systems left to
+    // JustifyHorizontally
+    std::map<const System *, int> laidOutWidths;
+    std::set<const System *> wordsSmaller;
+    std::set<const System *> settled;
+    for (int pass = 0; pass < 8; ++pass) {
+        bool again = false;
+        for (Object *object : systems) {
+            System *system = vrv_cast<System *>(object);
+            assert(system);
+            if (settled.count(system)) continue;
+            const double ratio = system->GetJustificationRatio(doc);
+            if (ratio >= 1.0) continue;
+            // A squeeze that keeps the words apart is left to JustifyHorizontally, as before
+            if (ratio >= SafeSqueezeRatio(system, doc)) continue;
+            const int width = system->m_drawingTotalWidth;
+            const auto laidOut = laidOutWidths.find(system);
+            // The notes tighter while that narrows the system by a hundredth at least
+            const bool narrowed
+                = (laidOut == laidOutWidths.end()) || (laidOut->second - width > laidOut->second / 100);
+            if (!wordsSmaller.count(system) && narrowed) {
+                system->m_drawingSpacingFactor *= ratio;
+            }
+            else if (!system->FindDescendantByType(SYL) || (system->m_drawingLyricScale <= MIN_LYRIC_SCALE)) {
+                // No words to set smaller, or at two fifths already: JustifyHorizontally squeezes it, as before
+                settled.insert(system);
+                continue;
+            }
+            else {
+                // Then the words smaller, while the squeeze would still draw one over the next: smaller words open
+                // the gaps between them, whether or not the system narrows
+                wordsSmaller.insert(system);
+                system->m_drawingLyricScale = std::max(MIN_LYRIC_SCALE, system->m_drawingLyricScale * ratio);
+            }
+            laidOutWidths[system] = width;
+            again = true;
+        }
+        if (!again) break;
+        this->LayOutHorizontally();
+    }
 }
 
 void Page::JustifyHorizontally()

@@ -133,8 +133,12 @@ data_DURATION MeterSig::GetUnitAsDur() const
 
 char32_t MeterSig::GetSymbolGlyph() const
 {
+    return this->GetSymbolGlyph(this->GetDocResources());
+}
+
+char32_t MeterSig::GetSymbolGlyph(const Resources *resources) const
+{
     char32_t glyph = 0;
-    const Resources *resources = this->GetDocResources();
 
     // If there is glyph.num, prioritize it
     if (this->HasGlyphNum()) {

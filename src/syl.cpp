@@ -20,6 +20,7 @@
 #include "note.h"
 #include "smufl.h"
 #include "staff.h"
+#include "system.h"
 #include "text.h"
 #include "textelement.h"
 #include "verse.h"
@@ -98,6 +99,12 @@ int Syl::CalcHyphenLength(Doc *doc, int staffSize)
     Syl::AdjustToLyricSize(doc, dashLength);
 
     return dashLength;
+}
+
+double Syl::GetDrawingLyricScale() const
+{
+    const System *system = vrv_cast<const System *>(this->GetFirstAncestor(SYSTEM));
+    return (system) ? system->m_drawingLyricScale : 1.0;
 }
 
 int Syl::CalcConnectorSpacing(Doc *doc, int staffSize)

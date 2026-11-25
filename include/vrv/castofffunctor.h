@@ -8,7 +8,10 @@
 #ifndef __VRV_CASTOFFFUNCTOR_H__
 #define __VRV_CASTOFFFUNCTOR_H__
 
+#include <array>
+
 #include "functor.h"
+#include "scoredef.h"
 
 namespace vrv {
 
@@ -70,6 +73,95 @@ private:
 public:
     //
 private:
+    /**
+     * What a staff has in one of a measure's scoreDef alignments, as AdjustXPosFunctor places it (MuseNote RC216):
+     * nothing; an element drawn empty, which keeps the alignment clear of what the staff drew before it but takes no
+     * room and no margin; or a drawing, its left and right from the alignment, with its margins.
+     */
+    struct ScoreDefExtent {
+        bool present = false;
+        bool drawn = false;
+        int left = 0;
+        int right = 0;
+        int leftMargin = 0;
+        int rightMargin = 0;
+    };
+
+    /**
+     * A staff's clef, key and meter in a run of scoreDef alignments (a mensur is not counted), and where the first may
+     * start on that staff: past a system start line, or past the barline before a cautionary change (MuseNote RC216).
+     */
+    struct StaffScoreDefExtents {
+        int minPos = 0;
+        std::array<ScoreDefExtent, 3> elements;
+    };
+
+    /**
+     * Where the alignment after a run of scoreDef alignments goes (a line's first measure's left barline, drawn empty;
+     * or a measure's end after a cautionary change), the run's alignments all starting at 0, as
+     * AdjustXPosFunctor::VisitMeasure places them: staff by staff, each element moving its alignment, and every one
+     * after it, as far as it must to clear what its staff drew before (MuseNote RC216).
+     */
+    int CalcScoreDefEnd(const std::vector<StaffScoreDefExtents> &staves) const;
+
+    /**
+     * The width a line starting with the next measure takes beyond that measure's stored width (MuseNote RC216): what
+     * its start draws (each staff's clef and key, a meter changing there), less what the stored width holds already of
+     * a change right before the measure, drawn there within the line; and the abbreviated labels.
+     */
+    int CalcLineStartWidth() const;
+
+    /**
+     * The width a change of clef, key or meter takes at the end of a line closing with the measure, cautionary: what
+     * each staff whose draw flags the scoreDef set draws after the measure's right barline (MuseNote RC216).
+     */
+    int CalcChangeWidth(const ScoreDef &scoreDef, const Measure *measure) const;
+
+    /**
+     * The width of what a line ending with this measure ends with: the change right after it, if any, cautionary
+     * (MuseNote RC216).
+     */
+    int CalcCautionaryWidth(Measure *measure) const;
+
+    /**
+     * What a staff draws in the scoreDef alignments of a line's start (its clef and key, and a meter where its draw
+     * flags set one), or of a change within a line or at its end (what its draw flags set) (MuseNote RC216).
+     */
+    StaffScoreDefExtents CalcStaffScoreDefExtents(const StaffDef *staffDef, bool lineStart) const;
+
+    /**
+     * A staff's clef, key and meter in effect, as View::DrawClef (View::DrawTabClef), View::DrawKeySig and
+     * View::DrawMeterSig draw them and BBoxDeviceContext bounds them, with their margins; at a line's start a key
+     * draws no naturals (MuseNote RC216).
+     */
+    ///@{
+    ScoreDefExtent CalcClefExtent(const StaffDef *staffDef) const;
+    ScoreDefExtent CalcKeyExtent(const StaffDef *staffDef, bool lineStart) const;
+    ScoreDefExtent CalcMeterExtent(const StaffDef *staffDef) const;
+    ///@}
+
+    /**
+     * Glyphs drawn from x as BBoxDeviceContext::DrawMusicText bounds them (each glyph at the advances before it,
+     * truncated, from its own left), added to an extent (MuseNote RC216).
+     */
+    void AddGlyphsExtent(const std::u32string &glyphs, int x, int staffSize, ScoreDefExtent &extent) const;
+
+    /**
+     * A glyph's advance as a device context measures text it draws (DeviceContext::AddGlyphToTextExtend: rounded up),
+     * its width where it has none; and a string's, as DeviceContext::GetSmuflTextExtent sums them (MuseNote RC216)
+     */
+    ///@{
+    int CalcGlyphAdvance(char32_t code, int staffSize) const;
+    int CalcGlyphsAdvance(const std::u32string &glyphs, int staffSize) const;
+    ///@}
+
+    /**
+     * A measure's clefs and keys into a scoreDef, as ScoreDefSetCurrentFunctor::VisitClef and VisitKeySig set them,
+     * and its draw flags cleared, the change before the measure being drawn there (MuseNote RC216).
+     */
+    void ApplyMeasure(ScoreDef &scoreDef, Measure *measure) const;
+
+private:
     // The system we are taking the content from
     System *m_contentSystem;
     // The page we are adding the system to
@@ -80,8 +172,16 @@ private:
     int m_shift;
     // The system width
     int m_systemWidth;
-    // The current scoreDef width
+    // The width counted for the start of the current line before its first measure (MuseNote RC216: it was the last
+    // scoreDef's own drawing width, and 0 until the line breaker met one)
     int m_currentScoreDefWidth;
+    // The scoreDef in effect at this point of the content; its draw flags, the change right before the next measure
+    // (MuseNote RC216)
+    ScoreDef m_upcomingScoreDef;
+    // For a line starting with the first measure held: its start, and the change the line before it ends with
+    // (MuseNote RC216)
+    int m_heldLineStartWidth;
+    int m_heldCautionaryWidth;
     // The pending elements (ScoreDef, Endings, etc.) to be placed at the beginning of a system
     ArrayOfObjects m_pendingElements;
     // Indicates to smartly use encoded system breaks

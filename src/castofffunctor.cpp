@@ -9,10 +9,18 @@
 
 //----------------------------------------------------------------------------
 
+#include <algorithm>
+#include <cmath>
+
+//----------------------------------------------------------------------------
+
+#include "clef.h"
 #include "div.h"
 #include "doc.h"
 #include "editorial.h"
 #include "ending.h"
+#include "keysig.h"
+#include "metersig.h"
 #include "page.h"
 #include "pageelement.h"
 #include "pagemilestone.h"
@@ -20,12 +28,35 @@
 #include "pb.h"
 #include "sb.h"
 #include "score.h"
+#include "setscoredeffunctor.h"
+#include "smufl.h"
 #include "staff.h"
+#include "staffdef.h"
 #include "system.h"
 
 //----------------------------------------------------------------------------
 
 namespace vrv {
+
+namespace {
+
+// As Staff::IsTablature and Staff::GetDrawingStaffNotationSize, from the staff's notation type
+bool IsTablatureType(data_NOTATIONTYPE type)
+{
+    return (type == NOTATIONTYPE_tab) || (type == NOTATIONTYPE_tab_guitar)
+        || (type == NOTATIONTYPE_tab_lute_italian) || (type == NOTATIONTYPE_tab_lute_french)
+        || (type == NOTATIONTYPE_tab_lute_german);
+}
+
+int StaffNotationSize(const StaffDef *staffDef, int staffSize)
+{
+    if (staffDef->GetNotationtype() == NOTATIONTYPE_tab_lute_german) {
+        return std::round(staffSize / GERMAN_TAB_STAFF_RATIO);
+    }
+    return IsTablatureType(staffDef->GetNotationtype()) ? std::round(staffSize / TABLATURE_STAFF_RATIO) : staffSize;
+}
+
+} // namespace
 
 //----------------------------------------------------------------------------
 // CastOffSystemsFunctor
@@ -57,6 +88,8 @@ CastOffSystemsFunctor::CastOffSystemsFunctor(Page *page, Doc *doc, bool smart) :
     m_shift = 0;
     m_systemWidth = 0;
     m_currentScoreDefWidth = 0;
+    m_heldLineStartWidth = 0;
+    m_heldCautionaryWidth = 0;
     m_smart = smart;
 }
 
@@ -104,32 +137,81 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
     const bool isLeftoverMeasure = ((NULL == nextMeasure) && m_doc->GetOptions()->m_breaksNoWidow.GetValue()
         && (m_doc->GetOptions()->m_breaks.GetValue() != BREAKS_encoded));
     if (m_currentSystem->GetChildCount() > 0) {
+        // A line starting with this measure, and the change a line ending before it ends with (MuseNote RC216)
+        const int lineStartWidth = this->CalcLineStartWidth();
+        const int cautionaryWidth = this->CalcChangeWidth(
+            m_upcomingScoreDef, vrv_cast<const Measure *>(m_currentSystem->GetLast(MEASURE)));
         // We have overflowing content (dir, dynam, tempo) larger than 5 units, keep it as pending
         if (overflow > (m_doc->GetDrawingUnit(100) * 5)) {
             measure = dynamic_cast<Measure *>(m_contentSystem->Relinquish(measure->GetIdx()));
             assert(measure);
+            // A line may start with the first measure held
+            if (std::none_of(m_pendingElements.begin(), m_pendingElements.end(),
+                    [](const Object *element) { return element->Is(MEASURE); })) {
+                m_heldLineStartWidth = lineStartWidth;
+                m_heldCautionaryWidth = cautionaryWidth;
+            }
             // move as pending since we want it not to be broken with the next measure
             m_pendingElements.push_back(measure);
+            this->ApplyMeasure(m_upcomingScoreDef, measure);
             // continue
             return FUNCTOR_SIBLINGS;
         }
-        // Break it if necessary
-        else if (drawingXRel + width + m_currentScoreDefWidth - m_shift > m_systemWidth) {
+        // Break it if necessary: the line ending with this measure before a change ends with that change too
+        // (MuseNote RC216)
+        else if (drawingXRel + width + m_currentScoreDefWidth - m_shift + this->CalcCautionaryWidth(measure)
+            > m_systemWidth) {
+            int firstHeld = -1;
+            int lastHeld = -1;
+            for (int i = 0; i < (int)m_pendingElements.size(); ++i) {
+                if (!m_pendingElements.at(i)->Is(MEASURE)) continue;
+                if (firstHeld < 0) firstHeld = i;
+                lastHeld = i;
+            }
+            // The line closing here ends with the change before the next line's first measure, cautionary (MuseNote
+            // RC216)
+            m_currentSystem->m_castOffStartWidth += (firstHeld >= 0) ? m_heldCautionaryWidth : cautionaryWidth;
             m_currentSystem = new System();
             m_page->AddChild(m_currentSystem);
             m_shift = drawingXRel;
+            // The start the new line draws (MuseNote RC216), recorded for the spacing estimate (MuseNote RC215)
+            m_currentScoreDefWidth = (firstHeld >= 0) ? m_heldLineStartWidth : lineStartWidth;
+            m_currentSystem->m_castOffStartWidth = m_currentScoreDefWidth;
             // If last measure requires separate system - mark that system as leftover for the future CastOffPages call
             if (isLeftoverMeasure) {
                 m_leftoverSystem = m_currentSystem;
             }
-            for (Object *pendingElement : m_pendingElements) {
-                if (pendingElement->Is(MEASURE)) {
-                    Measure *firstPendingMeasure = vrv_cast<Measure *>(pendingElement);
-                    assert(firstPendingMeasure);
-                    m_shift = firstPendingMeasure->GetCachedXRel();
-                    m_leftoverSystem = NULL;
-                    // it has to be first measure
-                    break;
+            // The line begins with the first measure held
+            if (firstHeld >= 0) {
+                Measure *firstPendingMeasure = vrv_cast<Measure *>(m_pendingElements.at(firstHeld));
+                assert(firstPendingMeasure);
+                m_shift = firstPendingMeasure->GetCachedXRel();
+                m_leftoverSystem = NULL;
+            }
+            // The measures held and this one must fit the new line together (MuseNote RC214): if they do not, the
+            // held measures take it alone, and this one begins the next
+            if ((lastHeld >= 0)
+                && (drawingXRel + width + m_currentScoreDefWidth - m_shift + this->CalcCautionaryWidth(measure)
+                    > m_systemWidth)) {
+                for (int i = 0; i <= lastHeld; ++i) {
+                    m_currentSystem->AddChild(m_pendingElements.at(i));
+                }
+                // The held line ends with what overhangs its last measure, which the layout makes room for
+                // (AdjustXOverflowFunctor), and with the change before this measure, cautionary: both counted with
+                // the line's widths for the spacing estimate
+                Measure *lastHeldMeasure = vrv_cast<Measure *>(m_currentSystem->GetLast(MEASURE));
+                assert(lastHeldMeasure);
+                m_currentSystem->m_castOffStartWidth += this->CalcChangeWidth(m_upcomingScoreDef, lastHeldMeasure)
+                    + (lastHeldMeasure->HasCachedHorizontalLayout() ? lastHeldMeasure->GetCachedOverflow()
+                                                                    : lastHeldMeasure->GetDrawingOverflow());
+                m_pendingElements.erase(m_pendingElements.begin(), m_pendingElements.begin() + lastHeld + 1);
+                m_currentSystem = new System();
+                m_page->AddChild(m_currentSystem);
+                m_shift = drawingXRel;
+                m_currentScoreDefWidth = lineStartWidth;
+                m_currentSystem->m_castOffStartWidth = m_currentScoreDefWidth;
+                if (isLeftoverMeasure) {
+                    m_leftoverSystem = m_currentSystem;
                 }
             }
         }
@@ -145,6 +227,7 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
     measure = dynamic_cast<Measure *>(m_contentSystem->Relinquish(measure->GetIdx()));
     assert(measure);
     m_currentSystem->AddChild(measure);
+    this->ApplyMeasure(m_upcomingScoreDef, measure);
 
     return FUNCTOR_SIBLINGS;
 }
@@ -198,11 +281,18 @@ FunctorCode CastOffSystemsFunctor::VisitScoreDef(ScoreDef *scoreDef)
     scoreDef = dynamic_cast<ScoreDef *>(m_contentSystem->Relinquish(scoreDef->GetIdx()));
     // move as pending since we want it at the beginning of the system in case of system break coming
     m_pendingElements.push_back(scoreDef);
-    // This is not perfect since now the scoreDefWidth is the one of the intermediate scoreDefs (and not
-    // the initial one - for this to be corrected, we would need two parameters, one for the current initial
-    // scoreDef and one for the current that will be the initial one at the next system
-    // Also, the abbr label (width) changes would not be taken into account
-    m_currentScoreDefWidth = scoreDef->GetDrawingWidth() + m_contentSystem->GetDrawingAbbrLabelsWidth();
+    // The scoreDef a line starting after this one draws, kept apart from the start of the current line (MuseNote
+    // RC216: the current line was counted with this intermediate scoreDef's own width), and set as
+    // ScoreDefSetCurrentFunctor sets it: its draw flags are the change the next measure draws
+    if (scoreDef->HasClefInfo(UNLIMITED_DEPTH) || scoreDef->HasKeySigInfo(UNLIMITED_DEPTH)
+        || scoreDef->HasMensurInfo(UNLIMITED_DEPTH) || scoreDef->HasMeterSigGrpInfo(UNLIMITED_DEPTH)
+        || scoreDef->HasMeterSigInfo(UNLIMITED_DEPTH)) {
+        m_upcomingScoreDef.ReplaceDrawingValues(scoreDef);
+    }
+    ListOfObjects staffDefs = scoreDef->FindAllDescendantsByType(STAFFDEF);
+    for (Object *object : staffDefs) {
+        m_upcomingScoreDef.ReplaceDrawingValues(vrv_cast<StaffDef *>(object));
+    }
 
     return FUNCTOR_SIBLINGS;
 }
@@ -217,9 +307,349 @@ FunctorCode CastOffSystemsFunctor::VisitSystem(System *system)
     m_currentSystem = targetSystem;
 
     m_shift = -system->GetDrawingLabelsWidth();
-    m_currentScoreDefWidth = m_page->m_drawingScoreDef.GetDrawingWidth() + system->GetDrawingAbbrLabelsWidth();
+    // The first line's start (clefs, keys, meter) is laid out in its first measure, whose width holds it; a later
+    // line's is counted when it begins, from the scoreDef in effect there (MuseNote RC216)
+    m_currentScoreDefWidth = 0;
+    const Page *contentPage = vrv_cast<const Page *>(system->GetFirstAncestor(PAGE));
+    assert(contentPage);
+    if (contentPage) m_upcomingScoreDef = contentPage->m_drawingScoreDef;
+    // No change is pending before the first measure
+    m_upcomingScoreDef.SetRedrawFlags(StaffDefRedrawFlags::FORCE_REDRAW);
+    m_heldLineStartWidth = 0;
+    m_heldCautionaryWidth = 0;
+    // What the first line is counted with beyond its measures: its labels (MuseNote RC215)
+    targetSystem->m_castOffStartWidth = system->GetDrawingLabelsWidth();
 
     return FUNCTOR_CONTINUE;
+}
+
+int CastOffSystemsFunctor::CalcScoreDefEnd(const std::vector<StaffScoreDefExtents> &staves) const
+{
+    // As AdjustXPosFunctor::VisitMeasure runs, a staff after another: each alignment first takes the shift the staff's
+    // elements before it made; an element drawn moves it, and every one after it, so that its left margin clears what
+    // the staff drew before, and leaves its right margin clear after it; one drawn empty clears that with no margin
+    // and takes no room; the alignment after the run, drawn empty, is moved clear of it all
+    std::array<int, 3> x = { 0, 0, 0 };
+    int end = 0;
+    for (const StaffScoreDefExtents &staff : staves) {
+        int shift = 0;
+        int minPos = staff.minPos;
+        for (size_t i = 0; i < x.size(); ++i) {
+            x.at(i) += shift;
+            const ScoreDefExtent &element = staff.elements.at(i);
+            if (!element.present) continue;
+            const int left = element.drawn ? (x.at(i) + element.left - element.leftMargin) : x.at(i);
+            if (left < minPos) {
+                shift += minPos - left;
+                x.at(i) += minPos - left;
+            }
+            minPos = element.drawn ? (x.at(i) + element.right + element.rightMargin) : x.at(i);
+        }
+        end = std::max(end + shift, minPos);
+    }
+    return end;
+}
+
+int CastOffSystemsFunctor::CalcLineStartWidth() const
+{
+    // What the line's start draws, and what the first measure's stored width holds already: the change right before
+    // it, as drawn within the line, where the measure is not the first of its system
+    std::vector<StaffScoreDefExtents> start;
+    std::vector<StaffScoreDefExtents> change;
+    const bool hasSystemStartLine = m_upcomingScoreDef.HasSystemStartLine();
+    const ListOfConstObjects staffDefs = m_upcomingScoreDef.FindAllDescendantsByType(STAFFDEF);
+    for (const Object *object : staffDefs) {
+        const StaffDef *staffDef = vrv_cast<const StaffDef *>(object);
+        assert(staffDef);
+        if (staffDef->GetDrawingVisibility() == OPTIMIZATION_HIDDEN) continue;
+        StaffScoreDefExtents staffStart = this->CalcStaffScoreDefExtents(staffDef, true);
+        // The room a line's first measure keeps clear of a system start line (AdjustXPosFunctor::VisitMeasure), which
+        // the one-line layout keeps on its first measure only
+        if (hasSystemStartLine) {
+            const int staffSize = staffDef->HasScale() ? staffDef->GetScale() : 100;
+            staffStart.minPos = m_doc->GetDrawingBarLineWidth(staffSize);
+        }
+        start.push_back(staffStart);
+        change.push_back(this->CalcStaffScoreDefExtents(staffDef, false));
+    }
+    return this->CalcScoreDefEnd(start) - this->CalcScoreDefEnd(change)
+        + m_contentSystem->GetDrawingAbbrLabelsWidth();
+}
+
+int CastOffSystemsFunctor::CalcChangeWidth(const ScoreDef &scoreDef, const Measure *measure) const
+{
+    // A staff's cautionary elements start where its right barline ends: the barline's right and its right margin,
+    // from the barline's alignment, where they all start (AdjustXPosFunctor::VisitLayerElement); without them the
+    // measure ends there
+    std::vector<StaffScoreDefExtents> staves;
+    int barLineEnd = 0;
+    bool hasChange = false;
+    const ListOfConstObjects staffDefs = scoreDef.FindAllDescendantsByType(STAFFDEF);
+    for (const Object *object : staffDefs) {
+        const StaffDef *staffDef = vrv_cast<const StaffDef *>(object);
+        assert(staffDef);
+        if (staffDef->GetDrawingVisibility() == OPTIMIZATION_HIDDEN) continue;
+        StaffScoreDefExtents extents = this->CalcStaffScoreDefExtents(staffDef, false);
+        for (const ScoreDefExtent &element : extents.elements) {
+            hasChange = hasChange || element.present;
+        }
+        if (measure) {
+            const BarLine *barLine = measure->GetRightBarLine();
+            const int staffSize = staffDef->HasScale() ? staffDef->GetScale() : 100;
+            const int right = (barLine->HasSelfBB() && !barLine->HasEmptyBB()) ? barLine->GetSelfX2() : 0;
+            extents.minPos = right + m_doc->GetRightMargin(barLine) * m_doc->GetDrawingUnit(staffSize);
+        }
+        barLineEnd = std::max(barLineEnd, extents.minPos);
+        staves.push_back(extents);
+    }
+    return hasChange ? (this->CalcScoreDefEnd(staves) - barLineEnd) : 0;
+}
+
+int CastOffSystemsFunctor::CalcCautionaryWidth(Measure *measure) const
+{
+    // The scoreDef in effect after the measure and the changes between it and the next measure (an ending's end or
+    // another milestone may stand among them), its draw flags theirs
+    ScoreDef changed = m_upcomingScoreDef;
+    bool hasChange = false;
+    for (const Object *next = m_contentSystem->GetNext(measure); next && !next->Is(MEASURE);
+         next = m_contentSystem->GetNext(next)) {
+        if (!next->Is(SCOREDEF)) continue;
+        if (!hasChange) {
+            this->ApplyMeasure(changed, measure);
+            hasChange = true;
+        }
+        const ScoreDef *scoreDef = vrv_cast<const ScoreDef *>(next);
+        if (scoreDef->HasClefInfo(UNLIMITED_DEPTH) || scoreDef->HasKeySigInfo(UNLIMITED_DEPTH)
+            || scoreDef->HasMensurInfo(UNLIMITED_DEPTH) || scoreDef->HasMeterSigGrpInfo(UNLIMITED_DEPTH)
+            || scoreDef->HasMeterSigInfo(UNLIMITED_DEPTH)) {
+            changed.ReplaceDrawingValues(scoreDef);
+        }
+        const ListOfConstObjects changedStaffDefs = scoreDef->FindAllDescendantsByType(STAFFDEF);
+        for (const Object *object : changedStaffDefs) {
+            changed.ReplaceDrawingValues(vrv_cast<const StaffDef *>(object));
+        }
+    }
+    return hasChange ? this->CalcChangeWidth(changed, measure) : 0;
+}
+
+CastOffSystemsFunctor::StaffScoreDefExtents CastOffSystemsFunctor::CalcStaffScoreDefExtents(
+    const StaffDef *staffDef, bool lineStart) const
+{
+    assert(staffDef);
+    // At a system's start every staff draws its clef and key (ScoreDef::SetRedrawFlags), a meter where its draw flags
+    // set one, as within a line
+    StaffScoreDefExtents extents;
+    if (lineStart || staffDef->DrawClef()) extents.elements.at(0) = this->CalcClefExtent(staffDef);
+    if (lineStart || staffDef->DrawKeySig()) extents.elements.at(1) = this->CalcKeyExtent(staffDef, lineStart);
+    if (staffDef->DrawMeterSig()) extents.elements.at(2) = this->CalcMeterExtent(staffDef);
+    return extents;
+}
+
+CastOffSystemsFunctor::ScoreDefExtent CastOffSystemsFunctor::CalcClefExtent(const StaffDef *staffDef) const
+{
+    assert(staffDef);
+    ScoreDefExtent extent;
+    extent.present = true;
+    const Clef *clef = staffDef->GetCurrentClef();
+    if (!clef || (clef->GetVisible() == BOOLEAN_false)) return extent;
+    const bool tablature = IsTablatureType(staffDef->GetNotationtype());
+    // View::DrawClef draws no clef without a line to stand on, but a percussion clef
+    if (!tablature && !clef->HasLine() && (clef->GetShape() != CLEFSHAPE_perc)) return extent;
+    const int staffSize = staffDef->HasScale() ? staffDef->GetScale() : 100;
+    // The staffDef's clef is in no document: its glyph is looked up in the document's resources
+    const char32_t glyph = clef->GetClefGlyph(staffDef->GetNotationtype(), &m_doc->GetResources());
+    if (glyph == 0) return extent;
+    this->AddGlyphsExtent(
+        std::u32string(1, glyph), 0, tablature ? StaffNotationSize(staffDef, staffSize) : staffSize, extent);
+    const int unit = m_doc->GetDrawingUnit(staffSize);
+    extent.leftMargin = m_doc->GetLeftMargin(CLEF) * unit;
+    extent.rightMargin = m_doc->GetRightMargin(CLEF) * unit;
+    return extent;
+}
+
+CastOffSystemsFunctor::ScoreDefExtent CastOffSystemsFunctor::CalcKeyExtent(
+    const StaffDef *staffDef, bool lineStart) const
+{
+    assert(staffDef);
+    ScoreDefExtent extent;
+    extent.present = true;
+    // View::DrawKeySig draws no key on tablature
+    if (IsTablatureType(staffDef->GetNotationtype())) return extent;
+    const KeySig *keySig = staffDef->GetCurrentKeySig();
+    if (!keySig || (keySig->GetVisible() == BOOLEAN_false)) return extent;
+    const int count = keySig->GetAccidCount();
+    // The naturals cancelling the key before, where View::DrawKeySig draws them: within a line or at its end, for a
+    // key with @cancelaccid or a key of none
+    int naturals = 0;
+    bool naturalsAfter = false;
+    if (!lineStart && !keySig->m_skipCancellation
+        && ((keySig->HasCancelaccid() && (keySig->GetCancelaccid() != CANCELACCID_none)) || (count == 0))) {
+        const bool sameType = (keySig->GetAccidType() == keySig->m_drawingCancelAccidType);
+        naturalsAfter = sameType && (keySig->GetCancelaccid() == CANCELACCID_after);
+        naturals = std::max(0, keySig->m_drawingCancelAccidCount - (sameType ? count : 0));
+    }
+    if ((count <= 0) && (naturals == 0)) return extent;
+    const int staffSize = staffDef->HasScale() ? staffDef->GetScale() : 100;
+    const int unit = m_doc->GetDrawingUnit(staffSize);
+    // As View::DrawKeySig steps: a natural by its width and a step of its own (View::DrawKeySigCancellation), an
+    // accidental by its advance and a step (View::DrawKeyAccid)
+    const std::u32string natural(1, SMUFL_E261_accidentalNatural);
+    const int naturalStep
+        = m_doc->GetGlyphWidth(SMUFL_E261_accidentalNatural, staffSize, false) + unit * TEMP_KEYSIG_NATURAL_STEP;
+    const std::u32string accid(1,
+        (keySig->GetAccidType() == ACCIDENTAL_WRITTEN_f) ? SMUFL_E260_accidentalFlat : SMUFL_E262_accidentalSharp);
+    const int accidStep = this->CalcGlyphsAdvance(accid, staffSize) + unit * TEMP_KEYSIG_STEP;
+    int x = 0;
+    for (int i = 0; !naturalsAfter && (i < naturals); ++i) {
+        this->AddGlyphsExtent(natural, x, staffSize, extent);
+        x += naturalStep;
+    }
+    for (int i = 0; i < count; ++i) {
+        this->AddGlyphsExtent(accid, x, staffSize, extent);
+        x += accidStep;
+    }
+    for (int i = 0; naturalsAfter && (i < naturals); ++i) {
+        this->AddGlyphsExtent(natural, x, staffSize, extent);
+        x += naturalStep;
+    }
+    extent.leftMargin = m_doc->GetLeftMargin(KEYSIG) * unit;
+    extent.rightMargin = m_doc->GetRightMargin(KEYSIG) * unit;
+    return extent;
+}
+
+CastOffSystemsFunctor::ScoreDefExtent CastOffSystemsFunctor::CalcMeterExtent(const StaffDef *staffDef) const
+{
+    assert(staffDef);
+    ScoreDefExtent extent;
+    extent.present = true;
+    const MeterSig *meterSig = staffDef->GetCurrentMeterSig();
+    if (!meterSig || (meterSig->GetVisible() == BOOLEAN_false)) return extent;
+    const int staffSize = staffDef->HasScale() ? staffDef->GetScale() : 100;
+    const int glyphSize = StaffNotationSize(staffDef, staffSize);
+    // As View::DrawMeterSig draws it: an enclosing glyph and a symbol each stepped by its width; or its lines of
+    // figures (View::DrawMeterSigFigures), the summands joined by their sign, each centred on the advance of the line
+    // with the more glyphs
+    const auto figures = [](int number) {
+        std::u32string glyphs;
+        for (const char digit : std::to_string(number)) {
+            glyphs += (char32_t)(SMUFL_E080_timeSig0 + (digit - '0'));
+        }
+        return glyphs;
+    };
+    const bool smallEnclosing = (meterSig->HasSym() || (meterSig->GetForm() == METERFORM_num));
+    const auto [front, back] = meterSig->GetEnclosingGlyphs(smallEnclosing);
+    int x = 0;
+    if (front) {
+        this->AddGlyphsExtent(std::u32string(1, front), x, glyphSize, extent);
+        x += m_doc->GetGlyphWidth(front, glyphSize, false);
+    }
+    if (meterSig->HasSym() || meterSig->HasGlyphNum() || meterSig->HasGlyphName()) {
+        const char32_t code = meterSig->GetSymbolGlyph(&m_doc->GetResources());
+        this->AddGlyphsExtent(std::u32string(1, code), x, glyphSize, extent);
+        x += m_doc->GetGlyphWidth(code, glyphSize, false);
+    }
+    else if (meterSig->HasCount()) {
+        const auto [summands, sign] = meterSig->GetCount();
+        std::u32string numerator;
+        for (const int summand : summands) {
+            if (!numerator.empty()) {
+                switch (sign) {
+                    case MeterCountSign::Slash: numerator += SMUFL_E08E_timeSigFractionalSlash; break;
+                    case MeterCountSign::Minus: numerator += SMUFL_E090_timeSigMinus; break;
+                    case MeterCountSign::Asterisk: numerator += SMUFL_E091_timeSigMultiply; break;
+                    case MeterCountSign::Plus: numerator += SMUFL_E08D_timeSigPlusSmall; break;
+                    case MeterCountSign::None:
+                    default: break;
+                }
+            }
+            numerator += figures(summand);
+        }
+        const std::u32string denominator
+            = ((meterSig->GetForm() == METERFORM_num) || !meterSig->HasUnit()) ? U"" : figures(meterSig->GetUnit());
+        const int width = this->CalcGlyphsAdvance(
+            (numerator.length() > denominator.length()) ? numerator : denominator, glyphSize);
+        const int centre = x + width / 2;
+        this->AddGlyphsExtent(numerator, centre - this->CalcGlyphsAdvance(numerator, glyphSize) / 2, glyphSize, extent);
+        if (!denominator.empty()) {
+            this->AddGlyphsExtent(
+                denominator, centre - this->CalcGlyphsAdvance(denominator, glyphSize) / 2, glyphSize, extent);
+        }
+        x += width;
+    }
+    if (back) {
+        this->AddGlyphsExtent(std::u32string(1, back), x, glyphSize, extent);
+    }
+    const int unit = m_doc->GetDrawingUnit(staffSize);
+    extent.leftMargin = m_doc->GetLeftMargin(METERSIG) * unit;
+    extent.rightMargin = m_doc->GetRightMargin(METERSIG) * unit;
+    return extent;
+}
+
+void CastOffSystemsFunctor::AddGlyphsExtent(
+    const std::u32string &glyphs, int x, int staffSize, ScoreDefExtent &extent) const
+{
+    const int pointSize = m_doc->GetDrawingSmuflFont(staffSize, false)->GetPointSize();
+    for (const char32_t code : glyphs) {
+        const Glyph *glyph = m_doc->GetResources().GetGlyph(code);
+        if (!glyph || (glyph->GetUnitsPerEm() <= 0)) continue;
+        int glyphX, glyphY, glyphWidth, glyphHeight;
+        glyph->GetBoundingBox(glyphX, glyphY, glyphWidth, glyphHeight);
+        const int left = x + glyphX * pointSize / glyph->GetUnitsPerEm();
+        const int right = left + glyphWidth * pointSize / glyph->GetUnitsPerEm();
+        extent.left = extent.drawn ? std::min(extent.left, left) : left;
+        extent.right = extent.drawn ? std::max(extent.right, right) : right;
+        extent.drawn = true;
+        x += glyph->GetHorizAdvX() * pointSize / glyph->GetUnitsPerEm();
+    }
+}
+
+int CastOffSystemsFunctor::CalcGlyphAdvance(char32_t code, int staffSize) const
+{
+    const Glyph *glyph = m_doc->GetResources().GetGlyph(code);
+    if (!glyph || (glyph->GetUnitsPerEm() <= 0)) return 0;
+    const double pointSize = m_doc->GetDrawingSmuflFont(staffSize, false)->GetPointSize();
+    const int advance = std::ceil(glyph->GetHorizAdvX() * pointSize / glyph->GetUnitsPerEm());
+    if (advance > 0) return advance;
+    int x, y, width, height;
+    glyph->GetBoundingBox(x, y, width, height);
+    return std::ceil(width * pointSize / glyph->GetUnitsPerEm());
+}
+
+int CastOffSystemsFunctor::CalcGlyphsAdvance(const std::u32string &glyphs, int staffSize) const
+{
+    int advance = 0;
+    for (const char32_t code : glyphs) {
+        advance += this->CalcGlyphAdvance(code, staffSize);
+    }
+    return advance;
+}
+
+void CastOffSystemsFunctor::ApplyMeasure(ScoreDef &scoreDef, Measure *measure) const
+{
+    // As ScoreDefSetCurrentFunctor::VisitClef and VisitKeySig set them
+    ListOfObjects clefs = measure->FindAllDescendantsByType(CLEF);
+    for (Object *object : clefs) {
+        LayerElement *elementOrLink = vrv_cast<LayerElement *>(object)->ThisOrSameasLink();
+        if (!elementOrLink || !elementOrLink->Is(CLEF)) continue;
+        Clef *clef = vrv_cast<Clef *>(elementOrLink);
+        if (clef->IsScoreDefElement()) continue;
+        const Staff *staff = vrv_cast<const Staff *>(object->GetFirstAncestor(STAFF));
+        if (!staff) continue;
+        const int n = clef->m_crossStaff ? clef->m_crossStaff->GetN() : staff->GetN();
+        StaffDef *staffDef = scoreDef.GetStaffDef(n);
+        if (staffDef) staffDef->SetCurrentClef(clef);
+    }
+    ListOfObjects keySigs = measure->FindAllDescendantsByType(KEYSIG);
+    for (Object *object : keySigs) {
+        KeySig *keySig = vrv_cast<KeySig *>(object);
+        if (keySig->IsScoreDefElement()) continue;
+        const Staff *staff = vrv_cast<const Staff *>(object->GetFirstAncestor(STAFF));
+        if (!staff) continue;
+        StaffDef *staffDef = scoreDef.GetStaffDef(staff->GetN());
+        if (staffDef) staffDef->SetCurrentKeySig(keySig);
+    }
+    // The change before the measure is drawn there, as ScoreDefSetCurrentFunctor::VisitMeasure clears it
+    scoreDef.SetRedrawFlags(StaffDefRedrawFlags::FORCE_REDRAW);
 }
 
 FunctorCode CastOffSystemsFunctor::VisitSystemEnd(System *system)

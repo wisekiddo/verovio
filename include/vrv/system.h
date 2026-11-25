@@ -164,6 +164,12 @@ public:
     double EstimateJustificationRatio(const Doc *doc) const;
 
     /**
+     * The ratio JustifyXFunctor applies to the system's justifiable width, as it computes it: below 1, the system
+     * is laid out wider than the page holds (MuseNote RC211).
+     */
+    double GetJustificationRatio(const Doc *doc) const;
+
+    /**
      * Reverse of ConvertToCastOffMensural()
      */
     void ConvertToUnCastOffMensuralSystem();
@@ -221,6 +227,20 @@ public:
     ///@{
     int m_castOffTotalWidth;
     int m_castOffJustifiableWidth;
+    ///@}
+    /**
+     * The width the line breaker counted for this system beyond its measures: its labels, and for a system that
+     * is not the first its clefs, keys and abbreviated labels. The spacing estimate counts it (MuseNote RC215).
+     */
+    int m_castOffStartWidth;
+    /**
+     * @name The note spacing factor and the lyric scale the system is laid out with (MuseNote RC211). A system laid
+     * out wider than the page holds is laid out again with its notes tighter, then with its words smaller, instead
+     * of being squeezed (Page::FitHorizontally). Both are 1.0 unless the system did not fit.
+     */
+    ///@{
+    double m_drawingSpacingFactor;
+    double m_drawingLyricScale;
     ///@}
 
 protected:
