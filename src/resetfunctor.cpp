@@ -692,6 +692,10 @@ FunctorCode ResetHorizontalAlignmentFunctor::VisitLayerElement(LayerElement *lay
 FunctorCode ResetHorizontalAlignmentFunctor::VisitMeasure(Measure *measure)
 {
     measure->SetDrawingXRel(0);
+    // Drawing resets only the box of what it draws, and a measure's left barline is not drawn where this layout joins
+    // it into the previous measure's right one (View::DrawMeasure): it would keep the box of a layout that drew it, at
+    // a line start, and take room it does not have (MuseNote RC224). A right barline is always drawn.
+    measure->GetLeftBarLine()->BoundingBox::ResetBoundingBox();
     if (measure->m_measureAligner.GetLeftAlignment()) {
         measure->m_measureAligner.GetLeftAlignment()->SetXRel(0);
     }
