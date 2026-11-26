@@ -2989,6 +2989,57 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 155. A score laid out again draws as it drew when loaded: no barline keeps a box from a layout before (tb.67)
+
+MuseNote plan V3_2_0_101 (root cause RC224, finding W181). Ours: upstream's develop has the same code (5109b20dd,
+2026-11-25).
+
+- **The cause.** `Measure::SetDrawingBarLines` makes a repeat's end and the next bar's repeat start one barline within
+  a line (`rptboth` on the first, none on the second's left) and two at a line break (the end closes the line, the
+  start opens the next). `View::DrawMeasure` draws a barline only where it has a rendition, and drawing resets only the
+  box of what it draws (`BBoxDeviceContext::StartGraphic`). A re-layout (`Toolkit::RedoLayout`: MuseNote's reader
+  switches between paged and continuous by `setOptions` and `redoLayout`) first lays the whole score out on one line
+  for the line breaker: there the repeat start the layout before had drawn at a line start is not drawn, keeps that
+  box, and `AdjustXPosFunctor` makes room for it (383 units at Africa's bar 37). The line breaker and the spacing
+  estimate read the widened bars: the pages broke and spaced otherwise than at the load. A load's first layout is not
+  affected (nothing was drawn before it); every later one was.
+- **The fix.** `ResetHorizontalAlignmentFunctor::VisitMeasure` resets the box of a measure's left barline at the start
+  of each horizontal layout: a barline the layout draws gets its box as before, one it does not has none. A right
+  barline always has a rendition (`SetDrawingBarLines` never leaves it none), so drawing resets its box every layout.
+- **What it changes.** The SVG of a score laid out again after a layout that drew a repeat start at a line start which
+  the one-line layout joins to the repeat end before it: it is drawn as a load. A load's output: none. No MEI, MIDI,
+  timemap, pitch map or id.
+- **Left as it was.** A layout makes its systems, and the clefs, keys and meters its lines start with, anew, with new
+  ids: a re-layout's SVG carries other ids for those than the load's, as before.
+
+**Cases**: MuseNote's `test/native/test_tb67_relayout_engine.cpp`: a score of bars each repeated, every line opening on
+a repeat start split from the repeat end before it (at each of the reader's four page widths); laid out again with
+nothing changed; switched from paged to continuous, against a continuous load; and back to paged, its MEI the load's
+too: every page drawn as the load's, ids aside. On tb.66 the 12 re-layout checks fail (the last line 3 to 6 units wider
+at the three widest pages; at the narrowest, one page becomes two); undone, the patch is tb.66.
+
+**Gate of tb.67** (patch 155, MuseNote plan V3_2_0_101, on tb.66). Native: the suite, 579 cases (80,487 assertions),
+and under ASan, integer-divide-by-zero and signed-integer-overflow 578, no report; `tool/log_format_audit.py`: 301
+engine sources, 0 calls. A Debug engine (signed overflow halting it) over every input: 3,612, all through, and through
+the frozen readers the 3,392 MusicXML and ABC inputs, all through. Parity against tb.66: 22,961 outputs, none differs;
+seeded ids 3,218 of 3,218; every input reads back from its MEI (3,612). MuseNote's reader switch over its 3,198 songs at
+its four page widths: after paged, continuous and paged again, tb.66 drew 128 song-widths in 76 songs otherwise than
+the load, and the continuous view after the switch 129 otherwise than a continuous load; tb.67 none and none; its
+loads, paged and continuous, the same as tb.66's (12,792 and 12,792). The locator gate: 0 failures. MuseSync's 24
+starters: the same. `bar_times.py`: as tb.66. MuseNote's export gate in every format, run on tb.66 and tb.67 with the
+same export code: no song-aspect worse, its six refused exports tb.66's (neume notation), and every file it writes the
+same as tb.66's, its ids numbered in order (the gate loads unseeded). The frozen readers' whole
+MEI: the same as tb.66's for the 3,089 songs, the 80 of 3.0.1 and the 194 ABC files. MuseNote's lyric gate, every song
+with words (2,676) at its 16 layouts and render paths: each load judged as on tb.66; the continuous view reached by a
+re-layout judged as a continuous load in every song (tb.66: 6 songs otherwise, up to 3 lines more). MuseNote's measure
+of every line of its corpus (the reader's biggest notes and the editor's biggest zoom): every trace as tb.66's.
+V3_2_0_92's taps (213 songs, 12 layouts, 3 renders each, the third after the switch): none right on tb.66 wrong on
+tb.67, no bar misframed. Render time, 100 songs in two layouts, the two engines alternated, three passes each on a
+loaded machine: within the spread (tb.67's median 4.5 % below tb.66's, its sum 1.5 % below; one pass after the other
+had read +10.9 %, the load's drift).
+
+**Upstream status**: not offered.
+
 ### 154. A line too full for its words is laid out again: its notes tighter, then its words smaller (tb.66)
 
 MuseNote plan V3_2_0_98 (root cause RC211, finding W187; what remains: MuseNote W192). Ours: upstream's develop squeezes
