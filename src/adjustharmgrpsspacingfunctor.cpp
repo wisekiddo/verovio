@@ -95,11 +95,33 @@ void AdjustHarmGrpsSpacingFunctor::AdjustHarmSpacing(Harm *harm)
         return;
     }
 
+    // Two units as default spacing
+    int wordSpace = 2 * m_doc->GetDrawingUnit(100);
+    Syl::AdjustToLyricSize(m_doc, wordSpace);
+
     // If we have more than one harm at the same position, do not adjust them
     // This situation makes sense when the first of them is right aligned
     // The next harm is spaced from the one reaching furthest right, not from the last one, which can be narrower
     // (MuseNote RC226). A position is an alignment: a harm on a note and one timed at it share it
     if (m_previousHarmStart && (m_previousHarmStart->GetAlignment() == harm->GetStart()->GetAlignment())) {
+        // But a harm there that runs into a different one of its place is drawn after them, as files that give a
+        // chord changing during a note no time of its own write it (MuseNote RC225). The same harm written twice stays
+        // in one place, drawn as one, and harms that do not meet as they are
+        const bool meets = std::any_of(m_placePositioners.begin(), m_placePositioners.end(),
+            [harm, harmPositioner](const FloatingPositioner *positioner) {
+                return (positioner->GetContentLeft() < harmPositioner->GetContentRight())
+                    && (harmPositioner->GetContentLeft() < positioner->GetContentRight())
+                    && (vrv_cast<const Harm *>(positioner->GetObject())->GetText() != harm->GetText());
+            });
+        if (meets) {
+            const int shift
+                = m_previousHarmPositioner->GetContentRight() + wordSpace - harmPositioner->GetContentLeft();
+            harm->SetDrawingXRel(harm->GetDrawingXRel() + shift);
+            for (FloatingPositioner *positioner : positioners) {
+                positioner->SetDrawingXRel(harm->GetDrawingXRel());
+            }
+        }
+        m_placePositioners.push_back(harmPositioner);
         if (harmPositioner->GetContentRight() > m_previousHarmPositioner->GetContentRight()) {
             m_previousHarmPositioner = harmPositioner;
         }
@@ -122,6 +144,9 @@ void AdjustHarmGrpsSpacingFunctor::AdjustHarmSpacing(Harm *harm)
         }
     }
 
+    // A new place
+    m_placePositioners = { harmPositioner };
+
     // Not much to do when we hit the first harm of the system
     if (m_previousHarmPositioner == NULL) {
         m_previousHarmStart = harm->GetStart();
@@ -143,9 +168,6 @@ void AdjustHarmGrpsSpacingFunctor::AdjustHarmSpacing(Harm *harm)
     assert(m_previousHarmPositioner);
 
     int overlap = m_previousHarmPositioner->GetContentRight() - (harmPositioner->GetContentLeft() + xShift);
-    // Two units as default spacing
-    int wordSpace = 2 * m_doc->GetDrawingUnit(100);
-    Syl::AdjustToLyricSize(m_doc, wordSpace);
     overlap += wordSpace;
 
     if (overlap > 0) {
@@ -207,6 +229,7 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitSystem(System *system)
     m_currentSystem = system;
     m_overlappingHarm.clear();
     m_measureHarms.clear();
+    m_placePositioners.clear();
     m_previousHarmPositioner = NULL;
     m_previousHarmStart = NULL;
     m_previousMeasure = NULL;

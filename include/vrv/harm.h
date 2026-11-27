@@ -75,6 +75,16 @@ public:
     bool GetBassPitch(TransPitch &pitch) const;
     void SetBassPitch(const TransPitch &pitch);
 
+    /**
+     * @name Get and set the X drawing relative position: how far right of its start the harm is drawn, after another
+     * harm of its start (MuseNote RC225). Kept here for the positioners drawing makes anew, as Arpeg keeps its own
+     */
+    ///@{
+    int GetDrawingXRel() const { return m_drawingXRel; }
+    void SetDrawingXRel(int drawingXRel) { m_drawingXRel = drawingXRel; }
+    void CacheXRel(bool restore = false);
+    ///@}
+
     //----------//
     // Functors //
     //----------//
@@ -96,7 +106,15 @@ private:
 public:
     //
 private:
-    //
+    /**
+     * The X drawing relative position of the harm, from its start (MuseNote RC225)
+     */
+    int m_drawingXRel;
+
+    /**
+     * The cached value for m_drawingXRel for caching horizontal layout
+     */
+    int m_cachedXRel;
 };
 
 } // namespace vrv

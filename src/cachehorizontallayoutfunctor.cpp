@@ -10,6 +10,7 @@
 //----------------------------------------------------------------------------
 
 #include "arpeg.h"
+#include "harm.h"
 
 //----------------------------------------------------------------------------
 
@@ -27,6 +28,13 @@ CacheHorizontalLayoutFunctor::CacheHorizontalLayoutFunctor(Doc *doc) : DocFuncto
 FunctorCode CacheHorizontalLayoutFunctor::VisitArpeg(Arpeg *arpeg)
 {
     arpeg->CacheXRel(m_restore);
+
+    return FUNCTOR_CONTINUE;
+}
+
+FunctorCode CacheHorizontalLayoutFunctor::VisitHarm(Harm *harm)
+{
+    harm->CacheXRel(m_restore);
 
     return FUNCTOR_CONTINUE;
 }

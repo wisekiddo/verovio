@@ -57,6 +57,20 @@ void Harm::Reset()
     TimeSpanningInterface::Reset();
     this->ResetLang();
     this->ResetNNumberLike();
+
+    m_drawingXRel = 0;
+    m_cachedXRel = VRV_UNSET;
+}
+
+void Harm::CacheXRel(bool restore)
+{
+    if (!restore) {
+        m_cachedXRel = m_drawingXRel;
+    }
+    // Only what was cached: a harm laid out after the cache keeps its own
+    else if (m_cachedXRel != VRV_UNSET) {
+        m_drawingXRel = m_cachedXRel;
+    }
 }
 
 bool Harm::IsSupportedChild(ClassId classId)

@@ -20,6 +20,7 @@
 #include "f.h"
 #include "ftrem.h"
 #include "hairpin.h"
+#include "harm.h"
 #include "layer.h"
 #include "ligature.h"
 #include "mrest.h"
@@ -639,6 +640,13 @@ FunctorCode ResetHorizontalAlignmentFunctor::VisitFloatingObject(FloatingObject 
     floatingObject->ResetMaxDrawingYRel();
 
     return FUNCTOR_CONTINUE;
+}
+
+FunctorCode ResetHorizontalAlignmentFunctor::VisitHarm(Harm *harm)
+{
+    harm->SetDrawingXRel(0);
+
+    return this->VisitControlElement(harm);
 }
 
 FunctorCode ResetHorizontalAlignmentFunctor::VisitLayer(Layer *layer)

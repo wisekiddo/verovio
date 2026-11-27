@@ -2314,8 +2314,10 @@ void View::DrawHarm(DeviceContext *dc, Harm *harm, Measure *measure, System *sys
         if (!system->SetCurrentFloatingPositioner(staff->GetN(), harm, harm->GetStart(), staff)) {
             continue;
         }
+        // Drawn after another harm of its start (MuseNote RC225): the positioner is made anew, as for View::DrawArpeg
+        harm->GetCurrentFloatingPositioner()->SetDrawingXRel(harm->GetDrawingXRel());
         const int staffSize = staff->m_drawingStaffSize;
-        int x = harm->GetStart()->GetDrawingX() + harm->GetStart()->GetDrawingRadius(m_doc);
+        int x = harm->GetStart()->GetDrawingX() + harm->GetStart()->GetDrawingRadius(m_doc) + harm->GetDrawingXRel();
         int y = harm->GetDrawingY();
 
         this->SetOffsetStaffSize(harm, staffSize);

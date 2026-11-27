@@ -74,6 +74,9 @@ private:
     System *m_currentSystem;
     // The harms of the current grp in the current measure, spaced at its end in the order of time (MuseNote RC226)
     std::vector<Harm *> m_measureHarms;
+    // The positioners of the harms at the previous harm's place, drawn one after the other where they meet (MuseNote
+    // RC225)
+    std::vector<FloatingPositioner *> m_placePositioners;
 };
 
 } // namespace vrv

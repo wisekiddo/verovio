@@ -128,6 +128,7 @@ public:
     FunctorCode VisitDot(Dot *dot) override;
     FunctorCode VisitDots(Dots *dots) override;
     FunctorCode VisitFloatingObject(FloatingObject *floatingObject) override;
+    FunctorCode VisitHarm(Harm *harm) override;
     FunctorCode VisitLayer(Layer *layer) override;
     FunctorCode VisitLayerElement(LayerElement *layerElement) override;
     FunctorCode VisitMeasure(Measure *measure) override;

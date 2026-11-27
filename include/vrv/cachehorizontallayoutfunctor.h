@@ -44,6 +44,7 @@ public:
      */
     ///@{
     FunctorCode VisitArpeg(Arpeg *arpeg) override;
+    FunctorCode VisitHarm(Harm *harm) override;
     FunctorCode VisitLayerElement(LayerElement *layerElement) override;
     FunctorCode VisitMeasure(Measure *measure) override;
     ///@}
