@@ -9,6 +9,7 @@
 #define __VRV_CASTOFFFUNCTOR_H__
 
 #include <array>
+#include <map>
 
 #include "functor.h"
 #include "scoredef.h"
@@ -124,6 +125,19 @@ private:
     int CalcCautionaryWidth(Measure *measure) const;
 
     /**
+     * How far right, on the one-line layout, the harms of a line's measures reach: those of the system given, of the
+     * measures held (where asked) and of the measure given (where any). VRV_UNSET for none (MuseNote RC231).
+     */
+    int CalcHarmRight(const System *system, bool held, const Measure *measure) const;
+
+    /**
+     * The room past the measure's right barline that harms reaching as far right as given take where a line ends with
+     * the measure (AdjustHarmGrpsSpacingFunctor::VisitSystemEnd), on the one-line layout: 0 where they reach no
+     * further, or none is drawn (MuseNote RC231).
+     */
+    int CalcHarmEndWidth(int harmRight, const Measure *measure) const;
+
+    /**
      * What a staff draws in the scoreDef alignments of a line's start (its clef and key, and a meter where its draw
      * flags set one), or of a change within a line or at its end (what its draw flags set) (MuseNote RC216).
      */
@@ -182,6 +196,9 @@ private:
     // (MuseNote RC216)
     int m_heldLineStartWidth;
     int m_heldCautionaryWidth;
+    // How far right each measure's harms reach on the one-line layout, as the breaker met it: VRV_UNSET for none
+    // (MuseNote RC231)
+    std::map<const Measure *, int> m_harmRights;
     // The pending elements (ScoreDef, Endings, etc.) to be placed at the beginning of a system
     ArrayOfObjects m_pendingElements;
     // Indicates to smartly use encoded system breaks

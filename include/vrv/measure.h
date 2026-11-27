@@ -241,11 +241,14 @@ public:
     int GetInnerCenterX() const;
 
     /**
-     * Return and reset the cached width / overflow
+     * Return and reset the cached width / overflow, and return the cached reach of the harms and right barline
+     * (MuseNote RC231)
      */
     ///@{
     int GetCachedWidth() const { return m_cachedWidth; }
     int GetCachedOverflow() const { return m_cachedOverflow; }
+    int GetCachedHarmReach() const { return m_cachedHarmReach; }
+    int GetCachedRightBarLineXRel() const { return m_cachedRightBarLineXRel; }
     void ResetCachedWidth() { m_cachedWidth = VRV_UNSET; }
     void ResetCachedOverflow() { m_cachedOverflow = VRV_UNSET; }
     ///@}
@@ -255,6 +258,13 @@ public:
      * Takes into account Dir, Dynam, and Tempo.
      */
     int GetDrawingOverflow();
+
+    /**
+     * How far right of the measure's left its harms reach, each by its widest positioner, as
+     * AdjustHarmGrpsSpacingFunctor spaces them: a line ending with the measure is given room for them past its right
+     * barline (MuseNote RC231). VRV_UNSET where the measure draws none.
+     */
+    int GetDrawingHarmReach();
 
     /**
      * Calculates the section restart shift
@@ -429,6 +439,14 @@ protected:
     int m_cachedOverflow;
     int m_cachedWidth;
     ///@}
+
+    /**
+     * The cached reach of the harms (GetDrawingHarmReach), and where the right barline stands, which a line ending
+     * with the measure is given room for them past: the cache has no positioners to measure, and restores no alignment
+     * (MuseNote RC231)
+     */
+    int m_cachedHarmReach;
+    int m_cachedRightBarLineXRel;
 
 private:
     /**

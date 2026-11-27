@@ -144,6 +144,8 @@ void Measure::Reset()
     m_cachedXRel = VRV_UNSET;
     m_cachedOverflow = VRV_UNSET;
     m_cachedWidth = VRV_UNSET;
+    m_cachedHarmReach = VRV_UNSET;
+    m_cachedRightBarLineXRel = VRV_UNSET;
 
     // by default, we have a single barLine on the right (none on the left)
     m_rightBarLine.SetForm(this->GetRight());
@@ -255,6 +257,8 @@ void Measure::CacheXRel(bool restore)
     else {
         m_cachedWidth = this->GetWidth();
         m_cachedOverflow = this->GetDrawingOverflow();
+        m_cachedHarmReach = this->GetDrawingHarmReach();
+        m_cachedRightBarLineXRel = this->GetRightBarLineXRel();
         m_cachedXRel = m_drawingXRel;
     }
 }
@@ -388,6 +392,31 @@ int Measure::GetDrawingOverflow()
     int measureRightX = this->GetDrawingX() + this->GetWidth();
     int overflow = widestPositioner->GetContentRight() - measureRightX;
     return std::max(0, overflow);
+}
+
+int Measure::GetDrawingHarmReach()
+{
+    System *system = vrv_cast<System *>(this->GetFirstAncestor(SYSTEM));
+    assert(system);
+
+    int reach = VRV_UNSET;
+    ListOfObjects harms = this->FindAllDescendantsByType(HARM);
+    for (Object *object : harms) {
+        Harm *harm = vrv_cast<Harm *>(object);
+        assert(harm);
+        // As AdjustHarmGrpsSpacingFunctor: a harm with no group, no start or none aligned is not spaced
+        if ((harm->GetDrawingGrpId() == 0) || !harm->GetStart() || !harm->GetStart()->GetAlignment()) continue;
+        ArrayOfFloatingPositioners positioners;
+        system->m_systemAligner.FindAllPositionerPointingTo(&positioners, harm);
+        // Its widest positioner, the one with the lowest left; a blank harm, whose box has no width, takes no room
+        FloatingPositioner *widest = NULL;
+        for (FloatingPositioner *positioner : positioners) {
+            if (!widest || (widest->GetContentLeft() > positioner->GetContentLeft())) widest = positioner;
+        }
+        if (!widest || !widest->HasContentBB() || (widest->GetContentX2() <= widest->GetContentX1())) continue;
+        reach = std::max(reach, widest->GetContentRight() - this->GetDrawingX());
+    }
+    return reach;
 }
 
 int Measure::GetSectionRestartShift(const Doc *doc) const

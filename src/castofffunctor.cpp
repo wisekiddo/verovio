@@ -132,6 +132,9 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
     int overflow = hasCache ? measure->GetCachedOverflow() : measure->GetDrawingOverflow();
     int width = hasCache ? measure->GetCachedWidth() : measure->GetWidth();
     int drawingXRel = measure->GetDrawingXRel();
+    // How far right the measure's harms reach on the one-line layout, for each line it is counted in (MuseNote RC231)
+    const int harmReach = hasCache ? measure->GetCachedHarmReach() : measure->GetDrawingHarmReach();
+    m_harmRights[measure] = (harmReach == VRV_UNSET) ? VRV_UNSET : drawingXRel + harmReach;
 
     Object *nextMeasure = m_contentSystem->GetNext(measure, MEASURE);
     const bool isLeftoverMeasure = ((NULL == nextMeasure) && m_doc->GetOptions()->m_breaksNoWidow.GetValue()
@@ -158,8 +161,10 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
             return FUNCTOR_SIBLINGS;
         }
         // Break it if necessary: the line ending with this measure before a change ends with that change too
-        // (MuseNote RC216)
+        // (MuseNote RC216), and with the room past its last barline that its harms take, those of the measures held
+        // with them (MuseNote RC231)
         else if (drawingXRel + width + m_currentScoreDefWidth - m_shift + this->CalcCautionaryWidth(measure)
+                + this->CalcHarmEndWidth(this->CalcHarmRight(m_currentSystem, true, measure), measure)
             > m_systemWidth) {
             int firstHeld = -1;
             int lastHeld = -1;
@@ -169,8 +174,10 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
                 lastHeld = i;
             }
             // The line closing here ends with the change before the next line's first measure, cautionary (MuseNote
-            // RC216)
-            m_currentSystem->m_castOffStartWidth += (firstHeld >= 0) ? m_heldCautionaryWidth : cautionaryWidth;
+            // RC216), and with the room past its last barline that its harms take (MuseNote RC231)
+            m_currentSystem->m_castOffStartWidth += ((firstHeld >= 0) ? m_heldCautionaryWidth : cautionaryWidth)
+                + this->CalcHarmEndWidth(this->CalcHarmRight(m_currentSystem, false, NULL),
+                    vrv_cast<const Measure *>(m_currentSystem->GetLast(MEASURE)));
             m_currentSystem = new System();
             m_page->AddChild(m_currentSystem);
             m_shift = drawingXRel;
@@ -192,18 +199,21 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
             // held measures take it alone, and this one begins the next
             if ((lastHeld >= 0)
                 && (drawingXRel + width + m_currentScoreDefWidth - m_shift + this->CalcCautionaryWidth(measure)
+                        + this->CalcHarmEndWidth(this->CalcHarmRight(NULL, true, measure), measure)
                     > m_systemWidth)) {
                 for (int i = 0; i <= lastHeld; ++i) {
                     m_currentSystem->AddChild(m_pendingElements.at(i));
                 }
                 // The held line ends with what overhangs its last measure, which the layout makes room for
-                // (AdjustXOverflowFunctor), and with the change before this measure, cautionary: both counted with
-                // the line's widths for the spacing estimate
+                // (AdjustXOverflowFunctor), with the change before this measure, cautionary, and with the room past
+                // its last barline that its harms take (MuseNote RC231): all counted with the line's widths for the
+                // spacing estimate
                 Measure *lastHeldMeasure = vrv_cast<Measure *>(m_currentSystem->GetLast(MEASURE));
                 assert(lastHeldMeasure);
                 m_currentSystem->m_castOffStartWidth += this->CalcChangeWidth(m_upcomingScoreDef, lastHeldMeasure)
                     + (lastHeldMeasure->HasCachedHorizontalLayout() ? lastHeldMeasure->GetCachedOverflow()
-                                                                    : lastHeldMeasure->GetDrawingOverflow());
+                                                                    : lastHeldMeasure->GetDrawingOverflow())
+                    + this->CalcHarmEndWidth(this->CalcHarmRight(m_currentSystem, false, NULL), lastHeldMeasure);
                 m_pendingElements.erase(m_pendingElements.begin(), m_pendingElements.begin() + lastHeld + 1);
                 m_currentSystem = new System();
                 m_page->AddChild(m_currentSystem);
@@ -430,6 +440,34 @@ int CastOffSystemsFunctor::CalcCautionaryWidth(Measure *measure) const
         }
     }
     return hasChange ? this->CalcChangeWidth(changed, measure) : 0;
+}
+
+int CastOffSystemsFunctor::CalcHarmRight(const System *system, bool held, const Measure *measure) const
+{
+    int right = VRV_UNSET;
+    const auto take = [this, &right](const Object *object) {
+        if (!object->Is(MEASURE)) return;
+        const auto found = m_harmRights.find(vrv_cast<const Measure *>(object));
+        if (found != m_harmRights.end()) right = std::max(right, found->second);
+    };
+    if (system) {
+        for (const Object *child : system->GetChildren()) take(child);
+    }
+    if (held) {
+        for (const Object *element : m_pendingElements) take(element);
+    }
+    if (measure) take(measure);
+    return right;
+}
+
+int CastOffSystemsFunctor::CalcHarmEndWidth(int harmRight, const Measure *measure) const
+{
+    // As AdjustHarmGrpsSpacingFunctor::VisitSystemEnd: the furthest a harm reaches, against the line's last barline,
+    // where the one-line layout put it (the cache restores no alignment)
+    if ((harmRight == VRV_UNSET) || !measure) return 0;
+    const int rightBarLineXRel = measure->HasCachedHorizontalLayout() ? measure->GetCachedRightBarLineXRel()
+                                                                       : measure->GetRightBarLineXRel();
+    return std::max(0, harmRight - (measure->GetDrawingXRel() + rightBarLineXRel));
 }
 
 CastOffSystemsFunctor::StaffScoreDefExtents CastOffSystemsFunctor::CalcStaffScoreDefExtents(
