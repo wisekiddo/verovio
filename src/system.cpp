@@ -85,6 +85,7 @@ void System::Reset()
     m_castOffStartWidth = 0;
     m_drawingSpacingFactor = 1.0;
     m_drawingLyricScale = 1.0;
+    m_drawingHarmScale = 1.0;
     m_drawingAbbrLabelsWidth = 0;
     m_drawingIsOptimized = false;
 }

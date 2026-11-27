@@ -54,6 +54,7 @@
 #include "comparison.h"
 #include "doc.h"
 #include "functor.h"
+#include "harm.h"
 #include "justifyfunctor.h"
 #include "libmei.h"
 #include "miscfunctor.h"
@@ -230,12 +231,13 @@ void Page::LayOut()
         return;
     }
 
-    // A new layout starts from the systems' own spacing and lyric size (MuseNote RC211)
+    // A new layout starts from the systems' own spacing, lyric size and harm size (MuseNote RC211, W200)
     ListOfObjects systems = this->FindAllDescendantsByType(SYSTEM, false, 1);
     for (Object *object : systems) {
         System *system = vrv_cast<System *>(object);
         system->m_drawingSpacingFactor = 1.0;
         system->m_drawingLyricScale = 1.0;
+        system->m_drawingHarmScale = 1.0;
     }
 
     this->LayOutHorizontally();
@@ -621,9 +623,13 @@ void Page::LayOutVertically()
 
 namespace {
 
-// A line's words are set no smaller than two fifths of their size (the owner's choice, 2026-11-24): where they cannot
-// fit even then, JustifyHorizontally squeezes the line, as before
+// A line's words are set no smaller than two fifths of their size (the owner's choice, 2026-11-24), and its harms
+// alike (2026-11-27): where they cannot fit even then, JustifyHorizontally squeezes the line, as before
 constexpr double MIN_LYRIC_SCALE = 0.4;
+
+// The nearest a squeeze may bring two harms of a line, of the two units AdjustHarmGrpsSpacingFunctor sets between them:
+// 100, the gap under which MuseNote's W200 reads two chord symbols as one (the owner's choice, 2026-11-27)
+constexpr int MIN_HARM_GAP = 100;
 
 // The lowest ratio JustifyXFunctor may squeeze a system by and keep each word clear of the next, and each hyphen its
 // dash (MuseNote RC211): 0 when the system has no two words to close
@@ -663,6 +669,46 @@ double SafeSqueezeRatio(System *system, Doc *doc)
     return std::min(safe, 1.0);
 }
 
+// The lowest ratio JustifyXFunctor may squeeze a system by and keep each harm MIN_HARM_GAP from the next (MuseNote
+// W200, RC211): 0 when the system has no two harms to close
+double SafeHarmSqueezeRatio(System *system)
+{
+    // The harms of each row, a grp drawn on a staff, as AdjustHarmGrpsSpacingFunctor spaces them; a blank one draws
+    // nothing (MuseNote RC226)
+    std::map<std::pair<int, const StaffAlignment *>, std::vector<const FloatingPositioner *>> rows;
+    ListOfObjects harms = system->FindAllDescendantsByType(HARM);
+    for (Object *object : harms) {
+        Harm *harm = vrv_cast<Harm *>(object);
+        if (!harm->GetStart() || (harm->GetDrawingGrpId() == 0)) continue;
+        ArrayOfFloatingPositioners positioners;
+        system->m_systemAligner.FindAllPositionerPointingTo(&positioners, harm);
+        for (const FloatingPositioner *positioner : positioners) {
+            if (!positioner->HasContentBB() || (positioner->GetContentX2() <= positioner->GetContentX1())) continue;
+            rows[{ harm->GetDrawingGrpId(), positioner->GetAlignment() }].push_back(positioner);
+        }
+    }
+    double safe = 0.0;
+    for (auto &[row, positioners] : rows) {
+        std::stable_sort(positioners.begin(), positioners.end(),
+            [](const FloatingPositioner *positioner1, const FloatingPositioner *positioner2) {
+                return (positioner1->GetContentLeft() < positioner2->GetContentLeft());
+            });
+        for (int i = 0; i + 1 < (int)positioners.size(); ++i) {
+            const FloatingPositioner *positioner = positioners.at(i);
+            const FloatingPositioner *next = positioners.at(i + 1);
+            // JustifyXFunctor moves the notes; a harm keeps its place by its start, and harms of one start move
+            // together
+            const LayerElement *start = vrv_cast<const Harm *>(positioner->GetObject())->GetStart();
+            const LayerElement *nextStart = vrv_cast<const Harm *>(next->GetObject())->GetStart();
+            const int span = nextStart->GetDrawingX() - start->GetDrawingX();
+            if (span <= 0) continue;
+            const int gap = next->GetContentLeft() - positioner->GetContentRight();
+            safe = std::max(safe, 1.0 - (double)(gap - MIN_HARM_GAP) / (double)span);
+        }
+    }
+    return std::min(safe, 1.0);
+}
+
 } // namespace
 
 void Page::FitHorizontally()
@@ -676,10 +722,10 @@ void Page::FitHorizontally()
     }
 
     ListOfObjects systems = this->FindAllDescendantsByType(SYSTEM, false, 1);
-    // Each system's width when last laid out; the systems whose words are being set smaller; and the systems left to
-    // JustifyHorizontally
+    // Each system's width when last laid out; the systems whose words or harms are being set smaller; and the systems
+    // left to JustifyHorizontally
     std::map<const System *, int> laidOutWidths;
-    std::set<const System *> wordsSmaller;
+    std::set<const System *> textSmaller;
     std::set<const System *> settled;
     for (int pass = 0; pass < 8; ++pass) {
         bool again = false;
@@ -689,26 +735,37 @@ void Page::FitHorizontally()
             if (settled.count(system)) continue;
             const double ratio = system->GetJustificationRatio(doc);
             if (ratio >= 1.0) continue;
-            // A squeeze that keeps the words apart is left to JustifyHorizontally, as before
-            if (ratio >= SafeSqueezeRatio(system, doc)) continue;
+            // A squeeze that keeps the words apart, and the harms MIN_HARM_GAP apart (MuseNote W200), is left to
+            // JustifyHorizontally, as before
+            const double wordsSafe = SafeSqueezeRatio(system, doc);
+            const double harmsSafe = SafeHarmSqueezeRatio(system);
+            if (ratio >= std::max(wordsSafe, harmsSafe)) continue;
             const int width = system->m_drawingTotalWidth;
             const auto laidOut = laidOutWidths.find(system);
             // The notes tighter while that narrows the system by a hundredth at least
             const bool narrowed
                 = (laidOut == laidOutWidths.end()) || (laidOut->second - width > laidOut->second / 100);
-            if (!wordsSmaller.count(system) && narrowed) {
+            // Then the words, or the harms, smaller where the squeeze would still close them: each to two fifths
+            const bool wordsToSet = (ratio < wordsSafe) && system->FindDescendantByType(SYL)
+                && (system->m_drawingLyricScale > MIN_LYRIC_SCALE);
+            const bool harmsToSet = (ratio < harmsSafe) && (system->m_drawingHarmScale > MIN_LYRIC_SCALE);
+            if (!textSmaller.count(system) && narrowed) {
                 system->m_drawingSpacingFactor *= ratio;
             }
-            else if (!system->FindDescendantByType(SYL) || (system->m_drawingLyricScale <= MIN_LYRIC_SCALE)) {
-                // No words to set smaller, or at two fifths already: JustifyHorizontally squeezes it, as before
+            else if (!wordsToSet && !harmsToSet) {
+                // Nothing to set smaller, or at two fifths already: JustifyHorizontally squeezes it, as before
                 settled.insert(system);
                 continue;
             }
             else {
-                // Then the words smaller, while the squeeze would still draw one over the next: smaller words open
-                // the gaps between them, whether or not the system narrows
-                wordsSmaller.insert(system);
-                system->m_drawingLyricScale = std::max(MIN_LYRIC_SCALE, system->m_drawingLyricScale * ratio);
+                // Smaller words, and smaller harms, open the gaps between them, whether or not the system narrows
+                textSmaller.insert(system);
+                if (wordsToSet) {
+                    system->m_drawingLyricScale = std::max(MIN_LYRIC_SCALE, system->m_drawingLyricScale * ratio);
+                }
+                if (harmsToSet) {
+                    system->m_drawingHarmScale = std::max(MIN_LYRIC_SCALE, system->m_drawingHarmScale * ratio);
+                }
             }
             laidOutWidths[system] = width;
             again = true;

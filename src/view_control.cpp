@@ -2332,6 +2332,10 @@ void View::DrawHarm(DeviceContext *dc, Harm *harm, Measure *measure, System *sys
         }
         else {
             params.m_pointSize = m_doc->GetDrawingLyricFont(staffSize)->GetPointSize();
+            // A line whose harms cannot fit at full size sets them smaller (MuseNote W200)
+            if (system->m_drawingHarmScale < 1.0) {
+                params.m_pointSize = params.m_pointSize * system->m_drawingHarmScale;
+            }
 
             harmTxt.SetPointSize(params.m_pointSize);
 

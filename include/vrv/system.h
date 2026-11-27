@@ -234,13 +234,15 @@ public:
      */
     int m_castOffStartWidth;
     /**
-     * @name The note spacing factor and the lyric scale the system is laid out with (MuseNote RC211). A system laid
-     * out wider than the page holds is laid out again with its notes tighter, then with its words smaller, instead
-     * of being squeezed (Page::FitHorizontally). Both are 1.0 unless the system did not fit.
+     * @name The note spacing factor, the lyric scale and the harm scale the system is laid out with (MuseNote RC211,
+     * W200). A system laid out wider than the page holds is laid out again with its notes tighter, then with its
+     * words or its harms smaller, instead of being squeezed (Page::FitHorizontally). All are 1.0 unless the system
+     * did not fit.
      */
     ///@{
     double m_drawingSpacingFactor;
     double m_drawingLyricScale;
+    double m_drawingHarmScale;
     ///@}
 
 protected:
