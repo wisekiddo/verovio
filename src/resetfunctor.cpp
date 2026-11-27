@@ -700,6 +700,8 @@ FunctorCode ResetHorizontalAlignmentFunctor::VisitLayerElement(LayerElement *lay
 FunctorCode ResetHorizontalAlignmentFunctor::VisitMeasure(Measure *measure)
 {
     measure->SetDrawingXRel(0);
+    // The move back of its first verses, recorded again by this layout's AdjustSylSpacingFunctor (MuseNote RC239)
+    measure->ResetDrawingSylMoveBacks();
     // Drawing resets only the box of what it draws, and a measure's left barline is not drawn where this layout joins
     // it into the previous measure's right one (View::DrawMeasure): it would keep the box of a layout that drew it, at
     // a line start, and take room it does not have (MuseNote RC224). A right barline is always drawn.

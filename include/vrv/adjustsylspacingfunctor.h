@@ -36,6 +36,9 @@ public:
     virtual ~AdjustSylSpacingFunctor() = default;
     ///@}
 
+    /** The line of verses the functor is replayed (RecordSylSpacingFunctor::Line; MuseNote RC239) */
+    void SetLine(const std::tuple<int, bool, int> &line) { m_line = line; }
+
     /*
      * Abstract base implementation
      */
@@ -72,8 +75,13 @@ private:
     std::vector<Verse *> m_simultaneousVerses;
     // The previous syl
     Syl *m_lastSyl;
-    // The previous measure
-    Measure *m_previousMeasure;
+    // Every measure ended since the previous verse, its own first: the previous verse is compared with the next one
+    // across the widths of them all (MuseNote RC239)
+    std::vector<Measure *> m_previousMeasures;
+    // The line of verses replayed, and whether the previous verse is the first of its measure in it: the move back it
+    // makes is recorded in its measure, which a line beginning with the measure takes as room (MuseNote RC239)
+    std::tuple<int, bool, int> m_line;
+    bool m_previousVerseFirst;
     // The current LabelAbbr of each voice, by layer @n
     std::map<int, LabelAbbr *> m_currentLabelAbbrs;
     // The voices, by layer @n, with a verse already in the current system

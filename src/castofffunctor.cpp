@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
+#include <tuple>
 
 //----------------------------------------------------------------------------
 
@@ -162,9 +164,10 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
         }
         // Break it if necessary: the line ending with this measure before a change ends with that change too
         // (MuseNote RC216), and with the room past its last barline that its harms take, those of the measures held
-        // with them (MuseNote RC231)
+        // with them (MuseNote RC231), and the line holds the room its first syllables take (MuseNote RC239)
         else if (drawingXRel + width + m_currentScoreDefWidth - m_shift + this->CalcCautionaryWidth(measure)
                 + this->CalcHarmEndWidth(this->CalcHarmRight(m_currentSystem, true, measure), measure)
+                + this->CalcSylRoom(m_currentSystem, true, measure)
             > m_systemWidth) {
             int firstHeld = -1;
             int lastHeld = -1;
@@ -174,10 +177,12 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
                 lastHeld = i;
             }
             // The line closing here ends with the change before the next line's first measure, cautionary (MuseNote
-            // RC216), and with the room past its last barline that its harms take (MuseNote RC231)
+            // RC216), and with the room past its last barline that its harms take (MuseNote RC231), and holds the room
+            // its first syllables take (MuseNote RC239)
             m_currentSystem->m_castOffStartWidth += ((firstHeld >= 0) ? m_heldCautionaryWidth : cautionaryWidth)
                 + this->CalcHarmEndWidth(this->CalcHarmRight(m_currentSystem, false, NULL),
-                    vrv_cast<const Measure *>(m_currentSystem->GetLast(MEASURE)));
+                    vrv_cast<const Measure *>(m_currentSystem->GetLast(MEASURE)))
+                + this->CalcSylRoom(m_currentSystem, false, NULL);
             m_currentSystem = new System();
             m_page->AddChild(m_currentSystem);
             m_shift = drawingXRel;
@@ -200,6 +205,7 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
             if ((lastHeld >= 0)
                 && (drawingXRel + width + m_currentScoreDefWidth - m_shift + this->CalcCautionaryWidth(measure)
                         + this->CalcHarmEndWidth(this->CalcHarmRight(NULL, true, measure), measure)
+                        + this->CalcSylRoom(NULL, true, measure)
                     > m_systemWidth)) {
                 for (int i = 0; i <= lastHeld; ++i) {
                     m_currentSystem->AddChild(m_pendingElements.at(i));
@@ -213,7 +219,8 @@ FunctorCode CastOffSystemsFunctor::VisitMeasure(Measure *measure)
                 m_currentSystem->m_castOffStartWidth += this->CalcChangeWidth(m_upcomingScoreDef, lastHeldMeasure)
                     + (lastHeldMeasure->HasCachedHorizontalLayout() ? lastHeldMeasure->GetCachedOverflow()
                                                                     : lastHeldMeasure->GetDrawingOverflow())
-                    + this->CalcHarmEndWidth(this->CalcHarmRight(m_currentSystem, false, NULL), lastHeldMeasure);
+                    + this->CalcHarmEndWidth(this->CalcHarmRight(m_currentSystem, false, NULL), lastHeldMeasure)
+                    + this->CalcSylRoom(m_currentSystem, false, NULL);
                 m_pendingElements.erase(m_pendingElements.begin(), m_pendingElements.begin() + lastHeld + 1);
                 m_currentSystem = new System();
                 m_page->AddChild(m_currentSystem);
@@ -470,6 +477,33 @@ int CastOffSystemsFunctor::CalcHarmEndWidth(int harmRight, const Measure *measur
     return std::max(0, harmRight - (measure->GetDrawingXRel() + rightBarLineXRel));
 }
 
+int CastOffSystemsFunctor::CalcSylRoom(const System *system, bool held, const Measure *measure) const
+{
+    // As AdjustSylSpacingFunctor lays the line out: each line of verses' first verse on the line keeps its place,
+    // where the one-line layout moved it back into the measures before it, and its measure takes that room
+    std::set<std::tuple<int, bool, int>> lines;
+    int room = 0;
+    const auto take = [&lines, &room](const Object *object) {
+        if (!object->Is(MEASURE)) return;
+        const Measure *current = vrv_cast<const Measure *>(object);
+        const std::map<std::tuple<int, bool, int>, int> &moveBacks = current->HasCachedHorizontalLayout()
+            ? current->GetCachedSylMoveBacks()
+            : current->GetDrawingSylMoveBacks();
+        for (const auto &[line, moveBack] : moveBacks) {
+            // The first verse on the line in this line of verses: those after it keep the room before them
+            if (lines.insert(line).second) room = std::max(room, moveBack);
+        }
+    };
+    if (system) {
+        for (const Object *child : system->GetChildren()) take(child);
+    }
+    if (held) {
+        for (const Object *element : m_pendingElements) take(element);
+    }
+    if (measure) take(measure);
+    return room;
+}
+
 CastOffSystemsFunctor::StaffScoreDefExtents CastOffSystemsFunctor::CalcStaffScoreDefExtents(
     const StaffDef *staffDef, bool lineStart) const
 {
@@ -692,6 +726,10 @@ void CastOffSystemsFunctor::ApplyMeasure(ScoreDef &scoreDef, Measure *measure) c
 
 FunctorCode CastOffSystemsFunctor::VisitSystemEnd(System *system)
 {
+    // The last line ends here: the room its first syllables take, with the measures still held, which go to it, is
+    // counted with its widths for the spacing estimate (MuseNote RC239)
+    m_currentSystem->m_castOffStartWidth += this->CalcSylRoom(m_currentSystem, true, NULL);
+
     if (m_pendingElements.empty()) return FUNCTOR_CONTINUE;
 
     // Otherwise add all pending objects

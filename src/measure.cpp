@@ -146,6 +146,8 @@ void Measure::Reset()
     m_cachedWidth = VRV_UNSET;
     m_cachedHarmReach = VRV_UNSET;
     m_cachedRightBarLineXRel = VRV_UNSET;
+    m_drawingSylMoveBacks.clear();
+    m_cachedSylMoveBacks.clear();
 
     // by default, we have a single barLine on the right (none on the left)
     m_rightBarLine.SetForm(this->GetRight());
@@ -259,6 +261,7 @@ void Measure::CacheXRel(bool restore)
         m_cachedOverflow = this->GetDrawingOverflow();
         m_cachedHarmReach = this->GetDrawingHarmReach();
         m_cachedRightBarLineXRel = this->GetRightBarLineXRel();
+        m_cachedSylMoveBacks = m_drawingSylMoveBacks;
         m_cachedXRel = m_drawingXRel;
     }
 }
@@ -417,6 +420,12 @@ int Measure::GetDrawingHarmReach()
         reach = std::max(reach, widest->GetContentRight() - this->GetDrawingX());
     }
     return reach;
+}
+
+void Measure::SetDrawingSylMoveBack(const std::tuple<int, bool, int> &line, int moveBack)
+{
+    int &recorded = m_drawingSylMoveBacks[line];
+    recorded = std::max(recorded, moveBack);
 }
 
 int Measure::GetSectionRestartShift(const Doc *doc) const

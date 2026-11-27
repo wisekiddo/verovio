@@ -34,7 +34,8 @@ AdjustSylSpacingFunctor::AdjustSylSpacingFunctor(Doc *doc) : DocFunctor(doc)
 {
     m_previousVerse = NULL;
     m_lastSyl = NULL;
-    m_previousMeasure = NULL;
+    m_line = std::make_tuple(0, false, 0);
+    m_previousVerseFirst = false;
     m_freeSpace = 0;
     m_staffSize = 100;
 }
@@ -46,6 +47,13 @@ int AdjustSylSpacingFunctor::AdjustPreviousVersePosition(int &overlap)
     const int shift = m_previousVerse->GetDrawingXRel() - previousX;
     for (Verse *verse : m_simultaneousVerses) {
         verse->SetDrawingXRel(verse->GetDrawingXRel() + shift);
+    }
+    // A measure's first verse moved back into the measures before it: a line beginning with the measure, where the
+    // first verse never moves back, takes that room (MuseNote RC239)
+    if (m_previousVerseFirst && (shift < 0)) {
+        Measure *measure = vrv_cast<Measure *>(m_previousVerse->GetFirstAncestor(MEASURE));
+        assert(measure);
+        measure->SetDrawingSylMoveBack(m_line, -shift);
     }
     return nextFreeSpace;
 }
@@ -64,8 +72,9 @@ FunctorCode AdjustSylSpacingFunctor::VisitMeasureEnd(Measure *measure)
     }
     m_measureVerses.clear();
 
-    // At the end of the measure - pass it along for overlapping verses
-    m_previousMeasure = measure;
+    // At the end of the measure - pass it along for overlapping verses, with the measures ended before it since the
+    // previous verse (MuseNote RC239)
+    m_previousMeasures.push_back(measure);
 
     // Adjust the position of the alignment according to what we have collected for this verse
     measure->m_measureAligner.AdjustProportionally(m_overlappingSyl);
@@ -88,7 +97,8 @@ FunctorCode AdjustSylSpacingFunctor::VisitSystem(System *system)
     m_overlappingSyl.clear();
     m_previousVerse = NULL;
     m_simultaneousVerses.clear();
-    m_previousMeasure = NULL;
+    m_previousMeasures.clear();
+    m_previousVerseFirst = false;
     m_systemLayers.clear();
     m_measureVerses.clear();
     m_freeSpace = 0;
@@ -99,25 +109,33 @@ FunctorCode AdjustSylSpacingFunctor::VisitSystem(System *system)
 
 FunctorCode AdjustSylSpacingFunctor::VisitSystemEnd(System *system)
 {
-    if (!m_previousMeasure) {
+    if (m_previousMeasures.empty()) {
         return FUNCTOR_CONTINUE;
     }
+    Measure *lastMeasure = m_previousMeasures.back();
 
-    // Here we also need to handle the last syl of the measure - we check the alignment with the right barline
+    // Here we also need to handle the last syl of the measure - we check the alignment with the right barline, across
+    // the measures after the previous verse's own (MuseNote RC239: the last measure's alone)
     if (m_previousVerse && m_lastSyl) {
-        int overlap = m_lastSyl->GetContentRight() - m_previousMeasure->GetRightBarLine()->GetAlignment()->GetXRel();
+        assert(m_previousMeasures.front() == m_previousVerse->GetFirstAncestor(MEASURE));
+        int xShift = 0;
+        for (size_t i = 0; i + 1 < m_previousMeasures.size(); ++i) {
+            xShift += m_previousMeasures.at(i)->GetWidth();
+        }
+        int overlap
+            = m_lastSyl->GetContentRight() - (xShift + lastMeasure->GetRightBarLine()->GetAlignment()->GetXRel());
         this->AdjustPreviousVersePosition(overlap);
 
         // If the previous verse was not in the previous measure (but before), ignore the overlap because it is
         // not likely to go over the whole following measure
-        if ((m_previousMeasure == m_previousVerse->GetFirstAncestor(MEASURE)) && (overlap > 0)) {
+        if ((m_previousMeasures.size() == 1) && (overlap > 0)) {
             m_overlappingSyl.push_back(std::make_tuple(
-                m_previousVerse->GetAlignment(), m_previousMeasure->GetRightBarLine()->GetAlignment(), overlap));
+                m_previousVerse->GetAlignment(), lastMeasure->GetRightBarLine()->GetAlignment(), overlap));
         }
     }
 
     // Adjust the position of the alignment according to what we have collected for this verse
-    m_previousMeasure->m_measureAligner.AdjustProportionally(m_overlappingSyl);
+    lastMeasure->m_measureAligner.AdjustProportionally(m_overlappingSyl);
     m_overlappingSyl.clear();
 
     return FUNCTOR_CONTINUE;
@@ -202,14 +220,20 @@ void AdjustSylSpacingFunctor::AdjustVerse(Verse *verse)
 
         // No free space because we never move the first one back
         m_freeSpace = 0;
-        m_previousMeasure = NULL;
+        // The first verse of its measure, and of the line: a line beginning with the measure takes the room of the
+        // move back it makes on the one-line layout, where it has the measures before it (MuseNote RC239)
+        m_previousVerseFirst = true;
+        Measure *measure = vrv_cast<Measure *>(verse->GetFirstAncestor(MEASURE));
+        assert(measure);
+        measure->AddDrawingSylLine(m_line);
+        m_previousMeasures.clear();
         return;
     }
 
     // Verses of two voices at one alignment are not spaced against each other: the one reaching furthest right is the
     // previous, and the others move with it (upstream e5f1b2456). Spaced, they would ask the measure for room from
     // their alignment to itself, which widens it and leaves them as they are.
-    if (!m_previousMeasure && (verse->GetAlignment() == m_previousVerse->GetAlignment())
+    if (m_previousMeasures.empty() && (verse->GetAlignment() == m_previousVerse->GetAlignment())
         && (layer != m_previousVerse->GetFirstAncestor(LAYER))) {
         if (lastSyl->GetContentRight() > m_lastSyl->GetContentRight()) {
             m_simultaneousVerses.push_back(m_previousVerse);
@@ -224,10 +248,11 @@ void AdjustSylSpacingFunctor::AdjustVerse(Verse *verse)
 
     int xShift = 0;
 
-    // We have a previous syllable from the previous measure - we need to add the measure width because the measures are
-    // not aligned yet
-    if (m_previousMeasure) {
-        xShift = m_previousMeasure->GetWidth();
+    // We have a previous syllable from a previous measure - we need to add the measures' widths because the measures
+    // are not aligned yet: every measure ended since the previous verse, its own first (MuseNote RC239: the last one's
+    // alone, as if the previous verse stood in it)
+    for (const Measure *measure : m_previousMeasures) {
+        xShift += measure->GetWidth();
     }
 
     // Use the syl because the content bounding box of the verse might be invalid at this stage
@@ -243,12 +268,15 @@ void AdjustSylSpacingFunctor::AdjustVerse(Verse *verse)
     int nextFreeSpace = this->AdjustPreviousVersePosition(overlap);
 
     if (overlap > 0) {
-        // We are adjusting syl in two different measures - move only the right barline of the first measure
-        if (m_previousMeasure) {
+        // We are adjusting syl in two different measures - move only the right barline of the first measure: the
+        // previous verse's own (MuseNote RC239: the measure ended last, from an alignment of another)
+        if (!m_previousMeasures.empty()) {
+            Measure *previousVerseMeasure = m_previousMeasures.front();
+            assert(previousVerseMeasure == m_previousVerse->GetFirstAncestor(MEASURE));
             m_overlappingSyl.push_back(std::make_tuple(
-                m_previousVerse->GetAlignment(), m_previousMeasure->GetRightBarLine()->GetAlignment(), overlap));
+                m_previousVerse->GetAlignment(), previousVerseMeasure->GetRightBarLine()->GetAlignment(), overlap));
             // Do it now
-            m_previousMeasure->m_measureAligner.AdjustProportionally(m_overlappingSyl);
+            previousVerseMeasure->m_measureAligner.AdjustProportionally(m_overlappingSyl);
             m_overlappingSyl.clear();
         }
         else {
@@ -258,11 +286,19 @@ void AdjustSylSpacingFunctor::AdjustVerse(Verse *verse)
         }
     }
 
+    // The first verse of its measure (a measure ended since the previous verse): a line beginning with the measure
+    // takes the room of the move back it makes (MuseNote RC239)
+    m_previousVerseFirst = !m_previousMeasures.empty();
+    if (m_previousVerseFirst) {
+        Measure *measure = vrv_cast<Measure *>(verse->GetFirstAncestor(MEASURE));
+        assert(measure);
+        measure->AddDrawingSylLine(m_line);
+    }
     m_previousVerse = verse;
     m_simultaneousVerses.clear();
     m_lastSyl = lastSyl;
     m_freeSpace = nextFreeSpace;
-    m_previousMeasure = NULL;
+    m_previousMeasures.clear();
 }
 
 //----------------------------------------------------------------------------

@@ -15,6 +15,9 @@
 #include "horizontalaligner.h"
 #include "object.h"
 
+#include <map>
+#include <tuple>
+
 namespace vrv {
 
 class ControlElement;
@@ -249,6 +252,7 @@ public:
     int GetCachedOverflow() const { return m_cachedOverflow; }
     int GetCachedHarmReach() const { return m_cachedHarmReach; }
     int GetCachedRightBarLineXRel() const { return m_cachedRightBarLineXRel; }
+    const std::map<std::tuple<int, bool, int>, int> &GetCachedSylMoveBacks() const { return m_cachedSylMoveBacks; }
     void ResetCachedWidth() { m_cachedWidth = VRV_UNSET; }
     void ResetCachedOverflow() { m_cachedOverflow = VRV_UNSET; }
     ///@}
@@ -265,6 +269,19 @@ public:
      * barline (MuseNote RC231). VRV_UNSET where the measure draws none.
      */
     int GetDrawingHarmReach();
+
+    /**
+     * @name How far the first verse of the measure in each line of verses (RecordSylSpacingFunctor::Line) moved back,
+     * as AdjustSylSpacingFunctor laid the measure out: a line beginning with the measure, where the first verse never
+     * moves back, takes that room (MuseNote RC239). Each line of verses the measure holds has an entry, 0 where its
+     * first verse did not move; reset at each horizontal layout.
+     */
+    ///@{
+    const std::map<std::tuple<int, bool, int>, int> &GetDrawingSylMoveBacks() const { return m_drawingSylMoveBacks; }
+    void AddDrawingSylLine(const std::tuple<int, bool, int> &line) { m_drawingSylMoveBacks.emplace(line, 0); }
+    void SetDrawingSylMoveBack(const std::tuple<int, bool, int> &line, int moveBack);
+    void ResetDrawingSylMoveBacks() { m_drawingSylMoveBacks.clear(); }
+    ///@}
 
     /**
      * Calculates the section restart shift
@@ -447,6 +464,13 @@ protected:
      */
     int m_cachedHarmReach;
     int m_cachedRightBarLineXRel;
+
+    /**
+     * The move back of the measure's first verses, as laid out (GetDrawingSylMoveBacks), and as cached with the
+     * measure's width: the cache lays no verse out (MuseNote RC239)
+     */
+    std::map<std::tuple<int, bool, int>, int> m_drawingSylMoveBacks;
+    std::map<std::tuple<int, bool, int>, int> m_cachedSylMoveBacks;
 
 private:
     /**

@@ -934,6 +934,7 @@ void Page::AdjustSylSpacingByVerse(const IntTree &verseTree, Doc *doc)
     this->Process(recordSylSpacing);
     for (const RecordSylSpacingFunctor::Line &line : recordSylSpacing.GetLines()) {
         AdjustSylSpacingFunctor adjustSylSpacing(doc);
+        adjustSylSpacing.SetLine(line);
         recordSylSpacing.Replay(line, adjustSylSpacing);
     }
 }

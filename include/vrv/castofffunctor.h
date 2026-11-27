@@ -138,6 +138,13 @@ private:
     int CalcHarmEndWidth(int harmRight, const Measure *measure) const;
 
     /**
+     * The room a line's first syllables take on it, where they never move back (AdjustSylSpacingFunctor): for each
+     * line of verses, the move back its first verse on the line made on the one-line layout, the largest of them; the
+     * line held in [system], the measures held where [held] (151), and [measure] (MuseNote RC239).
+     */
+    int CalcSylRoom(const System *system, bool held, const Measure *measure) const;
+
+    /**
      * What a staff draws in the scoreDef alignments of a line's start (its clef and key, and a meter where its draw
      * flags set one), or of a change within a line or at its end (what its draw flags set) (MuseNote RC216).
      */
