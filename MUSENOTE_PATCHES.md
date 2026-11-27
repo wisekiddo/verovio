@@ -2989,6 +2989,260 @@ subcase (it fails on tb.18); no output of the parity set changes.
 
 **Upstream status**: not offered.
 
+### 160. Syllables laid out on their line as the line breaker counts them (tb.68)
+
+MuseNote plan V3_2_0_103, amendment 2 (root cause RC239, finding W210). Ours: upstream's develop has the same code
+(5109b20dd, 2026-11-25).
+
+- **The cause.** Where a syllable would overlap the next, `AdjustSylSpacingFunctor` moves it back into the gap after the
+  syllable before it (`Verse::AdjustPosition`, at most three drawing units), and makes what is left room in the
+  measure (`MeasureAligner::AdjustProportionally`). (a) A line's first syllable never moves back: `VisitSystem` sets the
+  free space to 0 at each line's start ("we never move the first one back"). `CastOffSystemsFunctor` fits measures by
+  the widths of the one-line layout, where that syllable has the measures before it and moves back; on its line its
+  measure takes the room instead, which the breaker counted nowhere. The line was laid out wider than the page and
+  squeezed, its notes closer and its last chord past its end (MuseNote's Black Coffee in its 900 tile: "Love's" moved
+  back 270 units on the one-line layout, its measure 247 wider on its line, the line 186 over the page). In MuseNote's
+  catalog a third of the lines with words begin with such a syllable (17,609 of 51,854 at its reader's biggest notes,
+  184 units on average). (b) A verse measures back, with no verse in the measures between, was compared with the
+  previous across the width of the measure ended last only (each measure's end overwrote `m_previousMeasure`), as if
+  the previous verse stood in it: overlaps that are none (2,737 in 958 of MuseNote's songs, on the one-line layout),
+  the previous verse moved back for them and the next one's free space taken, and room made in the last measure from
+  an alignment of another (296 places); a real overlap across a short measure was given none where the previous verse
+  stands right of that measure's barline in its own, and the two were drawn over each other. On a line, the previous
+  verse's measure also holds the line's clef and key: MuseNote's M-o-t-h-e-r, "gold," and "E" a measure apart, 1,152
+  units clear on the one-line layout, 294 over each other on the line, the room put in the wordless measure between.
+  `VisitSystemEnd` compared a line's last verse with the line's end so too, and moved it back for an overlap that is
+  none.
+- **The fix.** (b) Every measure ended since the previous verse, its own first, is kept (`m_previousMeasures`): the two
+  are compared across the widths of them all, and the room for an overlap is made in the previous verse's own measure,
+  from its alignment to that measure's right barline, as for neighbouring measures (as patch 156 does for harms);
+  `VisitSystemEnd` compares the line's last verse with the line's end across the measures after it, and adds no room
+  across measures, as before. (a) Upstream's rule stays; the breaker counts the room it takes. The functor, told the
+  line of verses it is replayed (`SetLine`: a staff, its side, a verse number, as `RecordSylSpacingFunctor` keys them,
+  patch 147), records in each measure how far each line of verses' first verse there moved back
+  (`Measure::m_drawingSylMoveBacks`: an entry for each line of verses the measure holds; reset by
+  `ResetHorizontalAlignmentFunctor`, cached by `Measure::CacheXRel`, which lays no verse out). `CastOffSystemsFunctor::
+  CalcSylRoom` takes, for each line of verses, the first measure of the line holding it (with the measures held where
+  they go with it, 151), and the line's room is the largest of their moves back: counted in the fit check, beside the
+  harms' room (159); in the check that held measures and the next fit a new line (151); and in
+  `System::m_castOffStartWidth` (153) where a line closes: at a break, for held measures taking a line alone, and at
+  the content's end (a line's start comes on the last line too, unlike the harms' end). The content's first line
+  counts none: its first verses moved back on the one-line layout neither.
+- **What it changes.** Where lines break and how measures are spaced in a score with words: a line whose first
+  syllables moved back on the one-line layout is counted with that room, and ends a measure earlier where it does not
+  fit; wordless measures between syllables take no room for them, and a syllable over a whole short measure takes its
+  room in its own. The SVG and the page count only. No MEI, MIDI, timemap, pitch map or id.
+- **Left as it was.** A break at a div, or at an encoded system break in smart mode, counts no syllable room (152 and 159
+  count none there). The one-line layout's room between a line's last syllable and the next line's first stays in the
+  count: a line may be laid out narrower than counted, never wider. A line of one measure wider than the line, and the
+  content's first measure's overhang counted nowhere, are MuseNote's W212 and RC240.
+
+**Cases**: MuseNote's `test/native/test_tb68_chord_spacing_engine.cpp`, 10 for RC239 (synthetic scores). (b): a
+syllable two measures after another, a wordless measure between, gives that measure no room, on the one-line layout and
+on lines; on its line, a syllable a wordless measure after the line's first moves back as on the one-line layout; a
+syllable over the whole short measure after it is given room in its own, the two clear; a line's last syllable with a
+wordless measure after it stands against its note as on the one-line layout. (a): lines each opening with a syllable
+that moves back on the one-line layout, at page widths 800 to 1,600 in tens, none laid out wider than it holds, and
+justified, every word at its own size; two verses, verse 1 a word that moves nowhere and verse 2's first syllable
+moving back, counted; measures as wide as their words (which no spacing estimate narrows) holding only those that fit
+with the room, from 910; held measures (151) of such words opening a line, from 1,000; on pages so narrow (520 to 800)
+that the estimate's slack is less than the room, the estimate leaving it; a score laid out again through the cache at
+another width, broken as one loaded at it, none wider than it holds. (Each range starts where a measure with its line's
+start fits a line alone; the held case holds no first measure, whose overhang RC240 counts nowhere.) On tb.68 before
+the patch all 10 fail, and 156 to 159's 19 pass. Undone, each part fails its own: the widths of every measure
+between (the first two of (b) and the line's end), the room in the previous verse's own measure (the short
+measure's), the line end's comparison (its case), the record of the moves back (all six of (a)), the count in the
+fit check (the measures as wide as their words), for the estimate at a break and at the content's end (the narrow
+pages), for held measures (theirs), each line of verses' own (the two verses, and the two whose moving words are
+verse 2's), the cache (its case); 156 to 159's 19 pass in each. (A first set of 8 cases passed with the fit
+check's count, the estimate's or the held measures' undone alone: on lines not full, or whose measures the
+estimate narrows, its slack takes a room of 270 units; the cases were made so each count is needed alone.)
+
+**Gate of tb.68** (patches 156 to 160, MuseNote plan V3_2_0_103 and its amendments 1 and 2, on tb.67; the gate's fourth
+run, the third on 156 to 159, the first two on 156 to 158). Native: the suite, 608 cases (100,309 assertions), and under
+ASan, integer-divide-by-zero and signed-integer-overflow 607, no report; `tool/log_format_audit.py`: 301 engine sources,
+0 calls. A Debug engine (signed overflow halting it) over every input: 3,612, all through, and through the frozen
+readers the 3,392 MusicXML and ABC inputs, all through. Parity against tb.67: 26,741 outputs, 3,111 differ, all SVGs of
+songs with chord symbols or words (3,075 and 36); no MEI, MIDI, timemap, pitch map or id; seeded ids 3,758 of 3,758;
+every input reads back from its MEI (4,152). MuseNote's chord gate (every song with chord symbols, 2,988, and its 540
+files corrected by plan V3_2_0_102; its 16 layouts and render paths), tb.67 to tb.68: two chords of a line drawn over
+each other 282 in 39 songs to none (the 540: 82 in 12 to none); two different chords at one place over each other 2,442
+in 587 to none; two under 100 units apart 175 in 62 to 6 in 5 (52 in 19 to 3 in 2), 84 to 96 units, in the 900 tile, on
+lines whose chords are at two fifths already; chords drawn smaller 344 in 50 songs (132 in 16), at two fifths 15 in 5
+(8 in 2); chords past their line's end 833 in 137 to 542 in 75 (145 in 43 to 76 in 20). Each of those was laid out
+again and traced (310 distinct, the paged and continuous views drawing alike; the 540: 52): 202 in 29 songs are timed
+at their bar's end and start at its barline (MuseNote W203; 25 in 7); 107 in 45 stand on a line of one measure that,
+with its harms' room and the room its first syllables take, is wider than the line as counted, which no break can
+shorten (MuseNote W212; 27 in 13); one, in the 900 tile, on the score's first measure, whose direction overhanging its
+barline is never held, the line empty, nor counted (MuseNote RC240). (On the gate's third run, on 156 to 159, 36 more in
+29 songs stood on lines whose first syllables were laid out wider than counted: patch 160's.) MuseNote's measure of
+the syllables of its catalog (3,198 songs, its reader's biggest notes and its editor's 900 tile): verses compared
+across measures with an overlap that is none, 2,737 on the one-line layout and 316 and 263 on lines, to none; lines'
+first verses that moved back on the one-line layout, now counted, 19,142 of 52,380 lines and 26,076 of 71,124. The
+reader switch over its 3,198 songs at its four page widths: none drawn otherwise on either engine; its loads draw
+otherwise than tb.67's in 10,479 of 12,792 song-widths, in 2,803 songs, for their chords and words. The locator gate: 0
+failures. MuseSync's 24 starters: the same. `bar_times.py`: as tb.67. MuseNote's export gate in every format, run on
+tb.67 and tb.68 with the same export code: no song-aspect worse, its six refused exports tb.67's (neume notation). The
+frozen readers' whole MEI: the same as tb.67's for the 3,629 songs, the 80 of 3.0.1 and the 194 ABC files. MuseNote's
+lyric gate, every song with words (2,676) at its 16 layouts and render paths: no song draws more words over each other
+at any layout (judged otherwise than on tb.67 in up to 699 songs, in the 900 tile, where lines now break otherwise); the
+continuous view reached by a re-layout judged as a continuous load in every song. MuseNote's measure of every line of
+its corpus (the reader's biggest notes and the editor's biggest zoom): 160,029 lines to 161,575; lines counted wider than
+drawn by over 20 units 153 to 115, narrower 138 to 128, at the reader's biggest notes. V3_2_0_92's taps (213 songs, 12
+layouts, 3 renders each, the third after the switch): none right on tb.67 wrong on tb.68, no bar misframed. Render time,
+100 songs in two layouts, the two engines alternated, three passes each: +0.0 % (median; again alone on a machine at
+load 14 to 24: +2.2 %), within the spread.
+
+**Upstream status**: not offered.
+
+### 159. The line breaker counts the room a line's last chord symbol takes at its end (tb.68)
+
+MuseNote plan V3_2_0_103, amendment 1 (root cause RC231, finding W205). Ours: upstream's develop has the same code
+(5109b20dd, 2026-11-25).
+
+- **The cause.** `AdjustHarmGrpsSpacingFunctor::VisitSystemEnd` widens a line's last measure so that the line's last
+  harm ends at its last barline (patch 156: also where the harm stands measures before the end).
+  `CastOffSystemsFunctor` fits measures into a line by the widths of the score laid out on one line, where that harm
+  reaches into the next measure with nothing to clear; it counted what a line draws beyond its measures (151, 152) but
+  not this room. The line was laid out wider than the page, and `JustifyXFunctor`'s squeeze took the room back: the
+  harm's start moved left with the notes, its width stayed, and it ended past the line's end (MuseNote's chord gate on
+  tb.68 with 156 to 158: 788 harms in 132 songs, in its 16 layouts; a synthetic score at 900: 141 units).
+- **The fix.** `Measure::GetDrawingHarmReach`: how far right of the measure's left its harms reach, each by its widest
+  positioner, as `AdjustHarmGrpsSpacingFunctor` spaces them (a blank harm, one with no group or no aligned start: none);
+  cached with the measure's width and overflow (`Measure::CacheXRel`), with the right barline's place
+  (`m_cachedRightBarLineXRel`): the layout cache has no positioners to measure and restores no alignment (a relayout
+  read the right barline where the last line's layout had left it). The breaker keeps how far each measure's harms
+  reach on the one-line layout, and takes a line's from the measures it holds (`CalcHarmRight`: with the held
+  measures where they go with it, 151, not where they go to the next line); `CalcHarmEndWidth` is the room past a
+  measure's right barline. A measure fits its line only with that room, beside the cautionary change (152); a line
+  counts it in `System::m_castOffStartWidth` (153) where it ends at a break and where a held measure takes it alone
+  (151). The content's last line needs none: the one-line layout ends there too, and made the room in its widths.
+- **What it changes.** Where lines break in a score with harms: a line whose last harm reaches past its last barline
+  ends a measure earlier where the room does not fit, and the harm stays inside it. The SVG and the page count only.
+  No MEI, MIDI, timemap, pitch map or id.
+- **Left as it was.** A break at a div, or at an encoded system break in smart mode, counts no harm room (152 counts
+  no start there either). The one-line layout's room between a line's last harm and the next line's first (156) stays
+  in the count: a line may be laid out narrower than counted, never wider. A held line with both a direction and a harm
+  past its barline counts both rooms, which the layout partly shares: narrower than counted, never wider. A harm timed
+  at its measure's end starts at the right barline and stays past it (MuseNote W203).
+
+**Cases**: MuseNote's `test/native/test_tb68_chord_spacing_engine.cpp`, 4 for RC231 (synthetic scores): bars whose
+last chord reaches past their barline, at page widths 700 to 1,600 in tens, no line laid out wider than it holds and,
+justified, no chord past its line's end; a chord on the last beat of every fourth whole-note bar, reaching over the
+next bar and past it, counted where it stands; a bar held for a direction that overhangs it, with a chord past its
+barline, the line before it broken as without the chord and its own line keeping the chord inside; a score laid out
+again through the cache at another width (as MuseNote's editor zooms), its lines holding the bars a load's hold. On
+tb.68 before the patch all 4 fail. Undone, each part fails its own: the room in the fit check (the first two), the
+count for the estimate (the first two and the cache's), the held line's count and the held bars' reach kept apart
+(the held bar's), the cached reach and the cached right barline (the cache's), a line's reach from all its bars (all
+4); 156 to 158's 15 cases pass in each.
+
+**Upstream status**: not offered.
+
+### 158. A line too full for its chord symbols is laid out again, its notes tighter, then its chords smaller (tb.68)
+
+MuseNote plan V3_2_0_103 (root cause RC211, finding W200; on patch 154). Ours: upstream's develop has the same code
+(5109b20dd, 2026-11-25).
+
+- **The cause.** `JustifyXFunctor` squeezes a line laid out wider than the page holds by one ratio, which takes back
+  the room `AdjustHarmGrpsSpacingFunctor` gave its harms, two units between neighbours, as it took back its words'
+  (RC211). Patch 154 lays such a line out again where its squeeze would draw a word over the next; it judged words only
+  (`SafeSqueezeRatio`), and a squeeze drew harms nearer than they read apart, or over each other (MuseNote's Always
+  And Forever, bar 32: two Em7/A an eighth apart, 25 units apart at the reader's biggest size).
+- **The fix.** `SafeHarmSqueezeRatio` takes every two neighbouring harms of a line (a group on a staff, left to right;
+  harms of one start move together, and a blank harm draws nothing): the lowest ratio that keeps each two
+  `MIN_HARM_GAP` apart, 100 units, the gap under which MuseNote reads two chord symbols as one (the owner's choice,
+  2026-11-27, over the whole two units). `Page::FitHorizontally` lays a line out again where its squeeze would go
+  below that for its words or its harms: its notes tighter, then, where that no longer narrows it, its words or its
+  harms smaller, each only where it is what cannot fit (`System::m_drawingHarmScale`, beside `m_drawingLyricScale`,
+  drawn by `View::DrawHarm`), to two fifths at most (`MIN_LYRIC_SCALE`, the owner's choice for harms too). A line that
+  cannot fit even then is squeezed as before.
+- **What it changes.** The SVG of a line whose squeeze would have brought two harms under 100 units apart: its notes
+  tighter, and where that is not enough its harms smaller. A line's words are judged as before. No MEI, MIDI,
+  timemap, pitch map or id.
+
+**Cases**: in the same file, 3 for RC211: a line too full for its chords is laid out with its notes tighter, the
+chords whole; a squeeze that keeps the chords apart is left as before; chords that cannot fit their line whole are set
+smaller on that line only, to two fifths at most. The first and the third fail on tb.67 and with 156 and 157; undone,
+the chords' judging and their smaller drawing each fail both.
+
+**Upstream status**: not offered.
+
+### 157. Two different chord symbols at one place, the second drawn after the first (tb.68)
+
+MuseNote plan V3_2_0_103 (root cause RC225, the engine's rule for the files the song tool never sees). Ours:
+upstream's develop has the same code (5109b20dd, 2026-11-25).
+
+- **The cause.** Files that give a chord changing during a note no time of its own write it as a second harmony before
+  that note (Wikifonia's, through MuseScore 0.9 to 1.3; RC225), and `AdjustHarmGrpsSpacingFunctor` leaves harms of one
+  place alone on purpose (its comment: when the first is aligned right, they need nothing). Both stand at the note:
+  drawn over each other, the second unreadable (Picnic, bar 2: CMaj7 and Dm7). MuseNote corrected its catalog's files
+  (plan V3_2_0_102); a file it opens from elsewhere still writes them so.
+- **The fix.** A harm whose box meets that of a different harm already at its place, any of them, is drawn right of
+  them all, two units (the room between neighbours) after the rightmost, and the harm after the place is spaced from
+  it. The same harm
+  written twice stays in one place, drawn as one: a repeated chord does not read as a change. Harms that do not meet
+  (the first aligned right of its note, the second left) stay as they are. The move is the harm's own: `Harm` keeps a
+  drawing X relative to its start (`m_drawingXRel`, as `Arpeg` does), reset by `ResetHorizontalAlignmentFunctor`,
+  cached by `CacheHorizontalLayoutFunctor` (restored only where cached), given to each positioner it is drawn with
+  (`View::DrawHarm`, which draws the harm at its start plus it).
+- **What it changes.** The SVG of a score with two different harms at one place: the second drawn after the first,
+  its measure widened for it. No MEI, MIDI, timemap, pitch map or id.
+
+**Cases**: in the same file, 4 for RC225: two different chords at one note, the second drawn after the first; a
+chord meeting an earlier chord of its place, not the last, drawn after them all; the same chord twice at one note
+drawn in one place; chords at one note that do not meet left as they are. The first two fail on tb.67 and with 156
+alone; undone, the move fails both, its check against every chord of the place the second.
+
+**Upstream status**: not offered.
+
+### 156. Chord symbols spaced in the order of time, from the widest at a place, and across measures with none (tb.68)
+
+MuseNote plan V3_2_0_103 (root cause RC226, finding W200). Ours: upstream's develop has the same code (5109b20dd,
+2026-11-25).
+
+- **The cause.** `AdjustHarmGrpsSpacingFunctor` spaced each harm of a group from the one it visited before, in a
+  measure's written order, and of harms at one place kept the one visited last. (a) Where a measure lists a harm before
+  an earlier one, it was spaced from a harm to its right: the room `MeasureAligner::AdjustProportionally` made runs
+  backwards (it moves only what stands after the later harm), and the two harms that are neighbours in time were never
+  compared. MuseNote's Breathless, bar 55: a Bm7 its bar 54 (6/8) times past its end, which the MusicXML reader moves
+  into bar 55 (patch 69, RC55), listed before bar 55's own Dm9 on its first eighth: Dm9 drawn 185 units over it. (b) The
+  harm after a place was spaced from the last harm listed there, which can be narrower (One Night With You, bar 4:
+  Fmaj7 and C at beat 4, the next bar's G7 spaced from C, Fmaj7 over it) or blank (Cambalache, bar 9: Fm, a sixteenth
+  after F, spaced from a blank harm at F's note, a root written as nothing: 10 to 32 units over F at MuseNote's page
+  widths 3000, 2100 and 1400). A blank harm at a place of its own took room too. (c) The first harm of a measure was
+  compared with the harm before it by adding the width of the measure ended last. Where the harm before stands measures
+  back, with no harm in the measures between, the widths of its own measure and of the others were missing, and the
+  room went into the measure ended last, from an alignment of the other measure (`AdjustProportionally` moves what
+  stands right of that alignment's X): none where the alignment stood right of that measure's end, the two drawn over
+  each other (At Last, bars 16 to 18: G7#5b9 on bar 16's last beat, bar 17 a quarter with no harm, C69 on bar 18's
+  first, 18 units over it at the reader's 3000, 48 with justification off), and more than needed, in the wrong
+  measure, where it did not. `VisitSystemEnd` kept a line's last harm inside the line only where it stands in the
+  line's last measure: from a measure before, it ran past the line's end.
+- **The fix.** `VisitHarm` gathers each measure's harms of the group; `VisitMeasureEnd` sorts them by their start's
+  alignment time (harms of one time keep their written order) and spaces each from the one before, as before. The harm
+  after a place is spaced from the one there reaching furthest right; a place is an alignment, so a harm on a note and
+  one timed at it share it. A blank harm, whose box has no width, takes no part: it is not spaced from and is given no
+  room. Each measure ended since the harm before is kept, its own first (`m_previousMeasures`): the next harm, and the
+  line's end, are compared with it across the widths of them all, and the room goes in its own measure, from its start
+  to that measure's right barline, as for neighbouring measures.
+- **What it changes.** The SVG where a measure's harms are not written in the order of time, where harms of one place
+  are followed by a harm the last of them did not reach as far as the widest, where a blank harm stood between two, and
+  where a harm's harm before stands measures back: the measures widen, or narrow, so that each harm clears the one
+  before by two units, and the room for it goes in that harm's measure. A line whose last harm stands measures before
+  its end is widened to end after it. No MEI, MIDI, timemap, pitch map or id.
+
+**Cases**: in the same file, 8 for RC226: chords written out of time order spaced as chords written in order; a
+chord the reader moves into the next bar, before that bar's own, spaced in time; the chord after a place spaced from
+the widest of the place's chords, and from the widest where the last is drawn left of its note; a blank chord taking no
+part; a chord whose chord before stands bars back, none between, spaced from it (At Last's shape: it clears by exactly
+the two units); a chord that clears the chord bars before it given no room; a line's last chord, bars before the
+line's end, kept inside the line. All 8 fail on tb.67. Undone, each part fails its own: the order of time (the two
+of order), the widest of a place (the left-drawn one), the blank chord (its case), the measures ended since the chord
+before (the two across bars), the room in the chord's own measure (the bars-back one), the line's end (its case).
+
+**Upstream status**: not offered.
+
 ### 155. A score laid out again draws as it drew when loaded: no barline keeps a box from a layout before (tb.67)
 
 MuseNote plan V3_2_0_101 (root cause RC224, finding W181). Ours: upstream's develop has the same code (5109b20dd,
