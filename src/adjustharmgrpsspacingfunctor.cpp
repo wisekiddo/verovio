@@ -56,6 +56,17 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitHarm(Harm *harm)
         return FUNCTOR_SIBLINGS;
     }
 
+    // Spaced at the end of the measure, in the order of time (MuseNote RC226). A harm with no start, or none aligned,
+    // is not drawn and has no positioner
+    if (harm->GetStart() && harm->GetStart()->GetAlignment()) {
+        m_measureHarms.push_back(harm);
+    }
+
+    return FUNCTOR_SIBLINGS;
+}
+
+void AdjustHarmGrpsSpacingFunctor::AdjustHarmSpacing(Harm *harm)
+{
     /************** Find the widest positioner **************/
 
     // Get all the positioners for this object - all of them (all staves) because we can have different staff sizes
@@ -67,7 +78,7 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitHarm(Harm *harm)
     if (positioners.empty()) {
         LogDebug("Something was wrong when searching positioners for %s '%s'", harm->GetClassName().c_str(),
             harm->GetID().c_str());
-        return FUNCTOR_SIBLINGS;
+        return;
     }
 
     // Keep the one with the lowest left position (this will also be the widest)
@@ -78,15 +89,21 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitHarm(Harm *harm)
     }
 
     // If the harm positioner is missing or is empty, do not adjust spacing
-    if (!harmPositioner || !harmPositioner->HasContentBB()) {
-        return FUNCTOR_SIBLINGS;
+    // Nor for a blank harm, whose box has no width: it is not spaced from, and takes no room (MuseNote RC226)
+    if (!harmPositioner || !harmPositioner->HasContentBB()
+        || (harmPositioner->GetContentX2() <= harmPositioner->GetContentX1())) {
+        return;
     }
 
     // If we have more than one harm at the same position, do not adjust them
     // This situation makes sense when the first of them is right aligned
-    if (m_previousHarmStart && m_previousHarmStart == harm->GetStart()) {
-        m_previousHarmPositioner = harmPositioner;
-        return FUNCTOR_SIBLINGS;
+    // The next harm is spaced from the one reaching furthest right, not from the last one, which can be narrower
+    // (MuseNote RC226). A position is an alignment: a harm on a note and one timed at it share it
+    if (m_previousHarmStart && (m_previousHarmStart->GetAlignment() == harm->GetStart()->GetAlignment())) {
+        if (harmPositioner->GetContentRight() > m_previousHarmPositioner->GetContentRight()) {
+            m_previousHarmPositioner = harmPositioner;
+        }
+        return;
     }
 
     /************** Calculate the adjustment **************/
@@ -110,15 +127,16 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitHarm(Harm *harm)
         m_previousHarmStart = harm->GetStart();
         m_previousHarmPositioner = harmPositioner;
         m_previousMeasure = NULL;
-        return FUNCTOR_SIBLINGS;
+        return;
     }
 
     int xShift = 0;
 
-    // We have a previous harm from the previous measure - we need to add the measure width because the measures are
-    // not aligned yet
-    if (m_previousMeasure) {
-        xShift = m_previousMeasure->GetWidth();
+    // We have a previous harm from a previous measure - we need to add the measure widths because the measures are
+    // not aligned yet: of each measure ended since the previous harm, its own and any after it with no harm, not of the
+    // last only (MuseNote RC226)
+    for (Measure *measure : m_previousMeasures) {
+        xShift += measure->GetWidth();
     }
 
     assert(m_previousHarmStart);
@@ -131,12 +149,15 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitHarm(Harm *harm)
     overlap += wordSpace;
 
     if (overlap > 0) {
-        // We are adjusting harms in two different measures - move only the right barline of the first measure
-        if (m_previousMeasure) {
-            m_overlappingHarm.push_back(std::make_tuple(
-                m_previousHarmStart->GetAlignment(), m_previousMeasure->GetRightBarLine()->GetAlignment(), overlap));
+        // We are adjusting harms in two different measures - move only the right barline of the first measure, the
+        // previous harm's own: the measure ended last can be a later one, with no harm, which the previous harm's start
+        // is no alignment of (MuseNote RC226)
+        if (!m_previousMeasures.empty()) {
+            Measure *previousHarmMeasure = m_previousMeasures.front();
+            m_overlappingHarm.push_back(std::make_tuple(m_previousHarmStart->GetAlignment(),
+                previousHarmMeasure->GetRightBarLine()->GetAlignment(), overlap));
             // Do it now
-            m_previousMeasure->m_measureAligner.AdjustProportionally(m_overlappingHarm);
+            previousHarmMeasure->m_measureAligner.AdjustProportionally(m_overlappingHarm);
             m_overlappingHarm.clear();
         }
         else {
@@ -149,14 +170,29 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitHarm(Harm *harm)
     m_previousHarmStart = harm->GetStart();
     m_previousHarmPositioner = harmPositioner;
     m_previousMeasure = NULL;
-
-    return FUNCTOR_SIBLINGS;
+    m_previousMeasures.clear();
 }
 
 FunctorCode AdjustHarmGrpsSpacingFunctor::VisitMeasureEnd(Measure *measure)
 {
+    // The harms in the order of time, not as written: each is spaced from the one before it, and one written before
+    // an earlier harm was spaced from a harm to its right, the room made running backwards (MuseNote RC226). Harms of
+    // one time keep their written order
+    std::stable_sort(m_measureHarms.begin(), m_measureHarms.end(), [](const Harm *harm1, const Harm *harm2) {
+        return (harm1->GetStart()->GetAlignment()->GetTime() < harm2->GetStart()->GetAlignment()->GetTime());
+    });
+    for (Harm *harm : m_measureHarms) {
+        this->AdjustHarmSpacing(harm);
+    }
+    m_measureHarms.clear();
+
     // At the end of the measure - pass it along for overlapping verses
     m_previousMeasure = measure;
+    // and keep it until the next harm, with any measure after it: they stand between the previous harm and it
+    // (MuseNote RC226)
+    if (m_previousHarmPositioner) {
+        m_previousMeasures.push_back(measure);
+    }
 
     // Adjust the position of the alignment according to what we have collected for this harm grp
     measure->m_measureAligner.AdjustProportionally(m_overlappingHarm);
@@ -170,9 +206,11 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitSystem(System *system)
     // reset it, but not the current grpId!
     m_currentSystem = system;
     m_overlappingHarm.clear();
+    m_measureHarms.clear();
     m_previousHarmPositioner = NULL;
     m_previousHarmStart = NULL;
     m_previousMeasure = NULL;
+    m_previousMeasures.clear();
 
     return FUNCTOR_CONTINUE;
 }
@@ -197,23 +235,25 @@ FunctorCode AdjustHarmGrpsSpacingFunctor::VisitSystemEnd(System *system)
     }
 
     // Here we also need to handle the last harm of the measure - we check the alignment with the right barline
-    if (m_previousHarmPositioner) {
-        const Object *positioner = m_previousHarmPositioner->GetObject();
-        assert(positioner);
-        // We do this only if the harm is in the last measure
-        if (m_previousMeasure == positioner->GetFirstAncestor(MEASURE)) {
-            int overlap = m_previousHarmPositioner->GetContentRight()
-                - m_previousMeasure->GetRightBarLine()->GetAlignment()->GetXRel();
+    // of the last measure, which the last harm can stand measures before, with no harm in them: the widths of the
+    // measures from its own to the last, and the room in its own (MuseNote RC226)
+    Measure *roomMeasure = m_previousMeasure;
+    if (m_previousHarmPositioner && !m_previousMeasures.empty()) {
+        roomMeasure = m_previousMeasures.front();
+        int lineEnd = m_previousMeasure->GetRightBarLine()->GetAlignment()->GetXRel();
+        for (size_t i = 0; i + 1 < m_previousMeasures.size(); ++i) {
+            lineEnd += m_previousMeasures.at(i)->GetWidth();
+        }
+        int overlap = m_previousHarmPositioner->GetContentRight() - lineEnd;
 
-            if (overlap > 0) {
-                m_overlappingHarm.push_back(std::make_tuple(m_previousHarmStart->GetAlignment(),
-                    m_previousMeasure->GetRightBarLine()->GetAlignment(), overlap));
-            }
+        if (overlap > 0) {
+            m_overlappingHarm.push_back(std::make_tuple(m_previousHarmStart->GetAlignment(),
+                roomMeasure->GetRightBarLine()->GetAlignment(), overlap));
         }
     }
 
     // Adjust the position of the alignment according to what we have collected for this harm group id
-    m_previousMeasure->m_measureAligner.AdjustProportionally(m_overlappingHarm);
+    roomMeasure->m_measureAligner.AdjustProportionally(m_overlappingHarm);
     m_overlappingHarm.clear();
 
     return FUNCTOR_CONTINUE;

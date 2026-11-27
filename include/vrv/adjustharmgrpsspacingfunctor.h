@@ -47,7 +47,11 @@ public:
 protected:
     //
 private:
-    //
+    /**
+     * Space a harm from the one before it in time, or keep it with the harms of its place (MuseNote RC226)
+     */
+    void AdjustHarmSpacing(Harm *harm);
+
 public:
     //
 private:
@@ -63,8 +67,13 @@ private:
     LayerElement *m_previousHarmStart;
     // The previous measure (if any)
     Measure *m_previousMeasure;
+    // The measures ended since the previous harm, its own first: the next harm stands their widths from it, the
+    // measures not aligned yet (MuseNote RC226)
+    std::vector<Measure *> m_previousMeasures;
     // The current system
     System *m_currentSystem;
+    // The harms of the current grp in the current measure, spaced at its end in the order of time (MuseNote RC226)
+    std::vector<Harm *> m_measureHarms;
 };
 
 } // namespace vrv
